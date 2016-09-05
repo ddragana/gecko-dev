@@ -57,6 +57,7 @@ int flowCount = 0;
 void
 LogIO(const char *label, const char *data, uint32_t datalen)
 {
+  return;
   // Max line is (16 * 3) + 10(prefix) + newline + null
   char linebuf[128];
   uint32_t index;
@@ -298,7 +299,7 @@ public:
         }
       } else {
         bufSDT2TCPLen += read;
-//        LogIO("SDT read", bufSDT2TCP, bufSDT2TCPLen);
+        LogIO("SDT read", bufSDT2TCP, bufSDT2TCPLen);
       }
     }
     return bufSDT2TCPLen;
@@ -313,13 +314,12 @@ public:
                          SDT_CLEARTEXTPAYLOADSIZE - bufTCP2SDTLen);
       if (read < 1) {
         PRErrorCode code = PR_GetError();
-//fprintf(stderr, "TCP read err %d\n", code);
         if ((code != PR_WOULD_BLOCK_ERROR)) {
           return -1;
         }
       } else {
         bufTCP2SDTLen += read;
-//        LogIO("TCP read", bufTCP2SDT, bufTCP2SDTLen);
+        LogIO("TCP read", bufTCP2SDT, bufTCP2SDTLen);
       }
     }
     return bufTCP2SDTLen;
@@ -329,13 +329,9 @@ public:
   //          oterwise buffer length
   int writeSDT()
   {
-    if (!bufTCP2SDTLen) {
-      return 0;
-    }
     int written = PR_Write(sdt, bufTCP2SDT, bufTCP2SDTLen);
     if (written < 0) {
       PRErrorCode code = PR_GetError();
-//fprintf(stderr, "SDT written err %d\n", code);
       if (code != PR_WOULD_BLOCK_ERROR) {
         return -1;
       }
@@ -344,7 +340,7 @@ public:
         memmove(bufTCP2SDT, bufTCP2SDT + written, bufTCP2SDTLen - written);
       }
       bufTCP2SDTLen -= written;
-//      LogIO("SDT write", bufTCP2SDT, bufTCP2SDTLen);
+      LogIO("SDT write", bufTCP2SDT, bufTCP2SDTLen);
     }
     return bufTCP2SDTLen;
   }
@@ -359,7 +355,6 @@ public:
     int written = PR_Write(tcp, bufSDT2TCP, bufSDT2TCPLen);
     if (written < 0) {
       PRErrorCode code = PR_GetError();
-//fprintf(stderr, "TCP written err %d\n", code);
       if ((code != PR_WOULD_BLOCK_ERROR)) {  
         return -1;
       }
@@ -368,7 +363,7 @@ public:
         memmove(bufSDT2TCP, bufSDT2TCP + written, bufSDT2TCPLen - written);
       }
       bufSDT2TCPLen -= written;
-//      LogIO("T write", bufSDT2TCP, bufSDT2TCPLen);
+      LogIO("T write", bufSDT2TCP, bufSDT2TCPLen);
     }
     return bufSDT2TCPLen;
   }
@@ -489,9 +484,8 @@ int main()
     }
     int rv;
     rv = PR_Poll(pollElem, flowCount + 1, timer);
-
     if (rv < 0) {
-      fprintf(stderr, "Poll error\n");
+      fprintf(stderr, "%d Poll error\n", PR_IntervalNow());
       removeAllFlows();
       if (udp) {
         PR_Close(udp);
@@ -570,7 +564,6 @@ int main()
       }
     }
 
-    
     int i = 0;
     if ((pollElem[0].out_flags & PR_POLL_WRITE)) {
       // TODO change this. This is in my next iteration.

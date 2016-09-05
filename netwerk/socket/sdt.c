@@ -15,7 +15,8 @@
 
 #include "qPacketQueue.h"
 #include "sdt_common.h"
-
+#include "congestion_control.h"
+#include "tcp_general.h"
 
 // TODO connection reusing
 
@@ -85,8 +86,10 @@ TODO add session identifier for mobility.
 #define HTTP2_FRAME_FLAG_END_HEADERS   0x04
 #define HTTP2_FRAME_FLAG_PRIORITY      0x20
 #define HTTP2_FRAME_FLAG_ACK           0x01
-#define HTTP2_SETTINGS_ENABLE_PUSH     0x02
-#define HTTP2_SETTINGS_MAX_FRAME_SIZE  0x05
+
+#define HTTP2_SETTINGS_ENABLE_PUSH         0x02
+#define HTTP2_SETTINGS_TYPE_MAX_CONCURRENT 0x03
+#define HTTP2_SETTINGS_MAX_FRAME_SIZE      0x05
 
 #define HTTP2_HEADERLEN                9
 
@@ -134,7 +137,7 @@ const uint8_t magicHello[] = {
   // can tls for https be removed if e2e?
 #endif
 
-static uint32_t aBufferLenMax = 128; // number of queued packets
+static uint32_t aBufferLenMax = 1048576; // number of queued packets
 
 // our standard time unit is a microsecond
 static uint64_t qMaxCreditsDefault = 80000; // ums worth of full bucket
@@ -155,11 +158,14 @@ static PRIntervalTime sMaxRTO; // MaxRTO in interval that we do not need to conv
 #define RTT_FACTOR_ALPHA 0.125
 #define RTT_FACTOR_BETA 0.25
 
-static uint32_t amplificationPacket = 2;
+static struct tcp_congestion_ops *cc;// = tcp_general;
+
+//static uint32_t amplificationPacket = 2;
 
 void
-LogBuffer(const char *label, const char *data, uint32_t datalen)
+LogBuffer(const char *label, const unsigned char *data, uint32_t datalen)
 {
+  return;
   // Max line is (16 * 3) + 10(prefix) + newline + null
   char linebuf[128];
   uint32_t index;
@@ -292,7 +298,8 @@ struct sdt_t
   uint16_t sRecvDtlsLen;
   uint64_t sRecvSeq;
   uint64_t sBytesRead;
-  uint8_t sLayerSendBuffer[SDT_PAYLOADSIZE];
+  uint8_t  sLayerSendBuffer[SDT_PAYLOADSIZE];
+  uint64_t sRecvPktId;
 
   // We always get the whole packet from the network.
   uint8_t aLayerBuffer[SDT_CLEARTEXTPAYLOADSIZE];
@@ -354,16 +361,29 @@ struct sdt_t
   uint8_t numOfRTORetrans;
 
   PRFileDesc *fd; // weak ptr, don't close
+
+  uint64_t aNextMonotonousPacketId;
+  uint64_t aNextDataPacketId;
+  //CUBIC private data
+  // This will not work on all platforms, because of the alligment.
+  // I will submit this first version and change it later.
+  uint64_t cc_general_private[28];
 };
+
+void*
+sdt_GetCCPrivate(struct sdt_t *sdt)
+{
+  return sdt->cc_general_private;
+}
 
 struct sdt_t *sdt_newHandle()
 {
   struct sdt_t *handle = (struct sdt_t *) malloc (sizeof(struct sdt_t));
   memset(handle, 0, sizeof(struct sdt_t));
 
-  handle->publicHeader = 1;
+  handle->publicHeader = 1 + 8; // connectionId nad packetId
   handle->payloadsize = SDT_PAYLOADSIZE - 1;
-  handle->cleartextpayloadsize = SDT_CLEARTEXTPAYLOADSIZE - 1;
+  handle->cleartextpayloadsize = SDT_CLEARTEXTPAYLOADSIZE - handle->publicHeader;
 
   handle->state = SDT_CONNECTING;
 
@@ -373,7 +393,6 @@ struct sdt_t *sdt_newHandle()
 
   handle->rto = sMinRTO;
   handle->numOfRTORetrans = 0;
-fprintf(stderr, "sMinRTO %d %d", sMinRTO, PR_IntervalToSeconds(sMinRTO));
   handle->waitForFirstAck = 1;
 
   handle->qMaxCredits = qMaxCreditsDefault;
@@ -398,6 +417,11 @@ fprintf(stderr, "sMinRTO %d %d", sMinRTO, PR_IntervalToSeconds(sMinRTO));
   handle->hOutgoingHeaders->mNext = nullptr;
   handle->hOutgoingHeaders->mWindowSize = 0;
   handle->hState = SDT_H2S_NEWFRAME;
+
+  handle->aNextMonotonousPacketId = 1;
+  handle->aNextDataPacketId = 1;
+
+  cc->Init(handle);
 
   return handle;
 }
@@ -474,7 +498,7 @@ static unsigned int
 sdt_preprocess(struct sdt_t *handle,
                unsigned char *pkt, uint32_t len)
 {
-  if (len < (11)) {
+  if (len < (13)) {
     DEV_ABORT();
     return 0;
   }
@@ -531,8 +555,8 @@ sLayerPacketReceived(struct sdt_t *handle, uint16_t epoch, uint64_t seq)
     handle->aLargestRecvEpoch = epoch;
   }
 
-  fprintf(stderr, "sLayerPacketReceived largest receive till now=%lu; this "
-                  "packet seq=%lu handle=%p\n", handle->aLargestRecvId, seq,
+  fprintf(stderr, "%d sLayerPacketReceived largest receive till now=%lu; this "
+                  "packet seq=%lu handle=%p\n", PR_IntervalNow(), handle->aLargestRecvId, seq,
                   handle);
 
   PRIntervalTime now = PR_IntervalNow();
@@ -619,7 +643,8 @@ sLayerPacketReceived(struct sdt_t *handle, uint16_t epoch, uint64_t seq)
  *  +--------+--------+--------+--------+--    --+
  *  |ConnectionId (0, 8, 32 or 64)         ...   |
  *  +--------+--------+--------+--------+--    --+
- *  |
+ *  |Paket id (32)                      |
+ *  +--------+--------+--------+--------+
  */
 #define PUBLIC_FLAG_RESET 0x02
 #define CONNECTION_ID_8 0x0C
@@ -631,11 +656,16 @@ static int32_t
 sLayerDecodePublicContent(struct sdt_t *handle, void *buf,
                           int32_t amount)
 {
-//  LogBuffer("To decode: ", buf, amount);
+  LogBuffer("To decode: ", buf, amount);
   // For now we do not have connectionID
   assert(!(((uint8_t*)buf)[0] & CONNECTION_ID_8));
 
+  uint64_t id;
+  memcpy(&id, buf + 1, 8);
+  handle->sRecvPktId = ntohll(id);
+
   memmove(buf, buf + handle->publicHeader, amount - handle->publicHeader);
+  LogBuffer("To decode: ", buf, amount-handle->publicHeader);
   return amount - handle->publicHeader;
 }
 
@@ -643,10 +673,22 @@ static uint32_t
 sLayerEncodePublicContent(struct sdt_t *handle, const void *buf,
                           int32_t amount)
 {
-//  LogBuffer("To encode: ", buf, amount);
+  // this is a quick change to make sdt work with dtls. In the second phase I
+  // will adapt tls
+
+  LogBuffer("To encode: ", buf, amount);
   memcpy(handle->sLayerSendBuffer + handle->publicHeader, buf, amount);
   // For now we do not have connectionID
   handle->sLayerSendBuffer[0] = 0x0;
+  if ((((uint8_t*)buf)[0]) == DTLS_TYPE_DATA) {
+    uint64_t id = htonll(handle->aNextMonotonousPacketId);
+    memcpy(handle->sLayerSendBuffer + 1, &id, 8);
+  } else {
+    // It is a DTLS handshake packet, for now set id to 0, this will be fixed
+    // in the next phase.
+    memset(handle->sLayerSendBuffer + 1, 0, 8);
+  }
+
   return amount + handle->publicHeader;
 }
 
@@ -675,14 +717,13 @@ sLayerRecv(PRFileDesc *fd, void *buf, int32_t amount,
     return -1;
   }
 
-  fprintf(stderr,"sLayer Recv got %d of ciphertext this=%p "
-          "type=%d epoch=%X seq=0x%lX dtlsLen=%d sBytesRead=%ld\n", rv, handle,
+  fprintf(stderr," %dsLayer Recv got %d of ciphertext this=%p "
+          "type=%d epoch=%X seq=0x%lX dtlsLen=%d sBytesRead=%ld sRecvPktId:%d\n", PR_IntervalNow(), rv, handle,
           handle->sRecvRecordType, handle->sRecvEpoch, handle->sRecvSeq,
-          handle->sRecvDtlsLen, handle->sBytesRead);
+          handle->sRecvDtlsLen, handle->sBytesRead, handle->sRecvPktId);
 
-  if (handle->sRecvEpoch != 0) {
-    uint8_t newPkt = sLayerPacketReceived(handle, handle->sRecvEpoch,
-                                          handle->sRecvSeq);
+  if (handle->sRecvPktId != 0) {
+    uint8_t newPkt = sLayerPacketReceived(handle, 0, handle->sRecvPktId);
     if (!newPkt) {
       PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
       rv = -1;
@@ -723,15 +764,10 @@ sLayerSendTo(PRFileDesc *fd, const void *buf, int32_t amount,
 
   uint32_t dataLen = sLayerEncodePublicContent(handle, buf, amount);
 
-int rv;
-//if ((u64 == 2) && (u32 == 1)) {
-//rv = amount;
-//} else {
-  rv = fd->lower->methods->sendto(fd->lower, handle->sLayerSendBuffer,
-                                  dataLen, flags, addr, to);
-//}
+  int rv = fd->lower->methods->sendto(fd->lower, handle->sLayerSendBuffer,
+                                      dataLen, flags, addr, to);
 
-  fprintf(stderr,"sLayer send %p %d rv=%d\n", handle,
+  fprintf(stderr,"%d sLayer send %p %d rv=%d\n", PR_IntervalNow(), handle,
           amount, rv);
 
   if (rv < 0) {
@@ -744,14 +780,22 @@ int rv;
     return -1;
   }
 
-  if (((((uint8_t*)buf)[0]) != DTLS_TYPE_DATA) ||
-      (!handle->aPktTransmit)) {
-    //It is ACK or DTLS handshake packet.
+  if ((((uint8_t*)buf)[0]) != DTLS_TYPE_DATA) {
+    // It is a DTLS handshake packet.
+    return amount;
+  }
+
+  if (!handle->aPktTransmit) {
+    // It is a ACK.
+    handle->aNextMonotonousPacketId++;
     return amount;
   }
 
   // Remember last 3 Ids. TODO: 2 is enough
-  if (handle->aPktTransmit->mIdsNum == NUM_RETRANSMIT_IDS) {
+  if (!handle->aPktTransmit->mIdsNum) {
+    // Remembre the original id. This is only for debugging.
+    handle->aPktTransmit->mOriginalId = handle->aNextDataPacketId++;
+  } else if (handle->aPktTransmit->mIdsNum == NUM_RETRANSMIT_IDS) {
     for (int i = 0; i < NUM_RETRANSMIT_IDS -1; i++) {
       handle->aPktTransmit->mIds[i] = handle->aPktTransmit->mIds[i + 1];
     }
@@ -761,14 +805,12 @@ int rv;
   assert(handle->aPktTransmit->mIdsNum < NUM_RETRANSMIT_IDS);
   int inx = handle->aPktTransmit->mIdsNum++;
 
-//fprintf(stderr, "sLayer send IDNUM %p %d\n", handle->aPktTransmit, handle->aPktTransmit->mIdsNum);
-
-  handle->aPktTransmit->mIds[inx].mEpoch = epoch;
-  handle->aPktTransmit->mIds[inx].mSeq = id;
-  handle->aPktTransmit->mIds[inx].mSentTime = PR_IntervalNow();
-
   handle->aLargestSentEpoch = epoch;
-  handle->aLargestSentId = id;
+  handle->aLargestSentId = handle->aNextMonotonousPacketId;
+
+  handle->aPktTransmit->mIds[inx].mEpoch = 0;
+  handle->aPktTransmit->mIds[inx].mSeq = handle->aNextMonotonousPacketId++;
+  handle->aPktTransmit->mIds[inx].mSentTime = PR_IntervalNow();
 
 //fprintf(stderr, "Send id: %lu time: %u pkt: %p inx: %d\n", handle->aPktTransmit->mIds[inx].mSeq, handle->aPktTransmit->mIds[inx].mSentTime, handle->aPktTransmit, inx);
 
@@ -814,7 +856,7 @@ MakeAckPkt(struct sdt_t *handle)
   uint8_t numTS = 0;
   uint32_t offset = 15;
   int i = handle->aNumTimeStamps - 1;
-  int prevInx;
+  int prevInx = 0;
   for (; i >= 0 && i >= handle->aNumTimeStamps - 10; i--) {
     int inx = i % 10;
     if ((handle->aLargestRecvId - handle->aTSSeqNums[inx]) < 255) {
@@ -870,7 +912,7 @@ MakeAckPkt(struct sdt_t *handle)
     buf[offsetRangeNum] = numR;
   }
   handle->aNeedAck = 0;
-  pkt->sz = offset;
+  pkt->mSize = offset;
   return pkt;
 }
 
@@ -967,78 +1009,110 @@ NeedRetransmissionDupAck(struct sdt_t *handle)
     return;
   }
 
-  fprintf(stderr, "NeedRetransmissionDupAck\n");
-
   struct aPacket_t *curr = handle->aRetransmissionQueue.mFirst;
-  struct aPacket_t *prev = nullptr;
 
-  while (curr && !curr->mForRetransmission &&
-         (handle->aLargestAcked >= (curr->mIds[curr->mIdsNum - 1].mSeq +
-                                    DUPACK_THRESH))) {
+  while (curr &&
+         (handle->aLargestAcked >= (curr->mIds[curr->mIdsNum - 1].mSeq + DUPACK_THRESH))) {
 
-//fprintf(stderr, "Send id: %lu pkt: %p inx: %d \n", curr->mIds[curr->mIdsNum - 1].mSeq, curr, curr->mIdsNum);
-
-    curr->mForRetransmission = 1;
-    prev = curr;
+    if (!curr->mForRetransmission) {
+      cc->OnPacketLost(handle, curr->mIds[curr->mIdsNum - 1].mSeq,
+                       curr->mSize + DTLS_PART + handle->publicHeader);
+      curr->mForRetransmission = 1;
+    }
     curr = curr->mNext;
   }
 }
 
 int8_t
-NeedToSendRetransmit(struct sdt_t *handle)
+RetransmitQueued(struct sdt_t *handle)
 {
   return handle->aRetransmissionQueue.mFirst &&
          handle->aRetransmissionQueue.mFirst->mForRetransmission;
 }
 
+int8_t
+NeedToSendRetransmit(struct sdt_t *handle)
+{
+  PRIntervalTime now = PR_IntervalNow();
+  return RTOTimerExpired(handle, now) ||
+         ERTimerExpired(handle, now) ||
+         RetransmitQueued(handle);
+}
+
 static void hMakePingAck(struct sdt_t *handle);
 
-int
-RemoveRange(struct sdt_t *handle, uint64_t start, uint64_t end, int numTS,
-            uint32_t *tsDelay, uint64_t *tsSeqno)
+struct aAckedPacket_t
 {
+  uint64_t mId;
+  uint32_t mSize;
+  PRIntervalTime mRtt;
+  uint8_t mHasRtt;
+  struct aAckedPacket_t* mNext;
+};
+
+struct aAckedPacket_t *
+RemoveRange(struct sdt_t *handle, uint64_t end, uint64_t start, int numTS,
+            uint32_t *tsDelay, uint64_t *tsSeqno)
+{ 
   // This function removes range of newly acked packets and updates rtt, rto.
 
   assert(end >= start);
   // TODO keep track of ACK packets. Because acks are not in retransmission
   // queue search will need to through the whole queue.
-  int rv = 0;
+ 
+  struct aAckedPacket_t *ackedPkts = nullptr, *lastPkt = nullptr;
   struct aPacket_t *pkt;
   for (uint64_t i = start; i <= end; i++) {
     pkt = PacketQueueRemovePktWithId(&handle->aRetransmissionQueue, i);
 
     // We are also acking acks so maybe there is no pkt
     if (pkt) {
-      rv = 1;
       // I expect that numTS should be really small 1-2 (currently it is 10 :)),
       // so this is not that slow and pkt->mIdsNum is in 99.99% of the cases
       // only 1.
       // TODO: this can be optimize  by preprocessing tsDelay and tsSeqno.
       int ts = 0;
-      uint8_t found = 0;
-      while (!found && ts < numTS) {
+      PRIntervalTime rtt = 0;
+      uint8_t hasRtt = 0;
+      while (!rtt && ts < numTS) {
         // Use this measurement only if delay is not greater than rtt.
-        if (tsDelay[ts] < handle->srtt) {
+        if ((tsDelay[ts] < handle->srtt) || !handle->srtt) {
           for (uint32_t id = 0; id < pkt->mIdsNum; id++) {
             if (pkt->mIds[id].mSeq == tsSeqno[ts]) {
-
+              rtt = PR_IntervalNow() - pkt->mIds[id].mSentTime;
+              hasRtt = 1;
+              fprintf(stderr, "DDDDD rtt %d delay %d\n", PR_IntervalNow() - pkt->mIds[id].mSentTime, tsDelay[ts]);
               CalculateRTT(handle,
-                           ntohl(PR_IntervalNow() - pkt->mIds[id].mSentTime),
+                           PR_IntervalNow() - pkt->mIds[id].mSentTime,
                            tsDelay[ts]);
-              found = 1;
               break;
             }
           }
         }
         ts++;
       }
+
+      struct aAckedPacket_t *ack =
+        (struct aAckedPacket_t *) malloc (sizeof(struct aAckedPacket_t));
+      ack->mId = i;
+      ack->mSize = pkt->mSize + DTLS_PART + handle->publicHeader;
+      ack->mRtt = rtt;
+      ack->mHasRtt = hasRtt;
+      ack->mNext = nullptr;
+      if (!lastPkt) {
+        ackedPkts = lastPkt = ack;
+      } else {
+        lastPkt->mNext = ack;
+        lastPkt = ack;
+      }
+
       if (pkt->mIsPingPkt) {
         hMakePingAck(handle);
       }
       free(pkt);
     }
   }
-  return rv;
+  return ackedPkts;
 }
 
 static void
@@ -1048,9 +1122,12 @@ RecvAck(struct sdt_t *handle, uint8_t type)
 
   assert((handle->aLayerBufferLen - handle->aLayerBufferUsed) >= 15);
 
-  uint8_t newlyAcked = 0;
+  // If we have a loss reported in the packet, we need to call OnPacketLost
+  // before calling OnPacketAcked, because of a cwnd calculation.
+  struct aAckedPacket_t *newlyAcked = 0;
 
   uint8_t hasRanges = (type == 0x60);
+
   uint64_t largestRecv;
 
   // Reveived entropy (reveived entropy not implemented)
@@ -1109,7 +1186,7 @@ RecvAck(struct sdt_t *handle, uint8_t type)
       return;
     }
 
-    newlyAcked = RemoveRange(handle, handle->aLargestAcked + 1, largestRecv,
+    newlyAcked = RemoveRange(handle, largestRecv, handle->aLargestAcked + 1,
                              numTS, tsDelay, tsSeqno);
     handle->aLargestAcked = largestRecv;
   } else {
@@ -1123,7 +1200,6 @@ RecvAck(struct sdt_t *handle, uint8_t type)
     uint64_t num64;
     uint64_t recvRangeStart = largestRecv;
     uint64_t recvRangeEnd = 0;
-    uint8_t continueRange = 0; // TODO Not tested.
     struct range_t newRanges[numR + 1];
 
     int ranges = 0;
@@ -1146,7 +1222,6 @@ RecvAck(struct sdt_t *handle, uint8_t type)
         recvRangeStart -= (handle->aLayerBuffer[handle->aLayerBufferUsed] + 1);
       }
       handle->aLayerBufferUsed++;
-fprintf(stderr, "RECVACK %lu %lu \n", recvRangeStart, recvRangeEnd);
     }
     newRanges[ranges].mStart = recvRangeStart;
     newRanges[ranges].mEnd = 0;
@@ -1165,7 +1240,6 @@ fprintf(stderr, "RECVACK %lu %lu \n", recvRangeStart, recvRangeEnd);
     struct range_t *prev = nullptr;
 
     for (int i = 0; i < ranges; i++) {
-fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].mEnd, curr->mStart, curr->mEnd);
       if ((newRanges[i].mStart == curr->mStart) &&
           (newRanges[i].mEnd == curr->mEnd)) {
         // The old one.
@@ -1173,9 +1247,14 @@ fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].
         curr = curr->mNext;
       } else if (newRanges[i].mEnd > curr->mStart) {
         // completly new one.
-        int rv = RemoveRange(handle, newRanges[i].mStart, newRanges[i].mEnd,
-                             numTS, tsDelay, tsSeqno);
-        newlyAcked |= rv;
+        if (!newlyAcked) {
+          newlyAcked = RemoveRange(handle, newRanges[i].mStart,
+                                   newRanges[i].mEnd, numTS, tsDelay, tsSeqno);
+        } else {
+          newlyAcked->mNext = RemoveRange(handle, newRanges[i].mStart,
+                                          newRanges[i].mEnd, numTS, tsDelay, tsSeqno);
+        }
+
         struct range_t *newRange =
           (struct range_t *) malloc (sizeof(struct range_t));
         newRange->mStart = newRanges[i].mStart;
@@ -1192,8 +1271,13 @@ fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].
         assert(newRanges[i].mEnd <= curr->mEnd);
 
         if (newRanges[i].mStart > curr->mStart) {
-          int rv = RemoveRange(handle, newRanges[i].mStart, curr->mStart,
-                               numTS, tsDelay, tsSeqno);
+          if (!newlyAcked) {
+            newlyAcked = RemoveRange(handle, newRanges[i].mStart, curr->mStart,
+                                     numTS, tsDelay, tsSeqno);
+          } else {
+            newlyAcked->mNext = RemoveRange(handle, newRanges[i].mStart, curr->mStart,
+                                            numTS, tsDelay, tsSeqno);
+          }
           curr->mStart = newRanges[i].mStart;
         }
 
@@ -1204,9 +1288,14 @@ fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].
 
             if (nextR->mStart > newRanges[i].mEnd) {
               // merge 2 ranges
-              int rv = RemoveRange(handle, curr->mEnd, nextR->mStart,
-                                   numTS, tsDelay, tsSeqno);
-              newlyAcked |= rv;
+              if (!newlyAcked) {
+                newlyAcked = RemoveRange(handle, curr->mEnd, nextR->mStart,
+                                         numTS, tsDelay, tsSeqno);
+              } else {
+                newlyAcked->mNext = RemoveRange(handle, curr->mEnd, nextR->mStart,
+                                                numTS, tsDelay, tsSeqno);
+              }
+
               curr->mEnd =  nextR->mEnd;
               curr->mNext = nextR->mNext;
               free(nextR);
@@ -1214,9 +1303,14 @@ fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].
           }
         }
         if (newRanges[i].mEnd < curr->mEnd) {
-          int rv = RemoveRange(handle, curr->mEnd, newRanges[i].mEnd, numTS,
-                               tsDelay, tsSeqno);
-          newlyAcked |= rv;
+          if (!newlyAcked) {
+            newlyAcked = RemoveRange(handle, curr->mEnd, newRanges[i].mEnd,
+                                     numTS, tsDelay, tsSeqno);
+          } else {
+            newlyAcked->mNext = RemoveRange(handle, curr->mEnd, newRanges[i].mEnd,
+                                            numTS, tsDelay, tsSeqno);
+          }
+
           curr->mEnd = newRanges[i].mEnd;
         }
         prev = curr;
@@ -1232,15 +1326,23 @@ fprintf(stderr, "RECVACK1 %lu %lu %lu %lu\n", newRanges[i].mStart, newRanges[i].
 
   if (newlyAcked) {
     NeedRetransmissionDupAck(handle);
-  }
 
-  if (newlyAcked && (handle->aRetransmissionQueue.mLen == 0)) {
-    // All packets are acked stop RTO timer.
-    StopRTOTimer(handle);
-    StopERTimer(handle);
-  } else if (newlyAcked) {
-    // Some new packet(s) are acked - restart rto timer.
-    RestartRTOTimer(handle);
+    if ((handle->aRetransmissionQueue.mLen == 0)) {
+      // All packets are acked stop RTO timer.
+      StopRTOTimer(handle);
+      StopERTimer(handle);
+    } else {
+      // Some new packet(s) are acked - restart rto timer.
+      RestartRTOTimer(handle);
+    }
+    struct aAckedPacket_t *curr = newlyAcked;
+    while (curr) {
+      newlyAcked = newlyAcked->mNext;
+      cc->OnPacketAcked(handle, curr->mId, curr->mSize, curr->mRtt,
+                        curr->mHasRtt);
+      free(curr);
+      curr = newlyAcked;
+    }
   }
 
   if ((handle->aRetransmissionQueue.mLen) &&
@@ -1255,7 +1357,12 @@ CheckRetransmissionTimers(struct sdt_t *handle)
   if (ERTimerExpired(handle, PR_IntervalNow())) {
     fprintf(stderr, "ERTimerExpired\n");
     assert(handle->aRetransmissionQueue.mFirst);
-    handle->aRetransmissionQueue.mFirst->mForRetransmission = 1;
+    struct aPacket_t *pkt = handle->aRetransmissionQueue.mFirst;
+    if (!pkt->mForRetransmission) {
+      cc->OnPacketLost(handle, pkt->mIds[pkt->mIdsNum - 1].mSeq,
+        pkt->mSize + DTLS_PART + handle->publicHeader);
+      pkt->mForRetransmission = 1;
+    }
     StopERTimer(handle);
 
   } else if (RTOTimerExpired(handle, PR_IntervalNow())) {
@@ -1269,10 +1376,36 @@ CheckRetransmissionTimers(struct sdt_t *handle)
     }
     handle->rto *= 2;
     handle->numOfRTORetrans++;
+    cc->OnRetransmissionTimeout(handle);
     // This is a bit incorrect, but it is ok. We  should restart it when we do
     // resend this pkt.
     RestartRTOTimer(handle);
   }
+}
+
+static struct hStreamInfo_t*
+hFindOutgoingStream(struct sdt_t *handle, uint32_t streamId)
+{
+  struct hStreamInfo_t *prev = 0, *curr = handle->hOutgoingStreams;
+  while (curr && (curr->mStreamId < streamId)) {
+    prev = curr;
+    curr = curr->mNext;
+  }
+  if (!curr || (curr->mStreamId != streamId)) {
+    struct hStreamInfo_t *stream =
+      (struct hStreamInfo_t *) malloc (sizeof(struct hStreamInfo_t));
+    stream->mStreamId = streamId;
+    stream->mNextOffset = 0;
+    stream->mWindowSize = (2 << 16) - 1;
+    stream->mNext = curr;
+    if (!prev) {
+      handle->hOutgoingStreams = stream;
+    } else {
+      prev->mNext = stream;
+    }
+    curr = stream;
+  }
+  return curr;
 }
 
 static struct hStream_t*
@@ -1291,9 +1424,11 @@ hFindStream(struct sdt_t *handle, uint32_t streamId)
     stream->mWindowSize = (2 << 16) - 1;
     stream->mHeaderDone = 0;
     stream->mFrames = 0;
-    stream-> mNext = curr;
+    stream->mNext = curr;
     if (!prev) {
       handle->hIncomingStreams = stream;
+    } else {
+      prev->mNext = stream;
     }
     curr = stream;
   }
@@ -1479,7 +1614,7 @@ hMakeMagicFrame(struct sdt_t *handle)
 static void
 hMakeSettingsSettingsAckFrame(struct sdt_t *handle, uint8_t ack)
 {
-  uint16_t frameLen = HTTP2_HEADERLEN;
+  uint16_t frameLen = HTTP2_HEADERLEN + (ack ? 0 : 12);
 
   struct hFrame_t *frame = (struct hFrame_t*) malloc (sizeof(struct hFrame_t) +
                                                       frameLen);
@@ -1495,7 +1630,8 @@ hMakeSettingsSettingsAckFrame(struct sdt_t *handle, uint8_t ack)
   framebuf[frame->mDataSize] = 0;
   frame->mDataSize += 1;
 
-  uint16_t len = 0;
+  uint16_t len = ack ? 0 : 12;
+  len = htons(len);
   memcpy(framebuf + frame->mDataSize, &len, 2);
   frame->mDataSize += 2;
 
@@ -1513,6 +1649,17 @@ hMakeSettingsSettingsAckFrame(struct sdt_t *handle, uint8_t ack)
   memcpy(framebuf + frame->mDataSize, &id, 4);
   frame->mDataSize += 4;
 
+  if (!ack) {
+    framebuf[frame->mDataSize] = 0;
+    framebuf[frame->mDataSize + 1] = HTTP2_SETTINGS_ENABLE_PUSH;
+    uint32_t val = 0;
+    memcpy(framebuf + frame->mDataSize + 2, &val, 4);
+    frame->mDataSize += 6;
+    framebuf[frame->mDataSize] = 0;
+    framebuf[frame->mDataSize +1] = HTTP2_SETTINGS_TYPE_MAX_CONCURRENT;
+    memcpy(framebuf + frame->mDataSize + 2, &val, 4);
+    frame->mDataSize += 6;
+  }
   hAddSortedHttp2Frame(handle, frame);
 }
 
@@ -1546,16 +1693,13 @@ sdt2h2(struct sdt_t *handle)
 {
   LogBuffer("sdt2h2 buffer ",handle->aLayerBuffer ,handle->aLayerBufferLen );
 
-  if (!handle->hSettingRecv) {
-    // If there is no magic sent we need to sent it and settings too.
-    if (!handle->hMagicHello) {
-      handle->hMagicHello = 1;
-      hMakeMagicFrame(handle);
-      hMakeSettingsSettingsAckFrame(handle, 0);
-    }
-    return;
-  }
 
+  // If there is no magic sent we need to sent it and settings too.
+  if (!handle->hMagicHello) {
+    handle->hMagicHello = 1;
+    hMakeMagicFrame(handle);
+    hMakeSettingsSettingsAckFrame(handle, 0);
+  }
 
   while ((handle->aLayerBufferLen - handle->aLayerBufferUsed) > 0) {
     uint8_t type = handle->aLayerBuffer[handle->aLayerBufferUsed];
@@ -1768,11 +1912,10 @@ sdt2h2(struct sdt_t *handle)
               streamId -= 2;
             }
 
-            struct hStreamInfo_t *curr = handle->hOutgoingStreams;
-            while (curr && curr->mStreamId < streamId) {
-              curr = curr->mNext;
-            }
-            if (!curr || (curr->mStreamId != streamId)) {
+            struct hStreamInfo_t *streamInfo = hFindOutgoingStream(handle,
+                                                                   streamId);
+
+            if (!streamInfo) {
               // ignore
               fprintf(stderr, "No record for stream %d\n", streamId);
               handle->aLayerBufferUsed += 8;
@@ -1784,7 +1927,7 @@ sdt2h2(struct sdt_t *handle)
               handle->aLayerBufferUsed += 8;
 
               // ignore if the offset is smaller then mWindowSize.
-              if (offset > curr->mWindowSize) {
+              if (offset > streamInfo->mWindowSize) {
                 struct hFrame_t *frame =
                   (struct hFrame_t*)malloc(sizeof(struct hFrame_t) +
                                            HTTP2_HEADERLEN + 4);
@@ -1804,10 +1947,10 @@ sdt2h2(struct sdt_t *handle)
                 streamId = htonl(streamId);
                 memcpy(buf + 5, &streamId, 4);
 
-                assert((offset - curr->mWindowSize) < (2ll << 32));
-                uint32_t increase = offset - curr->mWindowSize;
+                assert((offset - streamInfo->mWindowSize) < (2ll << 32));
+                uint32_t increase = offset - streamInfo->mWindowSize;
                 increase = htonl(increase);
-                curr->mWindowSize = offset;
+                streamInfo->mWindowSize = offset;
                 memcpy(buf + HTTP2_HEADERLEN, &increase, 4);
                 hAddSortedHttp2Frame(handle, frame);
               }
@@ -1920,7 +2063,7 @@ static int32_t
 aLayerRecv(PRFileDesc *fd, void *buf, int32_t amount,
            int flags, PRIntervalTime to)
 {
-  fprintf(stderr, "aLayerRecv\n");
+  fprintf(stderr, "%d aLayerRecv\n", PR_IntervalNow());
 
   assert(PR_GetLayersIdentity(fd) == aIdentity);
 
@@ -1978,6 +2121,7 @@ aLayerRecv(PRFileDesc *fd, void *buf, int32_t amount,
       }
     }
   }
+
   if (!read) {
     PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
     return -1;
@@ -1989,7 +2133,7 @@ aLayerRecv(PRFileDesc *fd, void *buf, int32_t amount,
 int32_t
 sdt_GetData(PRFileDesc *fd)
 {
-  fprintf(stderr, "sdt_GetData\n");
+  fprintf(stderr, "%d sdt_GetData\n", PR_IntervalNow());
 
   struct sdt_t *handle = (struct sdt_t *)(fd->secret);
   if (!handle) {
@@ -2004,6 +2148,7 @@ sdt_GetData(PRFileDesc *fd)
                                   handle->cleartextpayloadsize,
                                   0,
                                   PR_INTERVAL_NO_WAIT);
+
     if (rv < 0) {
       return rv;
     }
@@ -2019,7 +2164,7 @@ sdt_GetData(PRFileDesc *fd)
     unsigned char *buf = (unsigned char *)(pkt + 1);
     int rv = fd->lower->methods->write(fd->lower,
                                        buf,
-                                       pkt->sz);
+                                       pkt->mSize);
     free(pkt);
     if (rv < 0) {
       return rv;
@@ -2073,7 +2218,7 @@ hSDTFrameOrHeaderLen(uint8_t type, uint8_t flags)
 }
 
 static void
-h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
+h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const unsigned char *buf,
        int32_t amount, uint32_t *read)
 {
   LogBuffer("h22std ", buf, amount);
@@ -2081,7 +2226,7 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
   uint8_t done = 0;
   unsigned char *pktbuf = (unsigned char *)(pkt + 1);
   *read = 0;
-  pkt->sz = 0;
+  pkt->mSize = 0;
 
   if (!handle->hMagicHello) {
     // 24 + 4
@@ -2101,7 +2246,7 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
     }
   }
 
-  while (!done && ((pkt->sz < handle->cleartextpayloadsize) ||
+  while (!done && ((pkt->mSize < handle->cleartextpayloadsize) ||
                    (handle->hState == SDT_H2S_PADDING))) {
 
     switch (handle->hState) {
@@ -2118,7 +2263,7 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
 
         // Check if we have place for a sdt frame in the out going buffer.
         if (hSDTFrameOrHeaderLen(handle->hType, handle->hFlags) >
-            (handle->cleartextpayloadsize - pkt->sz)) {
+            (handle->cleartextpayloadsize - pkt->mSize)) {
           done = 1;
           continue;
         }
@@ -2142,13 +2287,14 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
             handle->hDataLen -= 1;
             handle->hDataLen -= handle->hPadding;
           }
-          len = handle->cleartextpayloadsize - pkt->sz -
+          len = handle->cleartextpayloadsize - pkt->mSize -
                 hSDTFrameOrHeaderLen(handle->hType, 0);
           len = (len > (handle->hDataLen)) ?
                  (handle->hDataLen) : len;
         } else {
           len = handle->hDataLen;
         }
+
         // Maybe optimize this.
         if ((amount - *read) < (len + HTTP2_HEADERLEN +
                               ((handle->hPadding) ? 1 : 0))) {
@@ -2163,28 +2309,7 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
         *read = *read + ((handle->hPadding) ? 1 : 0);
 
         // Find stream info.
-        struct hStreamInfo_t *streamInfo = handle->hOutgoingStreams;
-        struct hStreamInfo_t *prevStreamInfo = 0;
-        while (streamInfo && (streamInfo->mStreamId < http2StreamId)) {
-          prevStreamInfo = streamInfo;
-          streamInfo = streamInfo->mNext;
-        }
-
-        if (!streamInfo || (streamInfo->mStreamId > http2StreamId)) {
-          handle->hCurrentStream =
-            (struct hStreamInfo_t *) malloc (sizeof(struct hStreamInfo_t));
-          handle->hCurrentStream->mStreamId = http2StreamId;
-          handle->hCurrentStream->mNextOffset = 0;
-          handle->hCurrentStream->mWindowSize = (2 << 16) - 1;
-          handle->hCurrentStream->mNext = streamInfo;
-          if (prevStreamInfo) {
-            prevStreamInfo->mNext = handle->hCurrentStream;
-          } else {
-            handle->hOutgoingStreams = handle->hCurrentStream;
-          }
-        } else {
-          handle->hCurrentStream = streamInfo;
-        }
+        handle->hCurrentStream = hFindOutgoingStream(handle, http2StreamId);
 
         // SDT id. Number 3 is reserved.
         handle->hSDTStreamId = http2StreamId;
@@ -2208,27 +2333,27 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
           case HTTP2_FRAME_TYPE_PRIORITY:
             fprintf(stderr, "HTTP2_FRAME_TYPE_PRIORITY\n");
             // Priority is not described readly.
-            pktbuf[pkt->sz] = SDT_FRAME_TYPE_PRIORITY;
-            pkt->sz += 1;
-            memcpy(pktbuf + pkt->sz, &handle->hSDTStreamId, 4);
-            pkt->sz += 4;
-            memcpy(pktbuf + pkt->sz, buf + *read, 5);
+            pktbuf[pkt->mSize] = SDT_FRAME_TYPE_PRIORITY;
+            pkt->mSize += 1;
+            memcpy(pktbuf + pkt->mSize, &handle->hSDTStreamId, 4);
+            pkt->mSize += 4;
+            memcpy(pktbuf + pkt->mSize, buf + *read, 5);
             *read += 5;
-            pkt->sz += 5;
+            pkt->mSize += 5;
             break;
 
           case HTTP2_FRAME_TYPE_RST_STREAM:
           {
             fprintf(stderr, "HTTP2_FRAME_TYPE_RST_STREAM\n");
-            pktbuf[pkt->sz] = SDT_FRAME_TYPE_RST_STREAM;
-            pkt->sz += 1;
-            memcpy(pktbuf + pkt->sz, &handle->hSDTStreamId, 4);
-            pkt->sz += 4;
+            pktbuf[pkt->mSize] = SDT_FRAME_TYPE_RST_STREAM;
+            pkt->mSize += 1;
+            memcpy(pktbuf + pkt->mSize, &handle->hSDTStreamId, 4);
+            pkt->mSize += 4;
             uint64_t offset = htonll(handle->hCurrentStream->mNextOffset);
-            memcpy(pktbuf + pkt->sz, &offset, 8);
-            pkt->sz += 8;
-            memcpy(pktbuf + pkt->sz, buf + *read, 4);
-            pkt->sz += 4;
+            memcpy(pktbuf + pkt->mSize, &offset, 8);
+            pkt->mSize += 8;
+            memcpy(pktbuf + pkt->mSize, buf + *read, 4);
+            pkt->mSize += 4;
             *read += len;
             break;
           }
@@ -2253,8 +2378,8 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
           case HTTP2_FRAME_TYPE_PING:
             fprintf(stderr, "HTTP2_FRAME_TYPE_PING\n");
             if (!(handle->hFlags & HTTP2_FRAME_FLAG_ACK)) {
-              pktbuf[pkt->sz] = SDT_FRAME_TYPE_PING;
-              pkt->sz += 1;
+              pktbuf[pkt->mSize] = SDT_FRAME_TYPE_PING;
+              pkt->mSize += 1;
               pkt->mIsPingPkt = 1;
             }
             *read += 8;
@@ -2262,10 +2387,10 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
 
           case HTTP2_FRAME_TYPE_GOAWAY:
             fprintf(stderr, "HTTP2_FRAME_TYPE_GOAWAY\n");
-            pktbuf[pkt->sz] = SDT_FRAME_TYPE_GOAWAY;
-            pkt->sz += 1;
-            memcpy(pktbuf + pkt->sz, buf + *read + 4, 4);
-            pkt->sz += 4;
+            pktbuf[pkt->mSize] = SDT_FRAME_TYPE_GOAWAY;
+            pkt->mSize += 1;
+            memcpy(pktbuf + pkt->mSize, buf + *read + 4, 4);
+            pkt->mSize += 4;
             uint32_t sdtId;
             memcpy(&sdtId, buf + *read, 4);
             sdtId = ntohl(sdtId);
@@ -2275,17 +2400,19 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
             }
             sdtId = htonl(sdtId + 2);
 
-            memcpy(pktbuf + pkt->sz, &sdtId, 4);
-            pkt->sz += 4;
-            *read += 8;
+            memcpy(pktbuf + pkt->mSize, &sdtId, 4);
+            pkt->mSize += 4;
+            memset(pktbuf + pkt->mSize, 0, 2);
+            pkt->mSize += 2;
+            *read += len;
             break;
 
           case HTTP2_FRAME_TYPE_WINDOW_UPDATE:
             fprintf(stderr, "HTTP2_FRAME_TYPE_WINDOW_UPDATE\n");
-            pktbuf[pkt->sz] = SDT_FRAME_TYPE_WINDOW_UPDATE;
-            pkt->sz += 1;
-            memcpy(pktbuf + pkt->sz, &handle->hSDTStreamId, 4);
-            pkt->sz += 4;
+            pktbuf[pkt->mSize] = SDT_FRAME_TYPE_WINDOW_UPDATE;
+            pkt->mSize += 1;
+            memcpy(pktbuf + pkt->mSize, &handle->hSDTStreamId, 4);
+            pkt->mSize += 4;
             uint32_t increase;
             memcpy(&increase, buf + *read, 4);
             *read += 4;
@@ -2295,8 +2422,8 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
             uint64_t offset;
             offset = stream->mWindowSize;
             offset = htonll(offset);
-            memcpy(pktbuf + pkt->sz, &offset, 8);
-            pkt->sz += 8;
+            memcpy(pktbuf + pkt->mSize, &offset, 8);
+            pkt->mSize += 8;
             break;
 
           case HTTP2_FRAME_TYPE_ALTSVC:
@@ -2320,11 +2447,12 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
                (handle->hType == HTTP2_FRAME_TYPE_CONTINUATION));
 
         uint16_t toRead;
-        toRead = handle->cleartextpayloadsize - pkt->sz -
+        toRead = handle->cleartextpayloadsize - pkt->mSize -
                  hSDTFrameOrHeaderLen(HTTP2_FRAME_TYPE_DATA, 0);
         if (handle->hType != HTTP2_FRAME_TYPE_DATA) {
           toRead -= HTTP2_HEADERLEN;
         }
+
         toRead = (toRead > handle->hDataLen) ? handle->hDataLen : toRead;
 
         // Maybe optimize this.
@@ -2333,23 +2461,23 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
           continue;
         }
 
-        pktbuf[pkt->sz] = SDT_FRAME_TYPE_STREAM2;
+        pktbuf[pkt->mSize] = SDT_FRAME_TYPE_STREAM2;
 
         if (handle->hType == HTTP2_FRAME_TYPE_DATA) {
           if ((handle->hFlags & HTTP2_FRAME_FLAG_END_STREAM) &&
               (handle->hDataLen == toRead)) {
-            pktbuf[pkt->sz] |= SDT_FIN_BIT;
+            pktbuf[pkt->mSize] |= SDT_FIN_BIT;
           }
         }
-        pkt->sz += 1;
+        pkt->mSize += 1;
 
         if (handle->hType == HTTP2_FRAME_TYPE_DATA) {
-          memcpy(pktbuf + pkt->sz, &handle->hSDTStreamId, 4);
+          memcpy(pktbuf + pkt->mSize, &handle->hSDTStreamId, 4);
         } else {
           uint32_t id = htonl(3);
-          memcpy(pktbuf + pkt->sz, &id, 4);
+          memcpy(pktbuf + pkt->mSize, &id, 4);
         }
-        pkt->sz += 4;
+        pkt->mSize += 4;
 
         uint64_t offset;
         if (handle->hType == HTTP2_FRAME_TYPE_DATA) {
@@ -2357,8 +2485,8 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
         } else {
           offset = htonll(handle->hOutgoingHeaders->mNextOffset);
         }
-        memcpy(pktbuf + pkt->sz, &offset, 8);
-        pkt->sz += 8;
+        memcpy(pktbuf + pkt->mSize, &offset, 8);
+        pkt->mSize += 8;
 
         uint16_t len = toRead;
         if (handle->hType != HTTP2_FRAME_TYPE_DATA) {
@@ -2373,32 +2501,32 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
         handle->hOffsetAll += len; // Needed for WINDOW_UPDATE.
 
         len = htons(len);
-        memcpy(pktbuf + pkt->sz, &len, 2);
-        pkt->sz += 2;
+        memcpy(pktbuf + pkt->mSize, &len, 2);
+        pkt->mSize += 2;
 
         if (handle->hType != HTTP2_FRAME_TYPE_DATA) {
           // I am not sure about this, I understood it like this.
-          pktbuf[pkt->sz] = 0;
-          pkt->sz += 1;
+          pktbuf[pkt->mSize] = 0;
+          pkt->mSize += 1;
           len = toRead;
           len = htons(len);
-          memcpy(pktbuf + pkt->sz, &len, 2);
-          pkt->sz += 2;
-          pktbuf[pkt->sz] = handle->hType;
-          pkt->sz += 1;
-          pktbuf[pkt->sz] = handle->hFlags & HTTP2_FRAME_FLAG_PRIORITY;
+          memcpy(pktbuf + pkt->mSize, &len, 2);
+          pkt->mSize += 2;
+          pktbuf[pkt->mSize] = handle->hType;
+          pkt->mSize += 1;
+          pktbuf[pkt->mSize] = handle->hFlags & HTTP2_FRAME_FLAG_PRIORITY;
           handle->hFlags &= ~HTTP2_FRAME_FLAG_PRIORITY; // only on the first one.
           if (handle->hDataLen == toRead) {
-            pktbuf[pkt->sz] |= (handle->hFlags & (HTTP2_FRAME_FLAG_END_STREAM |
-                                                HTTP2_FRAME_FLAG_END_HEADERS));
+            pktbuf[pkt->mSize] |= (handle->hFlags & (HTTP2_FRAME_FLAG_END_STREAM |
+                                                     HTTP2_FRAME_FLAG_END_HEADERS));
           }
-          pkt->sz += 1;
-          memcpy(pktbuf + pkt->sz, &handle->hSDTStreamId, 4);
-          pkt->sz += 4;
+          pkt->mSize += 1;
+          memcpy(pktbuf + pkt->mSize, &handle->hSDTStreamId, 4);
+          pkt->mSize += 4;
         }
 
-        memcpy(pktbuf + pkt->sz, buf + *read, toRead);
-        pkt->sz += toRead;
+        memcpy(pktbuf + pkt->mSize, buf + *read, toRead);
+        pkt->mSize += toRead;
         *read += toRead;
         assert(handle->hDataLen >= toRead);
         handle->hDataLen -= toRead;
@@ -2433,7 +2561,7 @@ h22sdt(struct sdt_t *handle, struct aPacket_t *pkt, const void *buf,
     }
   }
 
-  LogBuffer("h22sdt buffer ", pktbuf, pkt->sz);
+  LogBuffer("h22sdt buffer ", pktbuf, pkt->mSize);
 }
 
 static int32_t
@@ -2445,7 +2573,12 @@ aLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
     return -1;
   }
 
-  fprintf(stderr, "aLayerWrite state=%d amount=%d\n", handle->state, amount);
+  fprintf(stderr, "%d aLayerWrite state=%d amount=%d [%p]\n", PR_IntervalNow(),
+          handle->state, amount, handle);
+  fprintf(stderr, "%d aLayerWrite aTransmissionQueue= %d "
+          "aRetransmissionQueue=%d mMaxBufferedPkt=%d\n",
+          PR_IntervalNow(), handle->aTransmissionQueue.mLen,
+          handle->aRetransmissionQueue.mLen, handle->mMaxBufferedPkt);
 
   switch (handle->state) {
   case SDT_CONNECTING:
@@ -2477,7 +2610,6 @@ aLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
               handle->aRetransmissionQueue.mLen,
               handle->mMaxBufferedPkt );
       uint32_t dataRead = 0;
-      uint8_t retransmission = 0;
 
       // 1) Accept new data if there is space
       if (amount && ((handle->aTransmissionQueue.mLen +
@@ -2491,15 +2623,15 @@ aLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
 
         pkt->mIdsNum = 0;
         pkt->mForRetransmission = 0;
-        pkt->sz = 0;
+        pkt->mSize = 0;
         pkt->mIsPingPkt = 0;
 
         h22sdt(handle, pkt, buf, amount, &dataRead);
         unsigned char *pktbuf = (unsigned char *)(pkt + 1);
-        LogBuffer("h22sdt buffer ", pktbuf, pkt->sz);
+        LogBuffer("h22sdt buffer ", pktbuf, pkt->mSize);
         fprintf(stderr, "aLayerWrite: data read %d written %d\n",
-                dataRead, pkt->sz);
-        if (pkt->sz > 0) {
+                dataRead, pkt->mSize);
+        if (pkt->mSize > 0) {
           PacketQueueAddNew(&handle->aTransmissionQueue, pkt);
         } else {
           free (pkt);
@@ -2514,55 +2646,59 @@ aLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
       }
 
       // 3) Send a packet.
-      if (!NeedToSendRetransmit(handle)) {
-        handle->aPktTransmit = handle->aTransmissionQueue.mFirst;
-      } else {
-        retransmission = 1;
+      // Because of the congestion control we need to send as much as we can.
+      // (SocketTransport we call read, then write then read... on the socket.
+      //  If ack arrives and increases cwnd, write must be call more than once
+      //  to send as mach as we can. If we do not do that, if we call it just
+      //  once bytes_in_fligts will be less than cwnd and on the next ack cc is
+      //  app limited.)
+      if (RetransmitQueued(handle)) {
         handle->aPktTransmit = handle->aRetransmissionQueue.mFirst;
+      } else {
+        handle->aPktTransmit = handle->aTransmissionQueue.mFirst;
       }
+      int32_t rv = 0;
 
-      if (handle->aPktTransmit) {
+      while ((rv > -1) && handle->aPktTransmit) {
         unsigned char *pktbuf = (unsigned char *)(handle->aPktTransmit + 1);
 //LogBuffer("aLayerSendTo pkt ", buf, amount + sizeof(struct aPacket_t));
-        int rv = fd->lower->methods->write(fd->lower,
-                                           pktbuf,
-                                           handle->aPktTransmit->sz);
-        if (rv <= 0) {
+        rv = fd->lower->methods->write(fd->lower,
+                                       pktbuf,
+                                       handle->aPktTransmit->mSize);
+        if (rv < 0) {
           handle->aPktTransmit = nullptr;
           PRErrorCode errCode = PR_GetError();
           if (errCode != PR_WOULD_BLOCK_ERROR) {
             return rv;
-          } else {
-            if (dataRead) {
-              return dataRead;
-            } else {
-              PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
-              return -1;
-            }
           }
-        }
+        } else {
+          // Start rto timer if needed. RTO timere is started only for data
+          // packets.
+          MaybeStartRTOTimer(handle);
 
-        // Start rto timer if needed. RTO timere is started only for data
-        // packets.
-        MaybeStartRTOTimer(handle);
-
-        fprintf(stderr, "LayerSendTo amount=%d newDataRead=%d pkt_sz=%d rv=%d pkt=%p"
-                " number_of_ids=%d\n",
-                amount, dataRead, handle->aPktTransmit->sz, rv,
-                handle->aPktTransmit, handle->aPktTransmit->mIdsNum);
+          fprintf(stderr, "LayerSendTo amount=%d newDataRead=%d pkt_sz=%d "
+                  "rv=%d pkt=%p number_of_ids=%d\n",
+                  amount, dataRead, handle->aPktTransmit->mSize, rv,
+                  handle->aPktTransmit, handle->aPktTransmit->mIdsNum);
 
 //        buf = (unsigned char *)(handle->aPktTransmit);
 //        LogBuffer("aLayerSendTo pkt 2", buf,
-//                  handle->aPktTransmit->sz + sizeof(struct aPacket_t));
+//                  handle->aPktTransmit->mSize + sizeof(struct aPacket_t));
 
-        if (!retransmission) {
-          PacketQueueRemoveFirstPkt(&handle->aTransmissionQueue);
-        } else {
-          PacketQueueRemoveFirstPkt(&handle->aRetransmissionQueue);
-          handle->aPktTransmit->mForRetransmission = 0;
+          if (!handle->aPktTransmit->mForRetransmission) {
+            PacketQueueRemoveFirstPkt(&handle->aTransmissionQueue);
+          } else {
+            PacketQueueRemoveFirstPkt(&handle->aRetransmissionQueue);
+            handle->aPktTransmit->mForRetransmission = 0;
+          }
+          PacketQueueAddNew(&handle->aRetransmissionQueue, handle->aPktTransmit);
+
+          if (RetransmitQueued(handle)) {
+            handle->aPktTransmit = handle->aRetransmissionQueue.mFirst;
+          } else {
+            handle->aPktTransmit = handle->aTransmissionQueue.mFirst;
+          }
         }
-        PacketQueueAddNew(&handle->aRetransmissionQueue, handle->aPktTransmit);
-        handle->aPktTransmit = nullptr;
       }
 
       // 4) Send an ack if necessary.
@@ -2571,7 +2707,7 @@ aLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
         unsigned char *buf = (unsigned char *)(pkt + 1);
         int rv = fd->lower->methods->write(fd->lower,
                                            buf,
-                                           pkt->sz);
+                                           pkt->mSize);
         free(pkt);
 
         if (rv < 0) {
@@ -2628,9 +2764,6 @@ static int32_t
 qLayerRecv(PRFileDesc *fd, void *buf, int32_t amount,
            int flags, PRIntervalTime to)
 {
-  // There must be place for the whole frame (max UDP payload).
-  assert(amount <= SDT_CLEARTEXTPAYLOADSIZE);
-
   return fd->lower->methods->recv(fd->lower, buf, amount, flags, to);
 }
 
@@ -2650,7 +2783,21 @@ qLayerWrite(PRFileDesc *fd, const void *buf, int32_t amount)
 */
   // send now
 //  qChargeSend(handle);
-  return fd->lower->methods->write(fd->lower, buf, amount);
+
+  // If we can send according to cwnd, this is an ack, a retransmission or
+  // we are writnig 0 bytes.
+  int32_t rv = -1;
+  if (cc->CanSend(handle) || !handle->aPktTransmit || !amount) {
+    rv = fd->lower->methods->write(fd->lower, buf, amount);
+    if ((rv > 0) && handle->aPktTransmit) {
+      cc->OnPacketSent(handle, handle->aPktTransmit->mIds[handle->aPktTransmit->mIdsNum - 1].mSeq,
+                       handle->aPktTransmit->mSize + DTLS_PART + handle->publicHeader);
+    }
+    return rv;
+  } else {
+    PR_SetError(PR_WOULD_BLOCK_ERROR, 0);
+  }
+  return rv;
 }
 
 static PRStatus
@@ -2729,15 +2876,20 @@ sLayerPoll(PRFileDesc *fd, PRInt16 how_flags, PRInt16 *p_out_flags)
 static PRInt16 PR_CALLBACK
 qLayerPoll(PRFileDesc *fd, PRInt16 how_flags, PRInt16 *p_out_flags)
 {
-/*  *p_out_flags = 0;
+  *p_out_flags = 0;
   struct sdt_t *handle = (struct sdt_t *)(fd->secret);
   if (!handle) {
     assert(0);
     return PR_POLL_ERR;
   }
-  if ((how_flags & PR_POLL_WRITE) && !qAllowSend(handle)) {
-    how_flags ^= PR_POLL_WRITE; 
-  }*/
+
+  if (handle->state == SDT_TRANSFERRING) {
+    if ((how_flags & PR_POLL_WRITE) &&
+        !(cc->CanSend(handle) ||
+          DoWeNeedToSendAck(handle))) { //&& !qAllowSend(handle)) {
+      how_flags^= PR_POLL_WRITE;
+    }
+  }
 
   assert(fd->lower->methods->poll);
   return fd->lower->methods->poll(fd->lower, how_flags, p_out_flags);
@@ -2747,7 +2899,6 @@ static PRInt16 PR_CALLBACK
 aLayerPoll(PRFileDesc *fd, PRInt16 how_flags, PRInt16 *p_out_flags)
 {
   *p_out_flags = 0;
-  PRInt16 outFlags = 0;
 
   struct sdt_t *handle = (struct sdt_t *)(fd->secret);
   if (!handle) {
@@ -2756,30 +2907,27 @@ aLayerPoll(PRFileDesc *fd, PRInt16 how_flags, PRInt16 *p_out_flags)
     return how_flags;
   }
 
-  PRIntervalTime now = PR_IntervalNow();
-  if ((how_flags & PR_POLL_WRITE) &&
-      !(RTOTimerExpired(handle, now) ||
-        ERTimerExpired(handle, now) ||
-        handle->aTransmissionQueue.mLen) ||
-        NeedToSendRetransmit(handle)) {
-    how_flags ^= PR_POLL_WRITE;
-  }
+  if (handle->state == SDT_TRANSFERRING) {
+    if ((how_flags & PR_POLL_WRITE) &&
+        !(NeedToSendRetransmit(handle) ||
+          handle->aTransmissionQueue.mLen ||
+          DoWeNeedToSendAck(handle))) {
 
-  if (how_flags & PR_POLL_READ) {
-    if (handle->aLayerBufferLen) {
-      *p_out_flags |= PR_POLL_READ;
-      return how_flags;
-    } else if (handle->state != SDT_TRANSFERRING){
-      // Look for date from the network.
-      how_flags ^= PR_POLL_READ;
+      how_flags ^= PR_POLL_WRITE;
+    }
+
+    if (how_flags & PR_POLL_READ) {
+      if (handle->aLayerBufferLen) {
+        *p_out_flags |= PR_POLL_READ;
+        return how_flags;
+      }
     }
   }
 
   assert(fd->lower->methods->poll);
-  PRInt16 rv = fd->lower->methods->poll(fd->lower,
-                                        how_flags,
-                                        p_out_flags);
-  return rv;
+  return fd->lower->methods->poll(fd->lower,
+                                  how_flags,
+                                  p_out_flags);
 }
 
 static void
@@ -2878,6 +3026,8 @@ sdt_ensureInit()
   qMethods.close = genericClose;
   sMethods.close = genericClose;
   aMethods.close = genericClose;
+
+  cc = &tcp_general;
 }
     
 PRFileDesc *

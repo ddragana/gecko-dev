@@ -7,9 +7,12 @@
 extern "C" {
 #endif /* __cplusplus */
 
+#include "prio.h"
+
 #define SDT_MTU 1400
 #define SDT_PAYLOADSIZE 1400
-#define SDT_CLEARTEXTPAYLOADSIZE (SDT_PAYLOADSIZE - 64)
+#define DTLS_PART 37
+#define SDT_CLEARTEXTPAYLOADSIZE (SDT_PAYLOADSIZE - DTLS_PART)
 #define SDT_REPLAY_WINDOW 8192
 
 PRFileDesc *sdt_openSocket(PRIntn af);
@@ -23,6 +26,9 @@ uint16_t sdt_GetNextTimer(PRFileDesc *aFd);
 int32_t sdt_GetData(PRFileDesc *aFd);
 uint8_t sdt_HasData(PRFileDesc *aFd);
 uint8_t sdt_SocketWritable(PRFileDesc *aFd);
+
+struct sdt_t;
+void *sdt_GetCCPrivate(struct sdt_t *sdt);
 
 #ifdef __cplusplus
 }

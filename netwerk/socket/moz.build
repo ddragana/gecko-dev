@@ -25,7 +25,15 @@ UNIFIED_SOURCES += [
 
 SOURCES += [
     'sdt.c',
+    'tcp_cubic.c',
+    'tcp_general.c',
     'uLayer.c',
+]
+
+EXPORTS += [
+    'congestion_control.h',
+    'tcp_cubic.h',
+    'tcp_general.h',
 ]
 
 FINAL_LIBRARY = 'xul'

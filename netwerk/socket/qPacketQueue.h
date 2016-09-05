@@ -13,8 +13,9 @@ struct id_t
 
 struct aPacket_t
 {
-  uint32_t sz;
+  uint32_t mSize;
   // All ids that this packet is sent with.
+  uint64_t mOriginalId; // I used this only for debugging.
   struct id_t mIds[NUM_RETRANSMIT_IDS];
   uint32_t mIdsNum;
   uint8_t mForRetransmission;
@@ -73,7 +74,7 @@ PacketQueueRemovePktWithId(struct aPacketQueue_t *queue, uint64_t id)
 
   struct aPacket_t *curr = queue->mFirst;
   struct aPacket_t *prev = NULL;
-  uint8_t found = 0;
+
   while (curr) {
     for (uint32_t i = 0; i < curr->mIdsNum; i++) {
       if (curr->mIds[i].mSeq == id) {
