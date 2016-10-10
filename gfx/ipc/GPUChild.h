@@ -6,15 +6,19 @@
 #ifndef _include_mozilla_gfx_ipc_GPUChild_h_
 #define _include_mozilla_gfx_ipc_GPUChild_h_
 
-#include "mozilla/gfx/PGPUChild.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/gfx/PGPUChild.h"
+#include "mozilla/gfx/gfxVarReceiver.h"
 
 namespace mozilla {
 namespace gfx {
 
 class GPUProcessHost;
 
-class GPUChild final : public PGPUChild
+class GPUChild final
+  : public PGPUChild,
+    public gfxVarReceiver
 {
 public:
   explicit GPUChild(GPUProcessHost* aHost);
@@ -22,12 +26,22 @@ public:
 
   void Init();
 
-  static void Destroy(UniquePtr<GPUChild>&& aChild);
+  void EnsureGPUReady();
 
+  // gfxVarReceiver overrides.
+  void OnVarChanged(const GfxVarUpdate& aVar) override;
+
+  // PGPUChild overrides.
+  bool RecvInitComplete(const GPUDeviceData& aData) override;
+  bool RecvReportCheckerboard(const uint32_t& aSeverity, const nsCString& aLog) override;
   void ActorDestroy(ActorDestroyReason aWhy) override;
+  bool RecvGraphicsError(const nsCString& aError) override;
+
+  static void Destroy(UniquePtr<GPUChild>&& aChild);
 
 private:
   GPUProcessHost* mHost;
+  bool mGPUReady;
 };
 
 } // namespace gfx

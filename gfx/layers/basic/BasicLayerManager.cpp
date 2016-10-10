@@ -209,9 +209,7 @@ BasicLayerManager::PopGroupForLayer(PushedGroup &group)
 static IntRect
 ToInsideIntRect(const gfxRect& aRect)
 {
-  gfxRect r = aRect;
-  r.RoundIn();
-  return IntRect(r.X(), r.Y(), r.Width(), r.Height());
+  return IntRect::RoundIn(aRect.X(), aRect.Y(), aRect.Width(), aRect.Height());
 }
 
 // A context helper for BasicLayerManager::PaintLayer() that holds all the
@@ -936,7 +934,7 @@ BasicLayerManager::PaintLayer(gfxContext* aTarget,
 
     RefPtr<SourceSurface> untransformedSurf = untransformedDT->Snapshot();
     RefPtr<DrawTarget> xformDT =
-      untransformedDT->CreateSimilarDrawTarget(IntSize(xformBounds.width, xformBounds.height),
+      untransformedDT->CreateSimilarDrawTarget(IntSize::Truncate(xformBounds.width, xformBounds.height),
                                                SurfaceFormat::B8G8R8A8);
     RefPtr<SourceSurface> xformSurf;
     if(xformDT && untransformedSurf &&

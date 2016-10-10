@@ -61,7 +61,7 @@ function whenDelayedStartupFinished(aWindow, aCallback) {
   }, "browser-delayed-startup-finished", false);
 }
 
-function updateTabContextMenu(tab) {
+function updateTabContextMenu(tab, onOpened) {
   let menu = document.getElementById("tabContextMenu");
   if (!tab)
     tab = gBrowser.selectedTab;
@@ -69,7 +69,15 @@ function updateTabContextMenu(tab) {
   tab.dispatchEvent(evt);
   menu.openPopup(tab, "end_after", 0, 0, true, false, evt);
   is(TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
-  menu.hidePopup();
+  const onFinished = () => menu.hidePopup();
+  if (onOpened) {
+    return Task.spawn(function*() {
+      yield onOpened();
+      onFinished();
+    });
+  }
+  onFinished();
+  return Promise.resolve();
 }
 
 function openToolbarCustomizationUI(aCallback, aBrowserWin) {
@@ -684,13 +692,13 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
     throw new Error("assertMixedContentBlockingState requires a browser and a states object");
   }
 
-  let {passiveLoaded,activeLoaded,activeBlocked} = states;
+  let {passiveLoaded, activeLoaded, activeBlocked} = states;
   let {gIdentityHandler} = tabbrowser.ownerGlobal;
   let doc = tabbrowser.ownerDocument;
   let identityBox = gIdentityHandler._identityBox;
   let classList = identityBox.classList;
   let connectionIcon = doc.getElementById("connection-icon");
-  let connectionIconImage = tabbrowser.ownerGlobal.getComputedStyle(connectionIcon, "").
+  let connectionIconImage = tabbrowser.ownerGlobal.getComputedStyle(connectionIcon).
                          getPropertyValue("list-style-image");
 
   let stateSecure = gIdentityHandler._state & Ci.nsIWebProgressListener.STATE_IS_SECURE;
@@ -727,19 +735,19 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
 
     is_element_visible(connectionIcon);
     if (activeLoaded) {
-      is(connectionIconImage, "url(\"chrome://browser/skin/identity-mixed-active-loaded.svg\")",
+      is(connectionIconImage, "url(\"chrome://browser/skin/connection-mixed-active-loaded.svg#icon\")",
         "Using active loaded icon");
     }
     if (activeBlocked && !passiveLoaded) {
-      is(connectionIconImage, "url(\"chrome://browser/skin/identity-secure.svg\")",
+      is(connectionIconImage, "url(\"chrome://browser/skin/connection-secure.svg\")",
         "Using active blocked icon");
     }
     if (passiveLoaded && !(activeLoaded || activeBlocked)) {
-      is(connectionIconImage, "url(\"chrome://browser/skin/identity-mixed-passive-loaded.svg\")",
+      is(connectionIconImage, "url(\"chrome://browser/skin/connection-mixed-passive-loaded.svg#icon\")",
         "Using passive loaded icon");
     }
     if (passiveLoaded && activeBlocked) {
-      is(connectionIconImage, "url(\"chrome://browser/skin/identity-mixed-passive-loaded.svg\")",
+      is(connectionIconImage, "url(\"chrome://browser/skin/connection-mixed-passive-loaded.svg#icon\")",
         "Using active blocked and passive loaded icon");
     }
   }
@@ -767,9 +775,9 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
   // Make sure the correct icon is visible in the Control Center.
   // This logic is controlled with CSS, so this helps prevent regressions there.
   let securityView = doc.getElementById("identity-popup-securityView");
-  let securityViewBG = tabbrowser.ownerGlobal.getComputedStyle(securityView, "").
+  let securityViewBG = tabbrowser.ownerGlobal.getComputedStyle(securityView).
                        getPropertyValue("background-image");
-  let securityContentBG = tabbrowser.ownerGlobal.getComputedStyle(securityView, "").
+  let securityContentBG = tabbrowser.ownerGlobal.getComputedStyle(securityView).
                           getPropertyValue("background-image");
 
   if (stateInsecure) {
@@ -780,9 +788,9 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
   }
 
   if (stateSecure) {
-    is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/conn-secure.svg\")",
+    is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-secure\")",
       "CC using secure icon");
-    is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/conn-secure.svg\")",
+    is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-secure\")",
       "CC using secure icon");
   }
 
@@ -793,15 +801,15 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
       is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/mcb-disabled.svg\")",
         "CC using active loaded icon");
     } else if (activeBlocked || passiveLoaded) {
-      is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/conn-degraded.svg\")",
+      is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-degraded\")",
         "CC using degraded icon");
-      is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/conn-degraded.svg\")",
+      is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-degraded\")",
         "CC using degraded icon");
     } else {
       // There is a case here with weak ciphers, but no bc tests are handling this yet.
-      is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/conn-degraded.svg\")",
+      is(securityViewBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-degraded\")",
         "CC using degraded icon");
-      is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/conn-degraded.svg\")",
+      is(securityContentBG, "url(\"chrome://browser/skin/controlcenter/connection.svg#connection-degraded\")",
         "CC using degraded icon");
     }
   }
@@ -823,13 +831,13 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
 }
 
 function is_hidden(element) {
-  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  var style = element.ownerGlobal.getComputedStyle(element);
   if (style.display == "none")
     return true;
   if (style.visibility != "visible")
     return true;
   if (style.display == "-moz-popup")
-    return ["hiding","closed"].indexOf(element.state) != -1;
+    return ["hiding", "closed"].indexOf(element.state) != -1;
 
   // Hiding a parent element will hide all its children
   if (element.parentNode != element.ownerDocument)
@@ -839,7 +847,7 @@ function is_hidden(element) {
 }
 
 function is_visible(element) {
-  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  var style = element.ownerGlobal.getComputedStyle(element);
   if (style.display == "none")
     return false;
   if (style.visibility != "visible")
@@ -889,7 +897,7 @@ function promisePopupHidden(popup) {
 }
 
 function promiseNotificationShown(notification) {
-  let win = notification.browser.ownerDocument.defaultView;
+  let win = notification.browser.ownerGlobal;
   if (win.PopupNotifications.panel.state == "open") {
     return Promise.resolve();
   }
@@ -1015,7 +1023,11 @@ function getPropertyBagValue(bag, key) {
   try {
     let val = bag.getProperty(key);
     return val;
-  } catch(e if e.result == Cr.NS_ERROR_FAILURE) {}
+  } catch (e) {
+    if (e.result != Cr.NS_ERROR_FAILURE) {
+      throw e;
+    }
+  }
 
   return null;
 }
@@ -1157,5 +1169,28 @@ function getCertExceptionDialog(aLocation) {
       }
     }
   }
+  return undefined;
 }
 
+function setupRemoteClientsFixture(fixture) {
+  let oldRemoteClientsGetter =
+    Object.getOwnPropertyDescriptor(gFxAccounts, "remoteClients").get;
+
+  Object.defineProperty(gFxAccounts, "remoteClients", {
+    get: function() { return fixture; }
+  });
+  return oldRemoteClientsGetter;
+}
+
+function restoreRemoteClients(getter) {
+  Object.defineProperty(gFxAccounts, "remoteClients", {
+    get: getter
+  });
+}
+
+function* openMenuItemSubmenu(id) {
+  let menuPopup = document.getElementById(id).menupopup;
+  let menuPopupPromise = BrowserTestUtils.waitForEvent(menuPopup, "popupshown");
+  menuPopup.showPopup();
+  yield menuPopupPromise;
+}

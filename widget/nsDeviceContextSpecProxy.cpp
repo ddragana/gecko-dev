@@ -12,7 +12,7 @@
 #include "mozilla/gfx/PrintTargetThebes.h"
 #include "mozilla/layout/RemotePrintJobChild.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIPrintSession.h"
 #include "nsIPrintSettings.h"
@@ -81,7 +81,7 @@ nsDeviceContextSpecProxy::MakePrintTarget()
   height /= TWIPS_PER_POINT_FLOAT;
 
   RefPtr<gfxASurface> surface = gfxPlatform::GetPlatform()->
-    CreateOffscreenSurface(mozilla::gfx::IntSize(width, height),
+    CreateOffscreenSurface(mozilla::gfx::IntSize::Truncate(width, height),
                            mozilla::gfx::SurfaceFormat::A8R8G8B8_UINT32);
   if (!surface) {
     return nullptr;

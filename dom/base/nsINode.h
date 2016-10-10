@@ -8,6 +8,8 @@
 #define nsINode_h___
 
 #include "mozilla/Likely.h"
+#include "mozilla/ServoTypes.h"
+#include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"               // for member, local
 #include "nsGkAtoms.h"              // for nsGkAtoms::baseURIProperty
 #include "nsIDOMNode.h"
@@ -51,7 +53,6 @@ class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
 class nsNodeWeakReference;
 class nsDOMMutationObserver;
-struct ServoNodeData;
 
 namespace mozilla {
 class EventListenerManager;
@@ -68,6 +69,7 @@ inline bool IsSpaceCharacter(char aChar) {
   return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
          aChar == '\f';
 }
+class AccessibleNode;
 struct BoxQuadOptions;
 struct ConvertCoordinateOptions;
 class DOMPoint;
@@ -340,9 +342,6 @@ public:
   , mFirstChild(nullptr)
   , mSubtreeRoot(this)
   , mSlots(nullptr)
-#ifdef MOZ_STYLO
-  , mServoNodeData(nullptr)
-#endif
   {
   }
 #endif
@@ -916,6 +915,16 @@ public:
   }
 
   /**
+   * Returns the node that is the parent of this node in the flattened
+   * tree. This differs from the normal parent if the node is filtered
+   * into an insertion point, or if the node is a direct child of a
+   * shadow root.
+   *
+   * @return the flattened tree parent
+   */
+  inline nsINode* GetFlattenedTreeParentNode() const;
+
+  /**
    * Get the parent nsINode for this node if it is an Element.
    * @return the parent node
    */
@@ -976,31 +985,46 @@ public:
   bool IsStyledByServo() const { return false; }
 #endif
 
-  inline bool IsDirtyForServo() const
+  bool IsDirtyForServo() const
   {
     MOZ_ASSERT(IsStyledByServo());
     return HasFlag(NODE_IS_DIRTY_FOR_SERVO);
   }
 
-  inline bool HasDirtyDescendantsForServo() const
+  bool HasDirtyDescendantsForServo() const
   {
     MOZ_ASSERT(IsStyledByServo());
     return HasFlag(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
-  inline void SetIsDirtyForServo() {
+  void SetIsDirtyForServo() {
     MOZ_ASSERT(IsStyledByServo());
     SetFlags(NODE_IS_DIRTY_FOR_SERVO);
   }
 
-  inline void SetHasDirtyDescendantsForServo() {
+  void SetHasDirtyDescendantsForServo() {
     MOZ_ASSERT(IsStyledByServo());
     SetFlags(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
   }
 
-  inline void SetIsDirtyAndHasDirtyDescendantsForServo() {
+  void SetIsDirtyAndHasDirtyDescendantsForServo() {
     MOZ_ASSERT(IsStyledByServo());
     SetFlags(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO | NODE_IS_DIRTY_FOR_SERVO);
+  }
+
+  void UnsetIsDirtyForServo() {
+    MOZ_ASSERT(IsStyledByServo());
+    UnsetFlags(NODE_IS_DIRTY_FOR_SERVO);
+  }
+
+  void UnsetHasDirtyDescendantsForServo() {
+    MOZ_ASSERT(IsStyledByServo());
+    UnsetFlags(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO);
+  }
+
+  void UnsetIsDirtyAndHasDirtyDescendantsForServo() {
+    MOZ_ASSERT(IsStyledByServo());
+    UnsetFlags(NODE_HAS_DIRTY_DESCENDANTS_FOR_SERVO | NODE_IS_DIRTY_FOR_SERVO);
   }
 
   inline void UnsetRestyleFlagsIfGecko();
@@ -1727,17 +1751,7 @@ public:
   }
 protected:
   void SetParentIsContent(bool aValue) { SetBoolFlag(ParentIsContent, aValue); }
-  /**
-   * This is a special case of SetIsInDocument used to special-case it for the
-   * document constructor (which can't do the IsStyledByServo() check).
-   */
-  void SetIsDocument() { SetBoolFlag(IsInDocument); }
-  void SetIsInDocument() {
-    if (IsStyledByServo()) {
-      SetIsDirtyAndHasDirtyDescendantsForServo();
-    }
-    SetBoolFlag(IsInDocument);
-  }
+  void SetIsInDocument() { SetBoolFlag(IsInDocument); }
   void SetNodeIsContent() { SetBoolFlag(NodeIsContent); }
   void ClearInDocument() { ClearBoolFlag(IsInDocument); }
   void SetIsElement() { SetBoolFlag(NodeIsElement); }
@@ -1783,6 +1797,8 @@ public:
 
   void GetBoundMutationObservers(nsTArray<RefPtr<nsDOMMutationObserver> >& aResult);
 
+  already_AddRefed<mozilla::dom::AccessibleNode> GetAccessibleNode();
+
   /**
    * Returns the length of this node, as specified at
    * <http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#concept-node-length>
@@ -1795,12 +1811,12 @@ public:
     aNodeName.SetStringBuffer(nsStringBuffer::FromString(nodeName),
                               nodeName.Length());
   }
-  void GetBaseURI(nsAString& aBaseURI) const;
+  MOZ_MUST_USE nsresult GetBaseURI(nsAString& aBaseURI) const;
   // Return the base URI for the document.
   // The returned value may differ if the document is loaded via XHR, and
   // when accessed from chrome privileged script and
   // from content privileged script for compatibility.
-  void GetBaseURIFromJS(nsAString& aBaseURI) const;
+  void GetBaseURIFromJS(nsAString& aBaseURI, mozilla::ErrorResult& aRv) const;
   bool HasChildNodes() const
   {
     return HasChildren();
@@ -2059,22 +2075,15 @@ public:
 #undef TOUCH_EVENT
 #undef EVENT
 
-  ServoNodeData* GetServoNodeData() {
+  bool HasServoData() {
 #ifdef MOZ_STYLO
-    return mServoNodeData;
+    return !!mServoData.Get();
 #else
     MOZ_CRASH("Accessing servo node data in non-stylo build");
 #endif
   }
 
-  void SetServoNodeData(ServoNodeData* aData) {
-#ifdef MOZ_STYLO
-    MOZ_ASSERT(!mServoNodeData);
-    mServoNodeData = aData;
-#else
-    MOZ_CRASH("Setting servo node data in non-stylo build");
-#endif
-  }
+  void ClearServoData();
 
 protected:
   static bool Traverse(nsINode *tmp, nsCycleCollectionTraversalCallback &cb);
@@ -2115,8 +2124,8 @@ protected:
   nsSlots* mSlots;
 
 #ifdef MOZ_STYLO
-  // Layout data managed by Servo.
-  ServoNodeData* mServoNodeData;
+  // Per-node data managed by Servo.
+  mozilla::ServoCell<ServoNodeData*> mServoData;
 #endif
 };
 
@@ -2267,8 +2276,7 @@ ToCanonicalSupports(nsINode* aPointer)
   } \
   NS_IMETHOD GetDOMBaseURI(nsAString& aBaseURI) __VA_ARGS__ override \
   { \
-    nsINode::GetBaseURI(aBaseURI); \
-    return NS_OK; \
+    return nsINode::GetBaseURI(aBaseURI); \
   } \
   NS_IMETHOD CompareDocumentPosition(nsIDOMNode* aOther, uint16_t* aResult) __VA_ARGS__ override \
   { \

@@ -15,7 +15,8 @@
 #include "SharedSurfaceGL.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
-#include "mozilla/unused.h"
+#include "mozilla/layers/TextureForwarder.h"
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 namespace gl {
@@ -214,7 +215,6 @@ SharedSurface::SharedSurface(SharedSurfaceType type,
     , mCanRecycle(canRecycle)
     , mIsLocked(false)
     , mIsProducerAcquired(false)
-    , mIsConsumerAcquired(false)
 #ifdef DEBUG
     , mOwningThread(NS_GetCurrentThread())
 #endif
@@ -288,7 +288,7 @@ ChooseBufferBits(const SurfaceCaps& caps,
 
 SurfaceFactory::SurfaceFactory(SharedSurfaceType type, GLContext* gl,
                                const SurfaceCaps& caps,
-                               const RefPtr<layers::ClientIPCAllocator>& allocator,
+                               const RefPtr<layers::LayersIPCChannel>& allocator,
                                const layers::TextureFlags& flags)
     : mType(type)
     , mGL(gl)
@@ -569,7 +569,11 @@ ReadbackSharedSurface(SharedSurface* src, gfx::DrawTarget* dst)
             size_t alignment = 8;
             if (dstStride % 4 == 0)
                 alignment = 4;
-            ScopedPackAlignment autoAlign(gl, alignment);
+
+            ScopedPackState scopedPackState(gl);
+            if (alignment != 4) {
+                gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, alignment);
+            }
 
             gl->raw_fReadPixels(0, 0, width, height, readGLFormat, readType,
                                 dstBytes);
@@ -601,7 +605,7 @@ ReadPixel(SharedSurface* src)
 
     ScopedReadbackFB a(src);
     {
-        ScopedPackAlignment autoAlign(gl, 4);
+        ScopedPackState scopedPackState(gl);
 
         UniquePtr<uint8_t[]> bytes(new uint8_t[4]);
         gl->raw_fReadPixels(0, 0, 1, 1, LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE,

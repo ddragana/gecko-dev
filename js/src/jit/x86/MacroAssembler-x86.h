@@ -626,8 +626,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movl(Operand(address), dest);
     }
     void load64(const Address& address, Register64 dest) {
-        movl(Operand(address), dest.low);
-        movl(Operand(Address(address.base, address.offset + 4)), dest.high);
+        movl(Operand(Address(address.base, address.offset + INT64LOW_OFFSET)), dest.low);
+        int32_t highOffset = (address.offset < 0) ? -int32_t(INT64HIGH_OFFSET) : INT64HIGH_OFFSET;
+        movl(Operand(Address(address.base, address.offset + highOffset)), dest.high);
     }
     template <typename T>
     void storePtr(ImmWord imm, T address) {
@@ -660,8 +661,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movw(src, Operand(address));
     }
     void store64(Register64 src, Address address) {
-        movl(src.low, Operand(address));
-        movl(src.high, Operand(Address(address.base, address.offset + 4)));
+        movl(src.low, Operand(Address(address.base, address.offset + INT64LOW_OFFSET)));
+        movl(src.high, Operand(Address(address.base, address.offset + INT64HIGH_OFFSET)));
+    }
+    void store64(Imm64 imm, Address address) {
+        movl(imm.low(), Operand(Address(address.base, address.offset + INT64LOW_OFFSET)));
+        movl(imm.hi(), Operand(Address(address.base, address.offset + INT64HIGH_OFFSET)));
     }
 
     void setStackArg(Register reg, uint32_t arg) {
@@ -785,6 +790,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
 
     void loadConstantDouble(double d, FloatRegister dest);
     void loadConstantFloat32(float f, FloatRegister dest);
+    void loadConstantDouble(wasm::RawF64 d, FloatRegister dest);
+    void loadConstantFloat32(wasm::RawF32 f, FloatRegister dest);
+
     void loadConstantSimd128Int(const SimdConstant& v, FloatRegister dest);
     void loadConstantSimd128Float(const SimdConstant& v, FloatRegister dest);
 
@@ -827,13 +835,34 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     // Note: this function clobbers the source register.
     inline void convertUInt32ToFloat32(Register src, FloatRegister dest);
 
-    void convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest);
+    void convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp);
+    void convertInt64ToFloat32(Register64 src, FloatRegister dest);
+    static bool convertUInt64ToDoubleNeedsTemp();
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp);
+    void convertInt64ToDouble(Register64 src, FloatRegister dest);
+
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                   Label* oolRejoin, FloatRegister tempDouble);
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble);
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble);
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                     Label* oolRejoin, FloatRegister tempDouble);
 
     void incrementInt32Value(const Address& addr) {
         addl(Imm32(1), payloadOf(addr));
     }
 
     inline void ensureDouble(const ValueOperand& source, FloatRegister dest, Label* failure);
+
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        CodeOffset label = movlWithPatch(PatchedAbsoluteAddress(), dest);
+        append(wasm::GlobalAccess(label, globalDataOffset));
+    }
+    void loadWasmPinnedRegsFromTls() {
+        // x86 doesn't have any pinned registers.
+    }
 
   public:
     // Used from within an Exit frame to handle a pending exception.

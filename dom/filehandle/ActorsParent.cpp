@@ -7,7 +7,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileHandleCommon.h"
 #include "mozilla/dom/PBackgroundFileHandleParent.h"
@@ -2536,6 +2536,7 @@ WriteOp::Init(FileHandle* aFileHandle)
       ErrorResult rv;
       blobImpl->GetInternalStream(getter_AddRefs(inputStream), rv);
       if (NS_WARN_IF(rv.Failed())) {
+        rv.SuppressException();
         return false;
       }
 

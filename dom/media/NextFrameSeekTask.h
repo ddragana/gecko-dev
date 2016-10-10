@@ -27,7 +27,7 @@ public:
   NextFrameSeekTask(const void* aDecoderID,
                    AbstractThread* aThread,
                    MediaDecoderReaderWrapper* aReader,
-                   SeekJob&& aSeekJob,
+                   const SeekTarget& aTarget,
                    const MediaInfo& aInfo,
                    const media::TimeUnit& aDuration,
                    int64_t aCurrentTime,
@@ -57,11 +57,11 @@ private:
 
   void OnAudioDecoded(MediaData* aAudioSample);
 
-  void OnAudioNotDecoded(MediaDecoderReader::NotDecodedReason aReason);
+  void OnAudioNotDecoded(const MediaResult& aError);
 
   void OnVideoDecoded(MediaData* aVideoSample);
 
-  void OnVideoNotDecoded(MediaDecoderReader::NotDecodedReason aReason);
+  void OnVideoNotDecoded(const MediaResult& aError);
 
   void SetCallbacks();
 

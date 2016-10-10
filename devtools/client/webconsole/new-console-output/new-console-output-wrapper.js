@@ -8,26 +8,112 @@ const React = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
 
-const actions = require("devtools/client/webconsole/new-console-output/actions/messages");
-const { store } = require("devtools/client/webconsole/new-console-output/store");
+const actions = require("devtools/client/webconsole/new-console-output/actions/index");
+const { configureStore } = require("devtools/client/webconsole/new-console-output/store");
 
 const ConsoleOutput = React.createFactory(require("devtools/client/webconsole/new-console-output/components/console-output"));
+const FilterBar = React.createFactory(require("devtools/client/webconsole/new-console-output/components/filter-bar"));
 
-function NewConsoleOutputWrapper(parentNode, jsterm) {
-  let childComponent = ConsoleOutput({ jsterm });
-  let provider = React.createElement(
-    Provider, { store: store }, childComponent);
-  this.body = ReactDOM.render(provider, parentNode);
+const store = configureStore();
+let queuedActions = [];
+let throttledDispatchTimeout = false;
+
+function NewConsoleOutputWrapper(parentNode, jsterm, toolbox, owner) {
+  this.parentNode = parentNode;
+  this.jsterm = jsterm;
+  this.toolbox = toolbox;
+  this.owner = owner;
+
+  this.init = this.init.bind(this);
 }
 
 NewConsoleOutputWrapper.prototype = {
-  dispatchMessageAdd: (message) => {
-    store.dispatch(actions.messageAdd(message));
+  init: function () {
+    const attachRefToHud = (id, node) => {
+      this.jsterm.hud[id] = node;
+    };
+
+    let childComponent = ConsoleOutput({
+      serviceContainer: {
+        attachRefToHud,
+        emitNewMessage: (node, messageId) => {
+          this.jsterm.hud.emit("new-messages", new Set([{
+            node,
+            messageId,
+          }]));
+        },
+        hudProxyClient: this.jsterm.hud.proxy.client,
+        onViewSourceInDebugger: frame => this.toolbox.viewSourceInDebugger.call(
+          this.toolbox,
+          frame.url,
+          frame.line
+        ),
+        openNetworkPanel: (requestId) => {
+          return this.toolbox.selectTool("netmonitor").then(panel => {
+            return panel.panelWin.NetMonitorController.inspectRequest(requestId);
+          });
+        },
+        sourceMapService: this.toolbox ? this.toolbox._sourceMapService : null,
+      }
+    });
+    let filterBar = FilterBar({
+      serviceContainer: {
+        attachRefToHud
+      }
+    });
+    let provider = React.createElement(
+      Provider,
+      { store },
+      React.DOM.div(
+        {className: "webconsole-output-wrapper"},
+        filterBar,
+        childComponent
+    ));
+
+    this.body = ReactDOM.render(provider, this.parentNode);
   },
-  dispatchMessagesClear: () => {
+  dispatchMessageAdd: function(message, waitForResponse) {
+      let action = actions.messageAdd(message);
+      let messageId = action.message.get("id");
+      batchedMessageAdd(action);
+
+      // Wait for the message to render to resolve with the DOM node.
+      // This is just for backwards compatibility with old tests, and should
+      // be removed once it's not needed anymore.
+      if (waitForResponse) {
+        return new Promise(resolve => {
+          let jsterm = this.jsterm;
+          jsterm.hud.on("new-messages", function onThisMessage(e, messages) {
+            for (let m of messages) {
+              if (m.messageId == messageId) {
+                resolve(m.node);
+                jsterm.hud.off("new-messages", onThisMessage);
+                return;
+              }
+            }
+          });
+        });
+      }
+  },
+  dispatchMessagesAdd: function(messages) {
+    const batchedActions = messages.map(message => actions.messageAdd(message));
+    store.dispatch(actions.batchActions(batchedActions));
+  },
+  dispatchMessagesClear: function() {
     store.dispatch(actions.messagesClear());
-  }
+  },
 };
+
+function batchedMessageAdd(action) {
+  queuedActions.push(action);
+  if (!throttledDispatchTimeout) {
+    throttledDispatchTimeout = setTimeout(() => {
+      store.dispatch(actions.batchActions(queuedActions));
+      queuedActions = [];
+      throttledDispatchTimeout = null;
+    }, 50);
+  }
+}
 
 // Exports from this module
 module.exports = NewConsoleOutputWrapper;

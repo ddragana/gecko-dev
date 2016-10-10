@@ -165,7 +165,6 @@ int16_t gBadPortList[] = {
 static const char kProfileChangeNetTeardownTopic[] = "profile-change-net-teardown";
 static const char kProfileChangeNetRestoreTopic[] = "profile-change-net-restore";
 static const char kProfileDoChange[] = "profile-do-change";
-static const char kNetworkActiveChanged[] = "network-active-changed";
 
 // Necko buffer defaults
 uint32_t   nsIOService::gDefaultSegmentSize = 4096;
@@ -249,7 +248,6 @@ nsIOService::Init()
         observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, true);
         observerService->AddObserver(this, NS_NETWORK_LINK_TOPIC, true);
         observerService->AddObserver(this, NS_WIDGET_WAKE_OBSERVER_TOPIC, true);
-        observerService->AddObserver(this, kNetworkActiveChanged, true);
     }
     else
         NS_WARNING("failed to get observer service");
@@ -453,6 +451,8 @@ nsIOService::AsyncOnChannelRedirect(nsIChannel* oldChan, nsIChannel* newChan,
 nsresult
 nsIOService::CacheProtocolHandler(const char *scheme, nsIProtocolHandler *handler)
 {
+    MOZ_ASSERT(NS_IsMainThread());
+
     for (unsigned int i=0; i<NS_N(gScheme); i++)
     {
         if (!nsCRT::strcasecmp(scheme, gScheme[i]))
@@ -480,6 +480,8 @@ nsIOService::CacheProtocolHandler(const char *scheme, nsIProtocolHandler *handle
 nsresult
 nsIOService::GetCachedProtocolHandler(const char *scheme, nsIProtocolHandler **result, uint32_t start, uint32_t end)
 {
+    MOZ_ASSERT(NS_IsMainThread());
+
     uint32_t len = end - start - 1;
     for (unsigned int i=0; i<NS_N(gScheme); i++)
     {
@@ -498,6 +500,24 @@ nsIOService::GetCachedProtocolHandler(const char *scheme, nsIProtocolHandler **r
     return NS_ERROR_FAILURE;
 }
  
+static bool
+UsesExternalProtocolHandler(const char* aScheme)
+{
+    if (NS_LITERAL_CSTRING("file").Equals(aScheme) ||
+        NS_LITERAL_CSTRING("chrome").Equals(aScheme) ||
+        NS_LITERAL_CSTRING("resource").Equals(aScheme)) {
+        // Don't allow file:, chrome: or resource: URIs to be handled with
+        // nsExternalProtocolHandler, since internally we rely on being able to
+        // use and read from these URIs.
+        return false;
+    }
+
+    nsAutoCString pref("network.protocol-handler.external.");
+    pref += aScheme;
+
+    return Preferences::GetBool(pref.get(), false);
+}
+
 NS_IMETHODIMP
 nsIOService::GetProtocolHandler(const char* scheme, nsIProtocolHandler* *result)
 {
@@ -512,19 +532,7 @@ nsIOService::GetProtocolHandler(const char* scheme, nsIProtocolHandler* *result)
     if (NS_SUCCEEDED(rv))
         return rv;
 
-    bool externalProtocol = false;
-    nsCOMPtr<nsIPrefBranch> prefBranch;
-    GetPrefBranch(getter_AddRefs(prefBranch));
-    if (prefBranch) {
-        nsAutoCString externalProtocolPref("network.protocol-handler.external.");
-        externalProtocolPref += scheme;
-        rv = prefBranch->GetBoolPref(externalProtocolPref.get(), &externalProtocol);
-        if (NS_FAILED(rv)) {
-            externalProtocol = false;
-        }
-    }
-
-    if (!externalProtocol) {
+    if (!UsesExternalProtocolHandler(scheme)) {
         nsAutoCString contractID(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX);
         contractID += scheme;
         ToLowerCase(contractID);
@@ -624,6 +632,12 @@ nsIOService::NewURI(const nsACString &aSpec, const char *aCharset, nsIURI *aBase
         if (!aBaseURI)
             return NS_ERROR_MALFORMED_URI;
 
+        if (!aSpec.IsEmpty() && aSpec[0] == '#') {
+            // Looks like a reference instead of a fully-specified URI.
+            // --> initialize |uri| as a clone of |aBaseURI|, with ref appended.
+            return aBaseURI->CloneWithNewRef(aSpec, result);
+        }
+
         rv = aBaseURI->GetScheme(scheme);
         if (NS_FAILED(rv)) return rv;
     }
@@ -690,8 +704,8 @@ nsIOService::NewChannelFromURI(nsIURI *aURI, nsIChannel **result)
   NS_ASSERTION(false, "Deprecated, use NewChannelFromURI2 providing loadInfo arguments!");
 
   const char16_t* params[] = {
-    MOZ_UTF16("nsIOService::NewChannelFromURI()"),
-    MOZ_UTF16("nsIOService::NewChannelFromURI2()")
+    u"nsIOService::NewChannelFromURI()",
+    u"nsIOService::NewChannelFromURI2()"
   };
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   NS_LITERAL_CSTRING("Security by Default"),
@@ -890,8 +904,8 @@ nsIOService::NewChannelFromURIWithProxyFlags(nsIURI *aURI,
   NS_ASSERTION(false, "Deprecated, use NewChannelFromURIWithProxyFlags2 providing loadInfo arguments!");
 
   const char16_t* params[] = {
-    MOZ_UTF16("nsIOService::NewChannelFromURIWithProxyFlags()"),
-    MOZ_UTF16("nsIOService::NewChannelFromURIWithProxyFlags2()")
+    u"nsIOService::NewChannelFromURIWithProxyFlags()",
+    u"nsIOService::NewChannelFromURIWithProxyFlags2()"
   };
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   NS_LITERAL_CSTRING("Security by Default"),
@@ -952,8 +966,8 @@ nsIOService::NewChannel(const nsACString &aSpec, const char *aCharset, nsIURI *a
   NS_ASSERTION(false, "Deprecated, use NewChannel2 providing loadInfo arguments!");
 
   const char16_t* params[] = {
-    MOZ_UTF16("nsIOService::NewChannel()"),
-    MOZ_UTF16("nsIOService::NewChannel2()")
+    u"nsIOService::NewChannel()",
+    u"nsIOService::NewChannel2()"
   };
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   NS_LITERAL_CSTRING("Security by Default"),
@@ -1033,8 +1047,8 @@ nsIOService::SetOffline(bool offline)
         if (observerService) {
             (void)observerService->NotifyObservers(nullptr,
                 NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC, offline ? 
-                MOZ_UTF16("true") :
-                MOZ_UTF16("false"));
+                u"true" :
+                u"false");
         }
     }
 
@@ -1081,7 +1095,7 @@ nsIOService::SetOffline(bool offline)
             if (observerService && mConnectivity) {
                 observerService->NotifyObservers(subject,
                                                  NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
-                                                 MOZ_UTF16(NS_IOSERVICE_ONLINE));
+                                                 (u"" NS_IOSERVICE_ONLINE));
             }
         }
     }
@@ -1095,7 +1109,7 @@ nsIOService::SetOffline(bool offline)
             NS_ASSERTION(NS_SUCCEEDED(rv), "DNS service shutdown failed");
         }
         if (mSocketTransportService) {
-            DebugOnly<nsresult> rv = mSocketTransportService->Shutdown();
+            DebugOnly<nsresult> rv = mSocketTransportService->Shutdown(mShutdown);
             NS_ASSERTION(NS_SUCCEEDED(rv), "socket transport service shutdown failed");
         }
     }
@@ -1146,8 +1160,8 @@ nsIOService::SetConnectivityInternal(bool aConnectivity)
     if (XRE_IsParentProcess()) {
         observerService->NotifyObservers(nullptr,
             NS_IPC_IOSERVICE_SET_CONNECTIVITY_TOPIC, aConnectivity ?
-            MOZ_UTF16("true") :
-            MOZ_UTF16("false"));
+            u"true" :
+            u"false");
     }
 
     if (mOffline) {
@@ -1161,11 +1175,11 @@ nsIOService::SetConnectivityInternal(bool aConnectivity)
         observerService->NotifyObservers(
             static_cast<nsIIOService *>(this),
             NS_IOSERVICE_OFFLINE_STATUS_TOPIC,
-            MOZ_UTF16(NS_IOSERVICE_ONLINE));
+            (u"" NS_IOSERVICE_ONLINE));
     } else {
         // If we were previously online and lost connectivity
         // send the OFFLINE notification
-        const nsLiteralString offlineString(MOZ_UTF16(NS_IOSERVICE_OFFLINE));
+        const nsLiteralString offlineString(u"" NS_IOSERVICE_OFFLINE);
         observerService->NotifyObservers(static_cast<nsIIOService *>(this),
                                          NS_IOSERVICE_GOING_OFFLINE_TOPIC,
                                          offlineString.get());
@@ -1260,7 +1274,8 @@ nsIOService::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
              */
             if (size > 0 && size < 1024*1024)
                 gDefaultSegmentSize = size;
-        NS_WARN_IF_FALSE( (!(size & (size - 1))) , "network segment size is not a power of 2!");
+        NS_WARNING_ASSERTION(!(size & (size - 1)),
+                             "network segment size is not a power of 2!");
     }
 
     if (!pref || strcmp(pref, NETWORK_NOTIFY_CHANGED_PREF) == 0) {
@@ -1371,15 +1386,14 @@ IsWifiActive()
 #endif
 }
 
-class
-nsWakeupNotifier : public Runnable
+class nsWakeupNotifier : public Runnable
 {
 public:
     explicit nsWakeupNotifier(nsIIOServiceInternal *ioService)
         :mIOService(ioService)
     { }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         return mIOService->NotifyWakeup();
     }
@@ -1400,7 +1414,7 @@ nsIOService::NotifyWakeup()
         (void)observerService->
             NotifyObservers(nullptr,
                             NS_NETWORK_LINK_TOPIC,
-                            MOZ_UTF16(NS_NETWORK_LINK_DATA_CHANGED));
+                            (u"" NS_NETWORK_LINK_DATA_CHANGED));
     }
 
     RecheckCaptivePortal();
@@ -1482,38 +1496,6 @@ nsIOService::Observe(nsISupports *subject,
         // https://bugzilla.mozilla.org/show_bug.cgi?id=1152048#c19
         nsCOMPtr<nsIRunnable> wakeupNotifier = new nsWakeupNotifier(this);
         NS_DispatchToMainThread(wakeupNotifier);
-    } else if (!strcmp(topic, kNetworkActiveChanged)) {
-#ifdef MOZ_WIDGET_GONK
-        if (IsNeckoChild()) {
-          return NS_OK;
-        }
-        nsCOMPtr<nsINetworkInfo> interface = do_QueryInterface(subject);
-        if (!interface) {
-            return NS_ERROR_FAILURE;
-        }
-        int32_t state;
-        if (NS_FAILED(interface->GetState(&state))) {
-            return NS_ERROR_FAILURE;
-        }
-
-        bool wifiActive = IsWifiActive();
-        int32_t newWifiState = wifiActive ?
-            nsINetworkInfo::NETWORK_TYPE_WIFI :
-            nsINetworkInfo::NETWORK_TYPE_MOBILE;
-        if (mPreviousWifiState != newWifiState) {
-            // Notify wifi-only apps of their new status
-            int32_t status = wifiActive ?
-                nsIAppOfflineInfo::ONLINE : nsIAppOfflineInfo::OFFLINE;
-
-            for (auto it = mAppsOfflineStatus.Iter(); !it.Done(); it.Next()) {
-                if (it.UserData() == nsIAppOfflineInfo::WIFI_ONLY) {
-                    NotifyAppOfflineStatus(it.Key(), status);
-                }
-            }
-        }
-
-        mPreviousWifiState = newWifiState;
-#endif
     }
 
     return NS_OK;
@@ -1910,7 +1892,7 @@ nsIOService::NotifyAppOfflineStatus(uint32_t appId, int32_t state)
         observerService->NotifyObservers(
             info,
             NS_IOSERVICE_APP_OFFLINE_STATUS_TOPIC,
-            MOZ_UTF16("all data in nsIAppOfflineInfo subject argument"));
+            u"all data in nsIAppOfflineInfo subject argument");
     }
 }
 
@@ -1925,7 +1907,7 @@ public:
     {
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         gIOService->SetAppOfflineInternal(mAppId, mState);

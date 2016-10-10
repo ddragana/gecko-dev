@@ -11,27 +11,26 @@ const Services = require("Services");
 const { TargetFactory } = require("devtools/client/framework/target");
 const Telemetry = require("devtools/client/shared/telemetry");
 const {ViewHelpers} = require("devtools/client/shared/widgets/view-helpers");
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/locale/toolbox.properties");
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
-loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
-loader.lazyImporter(this, "EventEmitter", "resource://devtools/shared/event-emitter.js");
+const { PluralForm } = require("devtools/shared/plural-form");
 
 loader.lazyGetter(this, "prefBranch", function () {
   return Services.prefs.getBranch(null)
                     .QueryInterface(Ci.nsIPrefBranch2);
 });
-loader.lazyGetter(this, "toolboxStrings", function () {
-  return Services.strings.createBundle("chrome://devtools/locale/toolbox.properties");
-});
 
 loader.lazyRequireGetter(this, "gcliInit", "devtools/shared/gcli/commands/index");
 loader.lazyRequireGetter(this, "util", "gcli/util/util");
-loader.lazyRequireGetter(this, "ConsoleServiceListener", "devtools/shared/webconsole/utils", true);
+loader.lazyRequireGetter(this, "ConsoleServiceListener", "devtools/server/actors/utils/webconsole-utils", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
-loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants", true);
+loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants");
+loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
 
 /**
  * A collection of utilities to help working with commands
@@ -106,9 +105,8 @@ var CommandUtils = {
           button.setAttribute("title", command.description);
         }
 
-        button.addEventListener("click", () => {
-          requisition.updateExec(typed);
-        }, false);
+        button.addEventListener("click",
+          requisition.updateExec.bind(requisition, typed));
 
         button.addEventListener("keypress", (event) => {
           if (ViewHelpers.isSpaceOrReturn(event)) {
@@ -118,6 +116,7 @@ var CommandUtils = {
         }, false);
 
         // Allow the command button to be toggleable
+        let onChange = null;
         if (command.state) {
           button.setAttribute("autocheck", false);
 
@@ -127,7 +126,7 @@ var CommandUtils = {
            * applies to. For legacy reasons the event object can also contain
            * a tab property.
            */
-          let onChange = (eventName, ev) => {
+          onChange = (eventName, ev) => {
             if (ev.target == target || ev.tab == target.tab) {
 
               let updateChecked = (checked) => {
@@ -156,12 +155,14 @@ var CommandUtils = {
 
           command.state.onChange(target, onChange);
           onChange("", { target: target });
-          document.defaultView.addEventListener("unload", () => {
-            if (command.state.offChange) {
-              command.state.offChange(target, onChange);
-            }
-          }, false);
-        }
+        };
+        document.defaultView.addEventListener("unload", function (event) {
+          if (onChange && command.state.offChange) {
+            command.state.offChange(target, onChange);
+          }
+          button.remove();
+          button = null;
+        }, { once: true });
 
         requisition.clear();
 
@@ -223,15 +224,10 @@ exports.CommandUtils = CommandUtils;
  * to using panels.
  */
 loader.lazyGetter(this, "isLinux", function () {
-  return OS == "Linux";
+  return Services.appinfo.OS == "Linux";
 });
 loader.lazyGetter(this, "isMac", function () {
-  return OS == "Darwin";
-});
-
-loader.lazyGetter(this, "OS", function () {
-  let os = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-  return os;
+  return Services.appinfo.OS == "Darwin";
 });
 
 /**
@@ -316,7 +312,7 @@ DeveloperToolbar.prototype.createToolbar = function () {
   close.setAttribute("id", "developer-toolbar-closebutton");
   close.setAttribute("class", "close-icon");
   close.setAttribute("oncommand", "DeveloperToolbar.hide();");
-  let closeTooltip = toolboxStrings.GetStringFromName("toolbar.closeButton.tooltip");
+  let closeTooltip = L10N.getStr("toolbar.closeButton.tooltip");
   close.setAttribute("tooltiptext", closeTooltip);
 
   let stack = this._doc.createElement("stack");
@@ -334,8 +330,10 @@ DeveloperToolbar.prototype.createToolbar = function () {
   let toolboxBtn = this._doc.createElement("toolbarbutton");
   toolboxBtn.setAttribute("id", "developer-toolbar-toolbox-button");
   toolboxBtn.setAttribute("class", "developer-toolbar-button");
-  let toolboxTooltip = toolboxStrings.GetStringFromName("toolbar.toolsButton.tooltip");
+  let toolboxTooltip = L10N.getStr("toolbar.toolsButton.tooltip");
   toolboxBtn.setAttribute("tooltiptext", toolboxTooltip);
+  let toolboxOpen = gDevToolsBrowser.hasToolboxOpened(this._chromeWindow);
+  toolboxBtn.setAttribute("checked", toolboxOpen);
   toolboxBtn.addEventListener("command", function (event) {
     let window = event.target.ownerDocument.defaultView;
     gDevToolsBrowser.toggleToolboxCommand(window.gBrowser);
@@ -718,6 +716,8 @@ DeveloperToolbar.prototype.handleEvent = function (ev) {
       });
 
       if (ev.type == "TabSelect") {
+        let toolboxOpen = gDevToolsBrowser.hasToolboxOpened(this._chromeWindow);
+        this._errorCounterButton.setAttribute("checked", toolboxOpen);
         this._initErrorsCount(ev.target);
       }
     }
@@ -810,17 +810,14 @@ DeveloperToolbar.prototype._updateErrorsCount = function (changedTabId) {
   let warnings = this._warningsCount[tabId];
   let btn = this._errorCounterButton;
   if (errors) {
-    let errorsText = toolboxStrings
-                     .GetStringFromName("toolboxToggleButton.errors");
+    let errorsText = L10N.getStr("toolboxToggleButton.errors");
     errorsText = PluralForm.get(errors, errorsText).replace("#1", errors);
 
-    let warningsText = toolboxStrings
-                       .GetStringFromName("toolboxToggleButton.warnings");
+    let warningsText = L10N.getStr("toolboxToggleButton.warnings");
     warningsText = PluralForm.get(warnings, warningsText).replace("#1", warnings);
 
-    let tooltiptext = toolboxStrings
-                      .formatStringFromName("toolboxToggleButton.tooltip",
-                                            [errorsText, warningsText], 2);
+    let tooltiptext = L10N.getFormatStr("toolboxToggleButton.tooltip",
+                                            errorsText, warningsText);
 
     btn.setAttribute("error-count", errors);
     btn.setAttribute("tooltiptext", tooltiptext);
@@ -1010,7 +1007,7 @@ OutputPanel.prototype._resize = function () {
   // We'd like to put this in CSS but we can't:
   //   body { width: calc(min(-5px, max-content)); }
   //   #_panel { max-width: -5px; }
-  switch (OS) {
+  switch (Services.appinfo.OS) {
     case "Linux":
       maxWidth -= 5;
       break;

@@ -326,6 +326,7 @@ class RegExpCompartment
      * The shape of RegExp.prototype object that satisfies following:
      *   * RegExp.prototype.global getter is not modified
      *   * RegExp.prototype.sticky getter is not modified
+     *   * RegExp.prototype.unicode getter is not modified
      *   * RegExp.prototype.exec is an own data property
      *   * RegExp.prototype[@@match] is an own data property
      *   * RegExp.prototype[@@search] is an own data property
@@ -484,6 +485,9 @@ class RegExpObject : public NativeObject
 
     void initIgnoringLastIndex(HandleAtom source, RegExpFlag flags);
 
+    // NOTE: This method is *only* safe to call on RegExps that haven't been
+    //       exposed to script, because it requires that the "lastIndex"
+    //       property be writable.
     void initAndZeroLastIndex(HandleAtom source, RegExpFlag flags, ExclusiveContext* cx);
 
   private:

@@ -32,13 +32,30 @@ class JsepTrackTest : public ::testing::Test
     JsepTrackTest() {}
 
     std::vector<JsepCodecDescription*>
-    MakeCodecs() const
+    MakeCodecs(bool addFecCodecs = false,
+               bool preferRed = false,
+               bool addDtmfCodec = false) const
     {
       std::vector<JsepCodecDescription*> results;
       results.push_back(
           new JsepAudioCodecDescription("1", "opus", 48000, 2, 960, 40000));
       results.push_back(
           new JsepAudioCodecDescription("9", "G722", 8000, 1, 320, 64000));
+      if (addDtmfCodec) {
+        results.push_back(
+            new JsepAudioCodecDescription("101", "telephone-event",
+                                          8000, 1, 0, 0));
+      }
+
+      JsepVideoCodecDescription* red = nullptr;
+      if (addFecCodecs && preferRed) {
+        red = new JsepVideoCodecDescription(
+            "122",
+            "red",
+            90000
+            );
+        results.push_back(red);
+      }
 
       JsepVideoCodecDescription* vp8 =
           new JsepVideoCodecDescription("120", "VP8", 90000);
@@ -52,12 +69,35 @@ class JsepTrackTest : public ::testing::Test
       h264->mProfileLevelId = 0x42E00D;
       results.push_back(h264);
 
+      if (addFecCodecs) {
+        if (!preferRed) {
+          red = new JsepVideoCodecDescription(
+              "122",
+              "red",
+              90000
+              );
+          results.push_back(red);
+        }
+        JsepVideoCodecDescription* ulpfec = new JsepVideoCodecDescription(
+            "123",
+            "ulpfec",
+            90000
+            );
+        results.push_back(ulpfec);
+      }
+
       results.push_back(
           new JsepApplicationCodecDescription(
             "5000",
             "webrtc-datachannel",
             16
             ));
+
+      // if we're doing something with red, it needs
+      // to update the redundant encodings list
+      if (red) {
+        red->UpdateRedundantEncodings(results);
+      }
 
       return results;
     }
@@ -210,20 +250,44 @@ class JsepTrackTest : public ::testing::Test
       CheckEncodingCount(expected, mSendAns, mRecvOff);
     }
 
-    const JsepVideoCodecDescription*
-    GetVideoCodec(const JsepTrack& track) const
+    const JsepCodecDescription*
+    GetCodec(const JsepTrack& track,
+             SdpMediaSection::MediaType type,
+             size_t expectedSize,
+             size_t codecIndex) const
     {
       if (!track.GetNegotiatedDetails() ||
-          track.GetNegotiatedDetails()->GetEncodingCount() != 1U) {
+          track.GetNegotiatedDetails()->GetEncodingCount() != 1U ||
+          track.GetMediaType() != type) {
         return nullptr;
       }
       const std::vector<JsepCodecDescription*>& codecs =
         track.GetNegotiatedDetails()->GetEncoding(0).GetCodecs();
-      if (codecs.size() != 1U ||
-          codecs[0]->mType != SdpMediaSection::kVideo) {
+      // it should not be possible for codecs to have a different type
+      // than the track, but we'll check the codec here just in case.
+      if (codecs.size() != expectedSize || codecIndex >= expectedSize ||
+          codecs[codecIndex]->mType != type) {
         return nullptr;
       }
-      return static_cast<const JsepVideoCodecDescription*>(codecs[0]);
+      return codecs[codecIndex];
+    }
+
+    const JsepVideoCodecDescription*
+    GetVideoCodec(const JsepTrack& track,
+                  size_t expectedSize = 1,
+                  size_t codecIndex = 0) const
+    {
+      return static_cast<const JsepVideoCodecDescription*>
+        (GetCodec(track, SdpMediaSection::kVideo, expectedSize, codecIndex));
+    }
+
+    const JsepAudioCodecDescription*
+    GetAudioCodec(const JsepTrack& track,
+                  size_t expectedSize = 1,
+                  size_t codecIndex = 0) const
+    {
+      return static_cast<const JsepAudioCodecDescription*>
+        (GetCodec(track, SdpMediaSection::kAudio, expectedSize, codecIndex));
     }
 
     void CheckOtherFbsSize(const JsepTrack& track, size_t expected) const
@@ -364,6 +428,533 @@ TEST_F(JsepTrackTest, VideoNegotiation)
   OfferAnswer();
   CheckOffEncodingCount(1);
   CheckAnsEncodingCount(1);
+}
+
+class CheckForCodecType
+{
+public:
+  explicit CheckForCodecType(SdpMediaSection::MediaType type,
+                             bool *result) :
+    mResult(result),
+    mType(type) {}
+
+  void operator()(JsepCodecDescription* codec) {
+    if (codec->mType == mType) {
+      *mResult = true;
+    }
+  }
+
+private:
+  bool *mResult;
+  SdpMediaSection::MediaType mType;
+};
+
+TEST_F(JsepTrackTest, CheckForMismatchedAudioCodecAndVideoTrack)
+{
+  PtrVector<JsepCodecDescription> offerCodecs;
+
+  // make codecs including telephone-event (an audio codec)
+  offerCodecs.values = MakeCodecs(false, false, true);
+  RefPtr<JsepTrack> videoTrack = new JsepTrack(SdpMediaSection::kVideo,
+                                               "stream_id",
+                                               "track_id",
+                                               sdp::kSend);
+  // populate codecs and then make sure we don't have any audio codecs
+  // in the video track
+  videoTrack->PopulateCodecs(offerCodecs.values);
+
+  bool found = false;
+  videoTrack->ForEachCodec(CheckForCodecType(SdpMediaSection::kAudio, &found));
+  ASSERT_FALSE(found);
+
+  found = false;
+  videoTrack->ForEachCodec(CheckForCodecType(SdpMediaSection::kVideo, &found));
+  ASSERT_TRUE(found); // for sanity, make sure we did find video codecs
+}
+
+TEST_F(JsepTrackTest, CheckVideoTrackWithHackedDtmfSdp)
+{
+  Init(SdpMediaSection::kVideo);
+  CreateOffer();
+  // make sure we don't find sdp containing telephone-event in video track
+  ASSERT_EQ(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  // force audio codec telephone-event into video m= section of offer
+  GetOffer().AddCodec("101", "telephone-event", 8000, 1);
+  // make sure we _do_ find sdp containing telephone-event in video track
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  CreateAnswer();
+  // make sure we don't find sdp containing telephone-event in video track
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  // force audio codec telephone-event into video m= section of answer
+  GetAnswer().AddCodec("101", "telephone-event", 8000, 1);
+  // make sure we _do_ find sdp containing telephone-event in video track
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  Negotiate();
+  SanityCheck();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_TRUE(mSendOff.get());
+  ASSERT_TRUE(mRecvOff.get());
+  ASSERT_TRUE(mSendAns.get());
+  ASSERT_TRUE(mRecvAns.get());
+
+  // make sure we still don't find any audio codecs in the video track after
+  // hacking the sdp
+  bool found = false;
+  mSendOff->ForEachCodec(CheckForCodecType(SdpMediaSection::kAudio, &found));
+  ASSERT_FALSE(found);
+  mRecvOff->ForEachCodec(CheckForCodecType(SdpMediaSection::kAudio, &found));
+  ASSERT_FALSE(found);
+  mSendAns->ForEachCodec(CheckForCodecType(SdpMediaSection::kAudio, &found));
+  ASSERT_FALSE(found);
+  mRecvAns->ForEachCodec(CheckForCodecType(SdpMediaSection::kAudio, &found));
+  ASSERT_FALSE(found);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationOffererDtmf)
+{
+  mOffCodecs.values = MakeCodecs(false, false, true);
+  mAnsCodecs.values = MakeCodecs(false, false, false);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:101"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns)));
+  ASSERT_EQ("1", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationAnswererDtmf)
+{
+  mOffCodecs.values = MakeCodecs(false, false, false);
+  mAnsCodecs.values = MakeCodecs(false, false, true);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_EQ(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_EQ(mOffer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:101"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns)));
+  ASSERT_EQ("1", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationOffererAnswererDtmf)
+{
+  mOffCodecs.values = MakeCodecs(false, false, true);
+  mAnsCodecs.values = MakeCodecs(false, false, true);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationDtmfOffererNoFmtpAnswererFmtp)
+{
+  mOffCodecs.values = MakeCodecs(false, false, true);
+  mAnsCodecs.values = MakeCodecs(false, false, true);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+
+  CreateOffer();
+  GetOffer().RemoveFmtp("101");
+
+  CreateAnswer();
+
+  Negotiate();
+  SanityCheck();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_EQ(mOffer->ToString().find("a=fmtp:101"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationDtmfOffererFmtpAnswererNoFmtp)
+{
+  mOffCodecs.values = MakeCodecs(false, false, true);
+  mAnsCodecs.values = MakeCodecs(false, false, true);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+
+  CreateOffer();
+
+  CreateAnswer();
+  GetAnswer().RemoveFmtp("101");
+
+  Negotiate();
+  SanityCheck();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:101 0-15"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:101"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, AudioNegotiationDtmfOffererNoFmtpAnswererNoFmtp)
+{
+  mOffCodecs.values = MakeCodecs(false, false, true);
+  mAnsCodecs.values = MakeCodecs(false, false, true);
+
+  InitTracks(SdpMediaSection::kAudio);
+  InitSdp(SdpMediaSection::kAudio);
+
+  CreateOffer();
+  GetOffer().RemoveFmtp("101");
+
+  CreateAnswer();
+  GetAnswer().RemoveFmtp("101");
+
+  Negotiate();
+  SanityCheck();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:101 telephone-event"),
+            std::string::npos);
+
+  ASSERT_EQ(mOffer->ToString().find("a=fmtp:101"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:101"), std::string::npos);
+
+  const JsepAudioCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2)));
+  ASSERT_EQ("1", track->mDefaultPt);
+
+  ASSERT_TRUE((track = GetAudioCodec(*mSendOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvOff, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mSendAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+  ASSERT_TRUE((track = GetAudioCodec(*mRecvAns, 2, 1)));
+  ASSERT_EQ("101", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, VideoNegotationOffererFEC)
+{
+  mOffCodecs.values = MakeCodecs(true);
+  mAnsCodecs.values = MakeCodecs(false);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:122"), std::string::npos);
+
+  const JsepVideoCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetVideoCodec(*mSendOff)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvOff)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mSendAns)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvAns)));
+  ASSERT_EQ("120", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, VideoNegotationAnswererFEC)
+{
+  mOffCodecs.values = MakeCodecs(false);
+  mAnsCodecs.values = MakeCodecs(true);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_EQ(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_EQ(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_EQ(mOffer->ToString().find("a=fmtp:122"), std::string::npos);
+  ASSERT_EQ(mAnswer->ToString().find("a=fmtp:122"), std::string::npos);
+
+  const JsepVideoCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetVideoCodec(*mSendOff)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvOff)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mSendAns)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvAns)));
+  ASSERT_EQ("120", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, VideoNegotationOffererAnswererFEC)
+{
+  mOffCodecs.values = MakeCodecs(true);
+  mAnsCodecs.values = MakeCodecs(true);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+
+  const JsepVideoCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetVideoCodec(*mSendOff, 4)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvOff, 4)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mSendAns, 4)));
+  ASSERT_EQ("120", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvAns, 4)));
+  ASSERT_EQ("120", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, VideoNegotationOffererAnswererFECPreferred)
+{
+  mOffCodecs.values = MakeCodecs(true, true);
+  mAnsCodecs.values = MakeCodecs(true);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+
+  const JsepVideoCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetVideoCodec(*mSendOff, 4)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvOff, 4)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mSendAns, 4)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvAns, 4)));
+  ASSERT_EQ("122", track->mDefaultPt);
+}
+
+// Make sure we only put the right things in the fmtp:122 120/.... line
+TEST_F(JsepTrackTest, VideoNegotationOffererAnswererFECMismatch)
+{
+  mOffCodecs.values = MakeCodecs(true, true);
+  mAnsCodecs.values = MakeCodecs(true);
+  // remove h264 from answer codecs
+  ASSERT_EQ("H264", mAnsCodecs.values[3]->mName);
+  mAnsCodecs.values.erase(mAnsCodecs.values.begin()+3);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:122 120/126/123"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:122 120/123"), std::string::npos);
+
+  const JsepVideoCodecDescription* track = nullptr;
+  ASSERT_TRUE((track = GetVideoCodec(*mSendOff, 3)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvOff, 3)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mSendAns, 3)));
+  ASSERT_EQ("122", track->mDefaultPt);
+  ASSERT_TRUE((track = GetVideoCodec(*mRecvAns, 3)));
+  ASSERT_EQ("122", track->mDefaultPt);
+}
+
+TEST_F(JsepTrackTest, VideoNegotationOffererAnswererFECZeroVP9Codec)
+{
+  mOffCodecs.values = MakeCodecs(true);
+  JsepVideoCodecDescription* vp9 =
+    new JsepVideoCodecDescription("0", "VP9", 90000);
+  vp9->mConstraints.maxFs = 12288;
+  vp9->mConstraints.maxFps = 60;
+  mOffCodecs.values.push_back(vp9);
+
+  ASSERT_EQ(8U, mOffCodecs.values.size());
+  JsepVideoCodecDescription* red =
+      static_cast<JsepVideoCodecDescription*>(mOffCodecs.values[4]);
+  ASSERT_EQ("red", red->mName);
+  // rebuild the redundant encodings with our newly added "wacky" VP9
+  red->mRedundantEncodings.clear();
+  red->UpdateRedundantEncodings(mOffCodecs.values);
+
+  mAnsCodecs.values = MakeCodecs(true);
+
+  InitTracks(SdpMediaSection::kVideo);
+  InitSdp(SdpMediaSection::kVideo);
+  OfferAnswer();
+
+  CheckOffEncodingCount(1);
+  CheckAnsEncodingCount(1);
+
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mOffer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:122 red"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=rtpmap:123 ulpfec"), std::string::npos);
+
+  ASSERT_NE(mOffer->ToString().find("a=fmtp:122 120/126/123/0"), std::string::npos);
+  ASSERT_NE(mAnswer->ToString().find("a=fmtp:122 120/126/123\r\n"), std::string::npos);
 }
 
 TEST_F(JsepTrackTest, VideoNegotiationOfferRemb)

@@ -46,7 +46,10 @@
 
         <!-- This activity handles all incoming Intents and dispatches them to other activities. -->
         <activity android:name="org.mozilla.gecko.LauncherActivity"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:relinquishTaskIdentity="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true" />
 
         <!-- Fennec is shipped as the Android package named
              org.mozilla.{fennec,firefox,firefox_beta}.  The internal Java
@@ -241,11 +244,13 @@
         </receiver>
 
         <receiver
-            android:name="org.mozilla.gecko.NotificationReceiver"
+            android:name="org.mozilla.gecko.notifications.NotificationReceiver"
             android:exported="false">
             <!-- Notification API V2 -->
             <intent-filter>
                 <action android:name="@ANDROID_PACKAGE_NAME@.helperBroadcastAction" />
+                <action android:name="@ANDROID_PACKAGE_NAME@.NOTIFICATION_CLICK" />
+                <action android:name="@ANDROID_PACKAGE_NAME@.NOTIFICATION_CLOSE" />
                 <data android:scheme="moz-notification" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
@@ -277,6 +282,10 @@
 
         <provider android:name="org.mozilla.gecko.db.BrowserProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.browser"
+                  android:exported="false"/>
+
+        <provider android:name="org.mozilla.gecko.distribution.PartnerBookmarksProviderProxy"
+                  android:authorities="@ANDROID_PACKAGE_NAME@.partnerbookmarks"
                   android:exported="false"/>
 
         <!-- Share overlay activity
@@ -353,7 +362,7 @@
 
         <service
             android:exported="false"
-            android:name="org.mozilla.gecko.NotificationService">
+            android:name="org.mozilla.gecko.notifications.NotificationService">
         </service>
 
         <service
@@ -415,6 +424,14 @@
 #ifdef MOZ_ANDROID_GCM
 #include GcmAndroidManifest_services.xml.in
 #endif
+
+        <service
+            android:name="org.mozilla.gecko.media.MediaManager"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":media"
+            android:isolatedProcess="false">
+        </service>
 
     </application>
 </manifest>

@@ -84,12 +84,13 @@ this.HostManifestManager = {
   },
 
   _winLookup(application, context) {
+    const REGISTRY = Ci.nsIWindowsRegKey;
     let regPath = `${REGPATH}\\${application}`;
-    let path = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-                                          regPath, "");
+    let path = WindowsRegistry.readRegKey(REGISTRY.ROOT_KEY_CURRENT_USER,
+                                          regPath, "", REGISTRY.WOW64_64);
     if (!path) {
       path = WindowsRegistry.readRegKey(Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
-                                        regPath, "");
+                                        regPath, "", REGISTRY.WOW64_64);
     }
     if (!path) {
       return null;
@@ -214,7 +215,7 @@ this.NativeApp = class extends EventEmitter {
         this._startStderrRead();
       }).catch(err => {
         this.startupPromise = null;
-        Cu.reportError(err.message);
+        Cu.reportError(err instanceof Error ? err : err.message);
         this._cleanup(err);
       });
   }
@@ -242,7 +243,9 @@ this.NativeApp = class extends EventEmitter {
         this.readPromise = null;
         this._startRead();
       }).catch(err => {
-        Cu.reportError(err.message);
+        if (err.errorCode != Subprocess.ERROR_END_OF_FILE) {
+          Cu.reportError(err instanceof Error ? err : err.message);
+        }
         this._cleanup(err);
       });
   }
@@ -374,7 +377,7 @@ this.NativeApp = class extends EventEmitter {
   }
 
   portAPI() {
-    let api = {
+    let port = {
       name: this.name,
 
       disconnect: () => {
@@ -390,7 +393,7 @@ this.NativeApp = class extends EventEmitter {
 
       onDisconnect: new ExtensionUtils.SingletonEventManager(this.context, "native.onDisconnect", fire => {
         let listener = what => {
-          this.context.runSafe(fire);
+          this.context.runSafeWithoutClone(fire, port);
         };
         this.on("disconnect", listener);
         return () => {
@@ -400,7 +403,8 @@ this.NativeApp = class extends EventEmitter {
 
       onMessage: new ExtensionUtils.SingletonEventManager(this.context, "native.onMessage", fire => {
         let listener = (what, msg) => {
-          this.context.runSafe(fire, msg);
+          msg = Cu.cloneInto(msg, this.context.cloneScope);
+          this.context.runSafeWithoutClone(fire, msg, port);
         };
         this.on("message", listener);
         return () => {
@@ -409,7 +413,9 @@ this.NativeApp = class extends EventEmitter {
       }).api(),
     };
 
-    return Cu.cloneInto(api, this.context.cloneScope, {cloneFunctions: true});
+    port = Cu.cloneInto(port, this.context.cloneScope, {cloneFunctions: true});
+
+    return port;
   }
 
   sendMessage(msg) {
@@ -426,6 +432,10 @@ this.NativeApp = class extends EventEmitter {
     result.then(() => {
       this._cleanup();
     }, () => {
+      // Prevent the response promise from being reported as an
+      // unchecked rejection if the startup promise fails.
+      responsePromise.catch(() => {});
+
       this._cleanup();
     });
 

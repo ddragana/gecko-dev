@@ -4,8 +4,6 @@
 
 "use strict";
 
-const {Ci} = require("chrome");
-const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {l10n} = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
@@ -25,15 +23,14 @@ const {
   SELECTOR_ATTRIBUTE,
   SELECTOR_ELEMENT,
   SELECTOR_PSEUDO_CLASS
-} = require("devtools/shared/css-parsing-utils");
+} = require("devtools/shared/css/parsing-utils");
 const promise = require("promise");
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
 
-XPCOMUtils.defineLazyGetter(this, "_strings", function () {
-  return Services.strings.createBundle(
-    "chrome://devtools-shared/locale/styleinspector.properties");
-});
+const STYLE_INSPECTOR_PROPERTIES = "devtools-shared/locale/styleinspector.properties";
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const STYLE_INSPECTOR_L10N = new LocalizationHelper(STYLE_INSPECTOR_PROPERTIES);
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -90,7 +87,7 @@ RuleEditor.prototype = {
 
   get isSelectorEditable() {
     let trait = this.isEditable &&
-      this.toolbox.target.client.traits.selectorEditable &&
+      this.ruleView.inspector.target.client.traits.selectorEditable &&
       this.rule.domRule.type !== ELEMENT_STYLE &&
       this.rule.domRule.type !== CSSRule.KEYFRAME_RULE;
 
@@ -148,12 +145,15 @@ RuleEditor.prototype = {
       editableField({
         element: this.selectorText,
         done: this._onSelectorDone,
+        cssProperties: this.rule.cssProperties,
+        contextMenu: this.ruleView.inspector.onTextBoxContextMenu
       });
     }
 
-    if (this.rule.domRule.type !== CSSRule.KEYFRAME_RULE &&
-        this.rule.domRule.selectors) {
-      let selector = this.rule.domRule.selectors.join(", ");
+    if (this.rule.domRule.type !== CSSRule.KEYFRAME_RULE) {
+      let selector = this.rule.domRule.selectors
+               ? this.rule.domRule.selectors.join(", ")
+               : this.ruleView.inspector.selectionCssSelector;
 
       let selectorHighlighter = createChild(header, "span", {
         class: "ruleview-selectorhighlighter" +
@@ -237,7 +237,7 @@ RuleEditor.prototype = {
     }
 
     if (this.rule.isSystem) {
-      let uaLabel = _strings.GetStringFromName("rule.userAgentStyles");
+      let uaLabel = STYLE_INSPECTOR_L10N.getStr("rule.userAgentStyles");
       sourceLabel.setAttribute("value", uaLabel + " " + title);
 
       // Special case about:PreferenceStyleSheet, as it is generated on the
@@ -448,7 +448,9 @@ RuleEditor.prototype = {
       destroy: this._newPropertyDestroy,
       advanceChars: ":",
       contentType: InplaceEditor.CONTENT_TYPES.CSS_PROPERTY,
-      popup: this.ruleView.popup
+      popup: this.ruleView.popup,
+      cssProperties: this.rule.cssProperties,
+      contextMenu: this.ruleView.inspector.onTextBoxContextMenu
     });
 
     // Auto-close the input if multiple rules get pasted into new property.
@@ -580,7 +582,7 @@ RuleEditor.prototype = {
    *        The move focus direction number.
    */
   _moveSelectorFocus: function (direction) {
-    if (!direction || direction === Ci.nsIFocusManager.MOVEFOCUS_BACKWARD) {
+    if (!direction || direction === Services.focus.MOVEFOCUS_BACKWARD) {
       return;
     }
 

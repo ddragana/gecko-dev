@@ -45,6 +45,7 @@ public class BrowserContract {
     public static final String PARAM_PROFILE_PATH = "profilePath";
     public static final String PARAM_LIMIT = "limit";
     public static final String PARAM_SUGGESTEDSITES_LIMIT = "suggestedsites_limit";
+    public static final String PARAM_TOPSITES_DISABLE_PINNED = "topsites_disable_pinned";
     public static final String PARAM_IS_SYNC = "sync";
     public static final String PARAM_SHOW_DELETED = "show_deleted";
     public static final String PARAM_IS_TEST = "test";
@@ -589,6 +590,12 @@ public class BrowserContract {
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "topsites");
     }
 
+    public static final class Highlights {
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "highlights");
+
+        public static final String DATE = "date";
+    }
+
     @RobocopTarget
     public static final class SearchHistory implements CommonColumns, HistoryColumns {
         private SearchHistory() {}
@@ -606,6 +613,16 @@ public class BrowserContract {
         private SuggestedSites() {}
 
         public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, "suggestedsites");
+    }
+
+    public static final class ActivityStreamBlocklist implements CommonColumns {
+        private ActivityStreamBlocklist() {}
+
+        public static final String TABLE_NAME = "activity_stream_blocklist";
+        public static final Uri CONTENT_URI = Uri.withAppendedPath(AUTHORITY_URI, TABLE_NAME);
+
+        public static final String URL = "url";
+        public static final String CREATED = "created";
     }
 
     @RobocopTarget

@@ -12,11 +12,10 @@
 #include "mozilla/Base64.h"
 #include "mozilla/Casting.h"
 #include "mozilla/NotNull.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsArray.h"
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
-#include "nsCertVerificationThread.h"
 #include "nsICertificateDialogs.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIObjectInputStream.h"
@@ -35,14 +34,11 @@
 #include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
-#include "nsUsageArrayHelper.h"
 #include "nsXULAppAPI.h"
 #include "nspr.h"
-#include "nssb64.h"
 #include "pkix/pkixnss.h"
 #include "pkix/pkixtypes.h"
 #include "pkix/Result.h"
-#include "plbase64.h"
 #include "prerror.h"
 #include "prmem.h"
 #include "prprf.h"
@@ -173,7 +169,7 @@ nsNSSCertificate::~nsNSSCertificate()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertificate::virtualDestroyNSSReference()
@@ -338,165 +334,6 @@ nsNSSCertificate::GetKeyUsages(nsAString& text)
   }
 
   return NS_OK;
-}
-
-nsresult
-nsNSSCertificate::FormatUIStrings(const nsAutoString& nickname,
-                                  nsAutoString& nickWithSerial,
-                                  nsAutoString& details)
-{
-  if (!NS_IsMainThread()) {
-    NS_ERROR("nsNSSCertificate::FormatUIStrings called off the main thread");
-    return NS_ERROR_NOT_SAME_THREAD;
-  }
-
-  nsresult rv = NS_OK;
-
-  nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
-
-  if (NS_FAILED(rv) || !nssComponent) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsAutoString info;
-  nsAutoString temp1;
-
-  nickWithSerial.Append(nickname);
-
-  if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoIssuedFor", info))) {
-    details.Append(info);
-    details.Append(char16_t(' '));
-    if (NS_SUCCEEDED(GetSubjectName(temp1)) && !temp1.IsEmpty()) {
-      details.Append(temp1);
-    }
-    details.Append(char16_t('\n'));
-  }
-
-  if (NS_SUCCEEDED(GetSerialNumber(temp1)) && !temp1.IsEmpty()) {
-    details.AppendLiteral("  ");
-    if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpSerialNo", info))) {
-      details.Append(info);
-      details.AppendLiteral(": ");
-    }
-    details.Append(temp1);
-
-    nickWithSerial.AppendLiteral(" [");
-    nickWithSerial.Append(temp1);
-    nickWithSerial.Append(char16_t(']'));
-
-    details.Append(char16_t('\n'));
-  }
-
-  nsCOMPtr<nsIX509CertValidity> validity;
-  rv = GetValidity(getter_AddRefs(validity));
-  if (NS_SUCCEEDED(rv) && validity) {
-    details.AppendLiteral("  ");
-    if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoValid", info))) {
-      details.Append(info);
-    }
-
-    if (NS_SUCCEEDED(validity->GetNotBeforeLocalTime(temp1)) && !temp1.IsEmpty()) {
-      details.Append(char16_t(' '));
-      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoFrom", info))) {
-        details.Append(info);
-        details.Append(char16_t(' '));
-      }
-      details.Append(temp1);
-    }
-
-    if (NS_SUCCEEDED(validity->GetNotAfterLocalTime(temp1)) && !temp1.IsEmpty()) {
-      details.Append(char16_t(' '));
-      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoTo", info))) {
-        details.Append(info);
-        details.Append(char16_t(' '));
-      }
-      details.Append(temp1);
-    }
-
-    details.Append(char16_t('\n'));
-  }
-
-  if (NS_SUCCEEDED(GetKeyUsages(temp1)) && !temp1.IsEmpty()) {
-    details.AppendLiteral("  ");
-    if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpKeyUsage", info))) {
-      details.Append(info);
-      details.AppendLiteral(": ");
-    }
-    details.Append(temp1);
-    details.Append(char16_t('\n'));
-  }
-
-  nsAutoString firstEmail;
-  const char* aWalkAddr;
-  for (aWalkAddr = CERT_GetFirstEmailAddress(mCert.get())
-        ;
-        aWalkAddr
-        ;
-        aWalkAddr = CERT_GetNextEmailAddress(mCert.get(), aWalkAddr))
-  {
-    NS_ConvertUTF8toUTF16 email(aWalkAddr);
-    if (email.IsEmpty())
-      continue;
-
-    if (firstEmail.IsEmpty()) {
-      // If the first email address from the subject DN is also present
-      // in the subjectAltName extension, GetEmailAddresses() will return
-      // it twice (as received from NSS). Remember the first address so that
-      // we can filter out duplicates later on.
-      firstEmail = email;
-
-      details.AppendLiteral("  ");
-      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoEmail", info))) {
-        details.Append(info);
-        details.AppendLiteral(": ");
-      }
-      details.Append(email);
-    }
-    else {
-      // Append current address if it's different from the first one.
-      if (!firstEmail.Equals(email)) {
-        details.AppendLiteral(", ");
-        details.Append(email);
-      }
-    }
-  }
-
-  if (!firstEmail.IsEmpty()) {
-    // We got at least one email address, so we want a newline
-    details.Append(char16_t('\n'));
-  }
-
-  if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoIssuedBy", info))) {
-    details.Append(info);
-    details.Append(char16_t(' '));
-
-    if (NS_SUCCEEDED(GetIssuerName(temp1)) && !temp1.IsEmpty()) {
-      details.Append(temp1);
-    }
-
-    details.Append(char16_t('\n'));
-  }
-
-  if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoStoredIn", info))) {
-    details.Append(info);
-    details.Append(char16_t(' '));
-
-    if (NS_SUCCEEDED(GetTokenName(temp1)) && !temp1.IsEmpty()) {
-      details.Append(temp1);
-    }
-  }
-
-  // the above produces the following output:
-  //
-  //   Issued to: $subjectName
-  //   Serial number: $serialNumber
-  //   Valid from: $starting_date to $expiration_date
-  //   Certificate Key usage: $usages
-  //   Email: $address(es)
-  //   Issued by: $issuerName
-  //   Stored in: $token
-
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -1274,90 +1111,6 @@ nsNSSCertificate::GetValidity(nsIX509CertValidity** aValidity)
 }
 
 NS_IMETHODIMP
-nsNSSCertificate::GetUsagesArray(bool localOnly,
-                                 uint32_t* _verified,
-                                 uint32_t* _count,
-                                 char16_t*** _usages)
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
-
-  nsresult rv;
-  const int max_usages = 13;
-  char16_t* tmpUsages[max_usages];
-  const char* suffix = "";
-  uint32_t tmpCount;
-  nsUsageArrayHelper uah(mCert.get());
-  rv = uah.GetUsagesArray(suffix, localOnly, max_usages, _verified, &tmpCount,
-                          tmpUsages);
-  NS_ENSURE_SUCCESS(rv,rv);
-  if (tmpCount > 0) {
-    *_usages = (char16_t**) moz_xmalloc(sizeof(char16_t*) * tmpCount);
-    if (!*_usages)
-      return NS_ERROR_OUT_OF_MEMORY;
-    for (uint32_t i=0; i<tmpCount; i++) {
-      (*_usages)[i] = tmpUsages[i];
-    }
-    *_count = tmpCount;
-    return NS_OK;
-  }
-  *_usages = (char16_t**) moz_xmalloc(sizeof(char16_t*));
-  if (!*_usages)
-    return NS_ERROR_OUT_OF_MEMORY;
-  *_count = 0;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSCertificate::RequestUsagesArrayAsync(
-  nsICertVerificationListener* aResultListener)
-{
-  NS_ENSURE_TRUE(NS_IsMainThread(), NS_ERROR_NOT_SAME_THREAD);
-
-  if (!aResultListener)
-    return NS_ERROR_FAILURE;
-
-  nsCertVerificationJob* job = new nsCertVerificationJob;
-
-  job->mCert = this;
-  job->mListener =
-    new nsMainThreadPtrHolder<nsICertVerificationListener>(aResultListener);
-
-  nsresult rv = nsCertVerificationThread::addJob(job);
-  if (NS_FAILED(rv))
-    delete job;
-
-  return rv;
-}
-
-NS_IMETHODIMP
-nsNSSCertificate::GetUsagesString(bool localOnly, uint32_t* _verified,
-                                  nsAString& _usages)
-{
-  nsNSSShutDownPreventionLock locker;
-  if (isAlreadyShutDown())
-    return NS_ERROR_NOT_AVAILABLE;
-
-  nsresult rv;
-  const int max_usages = 13;
-  char16_t* tmpUsages[max_usages];
-  const char* suffix = "_p";
-  uint32_t tmpCount;
-  nsUsageArrayHelper uah(mCert.get());
-  rv = uah.GetUsagesArray(suffix, localOnly, max_usages, _verified, &tmpCount,
-                          tmpUsages);
-  NS_ENSURE_SUCCESS(rv,rv);
-  _usages.Truncate();
-  for (uint32_t i=0; i<tmpCount; i++) {
-    if (i>0) _usages.Append(',');
-    _usages.Append(tmpUsages[i]);
-    free(tmpUsages[i]);
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsNSSCertificate::GetASN1Structure(nsIASN1Object** aASN1Structure)
 {
   NS_ENSURE_ARG_POINTER(aASN1Structure);
@@ -1405,7 +1158,10 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV)
     nullptr /* XXX pinarg */,
     nullptr /* hostname */,
     unusedBuiltChain,
-    flags, nullptr /* stapledOCSPResponse */, &resultOidTag);
+    flags,
+    nullptr /* stapledOCSPResponse */,
+    nullptr /* sctsFromTLSExtension */,
+    &resultOidTag);
 
   if (rv != SECSuccess) {
     resultOidTag = SEC_OID_UNKNOWN;
@@ -1534,7 +1290,7 @@ nsNSSCertList::~nsNSSCertList()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertList::virtualDestroyNSSReference()
@@ -1821,7 +1577,7 @@ nsNSSCertListEnumerator::~nsNSSCertListEnumerator()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void nsNSSCertListEnumerator::virtualDestroyNSSReference()

@@ -23,7 +23,8 @@
     #endif
 
     #ifdef MOZ_WIDGET_ANDROID
-        #include "AndroidBridge.h"
+        #include <android/native_window.h>
+        #include <android/native_window_jni.h>
     #endif
 
     #ifdef ANDROID
@@ -101,6 +102,7 @@
 #include "GLLibraryEGL.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/widget/CompositorWidget.h"
 #include "nsDebug.h"
 #include "nsIWidget.h"
 #include "nsThreadUtils.h"
@@ -111,6 +113,8 @@ using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace gl {
+
+using namespace mozilla::widget;
 
 #define ADD_ATTR_2(_array, _k, _v) do {         \
     (_array).AppendElement(_k);                 \
@@ -180,10 +184,12 @@ CreateSurfaceForWindow(nsIWidget* widget, const EGLConfig& config) {
         MOZ_CRASH("GFX: Failed to get Java surface.\n");
     }
     JNIEnv* const env = jni::GetEnvForThread();
-    void* nativeWindow = AndroidBridge::Bridge()->AcquireNativeWindow(env, reinterpret_cast<jobject>(javaSurface));
-    newSurface = sEGLLibrary.fCreateWindowSurface(sEGLLibrary.fGetDisplay(EGL_DEFAULT_DISPLAY), config,
-                                                  nativeWindow, 0);
-    AndroidBridge::Bridge()->ReleaseNativeWindow(nativeWindow);
+    ANativeWindow* const nativeWindow = ANativeWindow_fromSurface(
+            env, reinterpret_cast<jobject>(javaSurface));
+    newSurface = sEGLLibrary.fCreateWindowSurface(
+            sEGLLibrary.fGetDisplay(EGL_DEFAULT_DISPLAY),
+            config, nativeWindow, 0);
+    ANativeWindow_release(nativeWindow);
 #else
     newSurface = sEGLLibrary.fCreateWindowSurface(EGL_DISPLAY(), config,
                                                   GET_NATIVE_WINDOW(widget), 0);
@@ -273,7 +279,7 @@ GLContextEGL::Init()
         return false;
     }
 
-    PR_STATIC_ASSERT(sizeof(GLint) >= sizeof(int32_t));
+    static_assert(sizeof(GLint) >= sizeof(int32_t), "GLint is smaller than int32_t");
     mMaxTextureImageSize = INT32_MAX;
 
     mShareWithEGLImage = sEGLLibrary.HasKHRImageBase() &&
@@ -755,6 +761,12 @@ GLContextProviderEGL::CreateWrappingExisting(void* aContext, void* aSurface)
     gl->mOwnsContext = false;
 
     return gl.forget();
+}
+
+already_AddRefed<GLContext>
+GLContextProviderEGL::CreateForCompositorWidget(CompositorWidget* aCompositorWidget, bool aForceAccelerated)
+{
+    return CreateForWindow(aCompositorWidget->RealWidget(), aForceAccelerated);
 }
 
 already_AddRefed<GLContext>

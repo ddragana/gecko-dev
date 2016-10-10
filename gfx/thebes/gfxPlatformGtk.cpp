@@ -73,10 +73,6 @@ gfxFontconfigUtils *gfxPlatformGtk::sFontconfigUtils = nullptr;
 static cairo_user_data_key_t cairo_gdk_drawable_key;
 #endif
 
-#ifdef MOZ_X11
-    bool gfxPlatformGtk::sUseXRender = true;
-#endif
-
 bool gfxPlatformGtk::sUseFcFontList = false;
 
 gfxPlatformGtk::gfxPlatformGtk()
@@ -91,12 +87,21 @@ gfxPlatformGtk::gfxPlatformGtk()
     mMaxGenericSubstitutions = UNINITIALIZED_VALUE;
 
 #ifdef MOZ_X11
-    sUseXRender = (GDK_IS_X11_DISPLAY(gdk_display_get_default())) ?
-                    mozilla::Preferences::GetBool("gfx.xrender.enabled") : false;
+    if (XRE_IsParentProcess()) {
+      if (GDK_IS_X11_DISPLAY(gdk_display_get_default()) &&
+          mozilla::Preferences::GetBool("gfx.xrender.enabled"))
+      {
+          gfxVars::SetUseXRender(true);
+      }
+    }
 #endif
 
-    uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
-    uint32_t contentMask = BackendTypeBit(BackendType::CAIRO) | BackendTypeBit(BackendType::SKIA);
+    uint32_t canvasMask = BackendTypeBit(BackendType::CAIRO);
+    uint32_t contentMask = BackendTypeBit(BackendType::CAIRO);
+#ifdef USE_SKIA
+    canvasMask |= BackendTypeBit(BackendType::SKIA);
+    contentMask |= BackendTypeBit(BackendType::SKIA);
+#endif
     InitBackendPrefs(canvasMask, BackendType::CAIRO,
                      contentMask, BackendType::CAIRO);
 
@@ -128,7 +133,7 @@ gfxPlatformGtk::~gfxPlatformGtk()
 void
 gfxPlatformGtk::FlushContentDrawing()
 {
-    if (UseXRender()) {
+    if (gfxVars::UseXRender()) {
         XFlush(DefaultXDisplay());
     }
 }
@@ -137,6 +142,10 @@ already_AddRefed<gfxASurface>
 gfxPlatformGtk::CreateOffscreenSurface(const IntSize& aSize,
                                        gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> newSurface;
     bool needsClear = true;
 #ifdef MOZ_X11
@@ -147,7 +156,7 @@ gfxPlatformGtk::CreateOffscreenSurface(const IntSize& aSize,
     if (gdkScreen) {
         // When forcing PaintedLayers to use image surfaces for content,
         // force creation of gfxImageSurface surfaces.
-        if (UseXRender() && !UseImageOffscreenSurfaces()) {
+        if (gfxVars::UseXRender() && !UseImageOffscreenSurfaces()) {
             Screen *screen = gdk_x11_screen_get_xscreen(gdkScreen);
             XRenderPictFormat* xrenderFormat =
                 gfxXlibSurface::FindRenderFormat(DisplayOfScreen(screen),
@@ -625,7 +634,20 @@ gfxPlatformGtk::GetGdkDrawable(cairo_surface_t *target)
 already_AddRefed<ScaledFont>
 gfxPlatformGtk::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
-    return GetScaledFontForFontWithCairoSkia(aTarget, aFont);
+    switch (aTarget->GetBackendType()) {
+    case BackendType::CAIRO:
+    case BackendType::SKIA:
+        if (aFont->GetType() == gfxFont::FONT_TYPE_FONTCONFIG) {
+            gfxFontconfigFontBase* fcFont = static_cast<gfxFontconfigFontBase*>(aFont);
+            return Factory::CreateScaledFontForFontconfigFont(
+                    fcFont->GetCairoScaledFont(),
+                    fcFont->GetPattern(),
+                    fcFont->GetAdjustedSize());
+        }
+        MOZ_FALLTHROUGH;
+    default:
+        return GetScaledFontForFontWithCairoSkia(aTarget, aFont);
+    }
 }
 
 #ifdef GL_PROVIDER_GLX

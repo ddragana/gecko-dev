@@ -18,8 +18,10 @@
 
 class nsIPresShell;
 class nsIFrame;
-struct nsHTMLReflowState;
 class nsPresContext;
+namespace mozilla {
+struct ReflowInput;
+} // namespace mozilla
 
 /**
  * The available space for content not occupied by floats is divided
@@ -269,14 +271,14 @@ public:
     // pushed to the next page/column.
     DONT_CLEAR_PUSHED_FLOATS = (1<<0)
   };
-  nscoord ClearFloats(nscoord aBCoord, uint8_t aBreakType,
+  nscoord ClearFloats(nscoord aBCoord, mozilla::StyleClear aBreakType,
                       uint32_t aFlags = 0) const;
 
   /**
    * Checks if clear would pass into the floats' BFC's next-in-flow,
    * i.e. whether floats affecting this clear have continuations.
    */
-  bool ClearContinues(uint8_t aBreakType) const;
+  bool ClearContinues(mozilla::StyleClear aBreakType) const;
 
   void AssertStateMatches(SavedState *aState) const
   {
@@ -368,12 +370,14 @@ private:
 /**
  * A helper class to manage maintenance of the float manager during
  * nsBlockFrame::Reflow. It automatically restores the old float
- * manager in the reflow state when the object goes out of scope.
+ * manager in the reflow input when the object goes out of scope.
  */
 class nsAutoFloatManager {
+  using ReflowInput = mozilla::ReflowInput;
+
 public:
-  explicit nsAutoFloatManager(nsHTMLReflowState& aReflowState)
-    : mReflowState(aReflowState),
+  explicit nsAutoFloatManager(ReflowInput& aReflowInput)
+    : mReflowInput(aReflowInput),
       mNew(nullptr),
       mOld(nullptr) {}
 
@@ -382,13 +386,13 @@ public:
   /**
    * Create a new float manager for the specified frame. This will
    * `remember' the old float manager, and install the new float
-   * manager in the reflow state.
+   * manager in the reflow input.
    */
-  nsresult
+  void
   CreateFloatManager(nsPresContext *aPresContext);
 
 protected:
-  nsHTMLReflowState &mReflowState;
+  ReflowInput &mReflowInput;
   nsFloatManager *mNew;
   nsFloatManager *mOld;
 };

@@ -444,7 +444,7 @@ HyperTextAccessible::ClosestNotGeneratedDOMPoint(const DOMPoint& aDOMPoint,
 
   // ::before pseudo element
   if (aElementContent &&
-      aElementContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentbefore) {
+      aElementContent->IsGeneratedContentContainerForBefore()) {
     MOZ_ASSERT(aElementContent->GetParent(),
                "::before must have parent element");
     // The first child of its parent (i.e., immediately after the ::before) is
@@ -454,7 +454,7 @@ HyperTextAccessible::ClosestNotGeneratedDOMPoint(const DOMPoint& aDOMPoint,
 
   // ::after pseudo element
   if (aElementContent &&
-      aElementContent->NodeInfo()->NameAtom() == nsGkAtoms::mozgeneratedcontentafter) {
+      aElementContent->IsGeneratedContentContainerForAfter()) {
     MOZ_ASSERT(aElementContent->GetParent(),
                "::after must have parent element");
     // The end of its parent (i.e., immediately before the ::after) is good
@@ -2217,12 +2217,13 @@ HyperTextAccessible::GetSpellTextAttr(nsINode* aNode,
 bool
 HyperTextAccessible::IsTextRole()
 {
-  if (mRoleMapEntry &&
-      (mRoleMapEntry->role == roles::GRAPHIC ||
-       mRoleMapEntry->role == roles::IMAGE_MAP ||
-       mRoleMapEntry->role == roles::SLIDER ||
-       mRoleMapEntry->role == roles::PROGRESSBAR ||
-       mRoleMapEntry->role == roles::SEPARATOR))
+  const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
+  if (roleMapEntry &&
+      (roleMapEntry->role == roles::GRAPHIC ||
+       roleMapEntry->role == roles::IMAGE_MAP ||
+       roleMapEntry->role == roles::SLIDER ||
+       roleMapEntry->role == roles::PROGRESSBAR ||
+       roleMapEntry->role == roles::SEPARATOR))
     return false;
 
   return true;

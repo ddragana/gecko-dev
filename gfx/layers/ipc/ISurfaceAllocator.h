@@ -16,7 +16,6 @@
 #include "mozilla/Atomics.h"            // for Atomic
 #include "mozilla/layers/LayersMessages.h" // for ShmemSection
 #include "LayersTypes.h"
-#include "mozilla/layers/AtomicRefCountedWithFinalize.h"
 
 /*
  * FIXME [bjacob] *** PURE CRAZYNESS WARNING ***
@@ -41,7 +40,6 @@ class DataSourceSurface;
 namespace layers {
 
 class CompositableForwarder;
-class ShadowLayerForwarder;
 class TextureForwarder;
 
 class ShmemAllocator;
@@ -49,6 +47,7 @@ class ShmemSectionAllocator;
 class LegacySurfaceDescriptorAllocator;
 class ClientIPCAllocator;
 class HostIPCAllocator;
+class LayersIPCChannel;
 
 enum BufferCapabilities {
   DEFAULT_BUFFER_CAPS = 0,
@@ -76,12 +75,13 @@ mozilla::ipc::SharedMemory::SharedMemoryType OptimalShmemType();
  * These methods should be only called in the ipdl implementor's thread, unless
  * specified otherwise in the implementing class.
  */
-class ISurfaceAllocator : public AtomicRefCountedWithFinalize<ISurfaceAllocator>
+class ISurfaceAllocator
 {
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(ISurfaceAllocator)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ISurfaceAllocator)
 
-  ISurfaceAllocator(const char* aName) : AtomicRefCountedWithFinalize(aName) {}
+  ISurfaceAllocator() {}
 
   // down-casting
 
@@ -91,9 +91,7 @@ public:
 
   virtual CompositableForwarder* AsCompositableForwarder() { return nullptr; }
 
-  virtual TextureForwarder* AsTextureForwarder() { return nullptr; }
-
-  virtual ShadowLayerForwarder* AsLayerForwarder() { return nullptr; }
+  virtual TextureForwarder* GetTextureForwarder() { return nullptr; }
 
   virtual ClientIPCAllocator* AsClientAllocator() { return nullptr; }
 
@@ -114,15 +112,13 @@ protected:
   void Finalize() {}
 
   virtual ~ISurfaceAllocator() {}
-
-  friend class AtomicRefCountedWithFinalize<ISurfaceAllocator>;
 };
 
 /// Methods that are specific to the client/child side.
 class ClientIPCAllocator : public ISurfaceAllocator
 {
 public:
-  ClientIPCAllocator(const char* aName) : ISurfaceAllocator(aName) {}
+  ClientIPCAllocator() {}
 
   virtual ClientIPCAllocator* AsClientAllocator() override { return this; }
 
@@ -139,7 +135,7 @@ public:
 class HostIPCAllocator : public ISurfaceAllocator
 {
 public:
-  HostIPCAllocator(const char* aName) : ISurfaceAllocator(aName) {}
+  HostIPCAllocator() {}
 
   virtual HostIPCAllocator* AsHostIPCAllocator() override { return this; }
 
@@ -169,14 +165,6 @@ public:
 protected:
   std::vector<AsyncParentMessageData> mPendingAsyncMessage;
   bool mAboutToSendAsyncMessages = false;
-};
-
-/// Specific to the CompositorBridgeParent/CrossProcessCompositorBridgeParent.
-class CompositorBridgeParentIPCAllocator : public HostIPCAllocator
-{
-public:
-  CompositorBridgeParentIPCAllocator(const char* aName) : HostIPCAllocator(aName) {}
-  virtual void NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId) override;
 };
 
 /// An allocator can provide shared memory.
@@ -270,9 +258,11 @@ public:
   NS_IMETHOD CollectReports(nsIHandleReportCallback* aHandleReport,
                             nsISupports* aData, bool aAnonymize) override
   {
-    return MOZ_COLLECT_REPORT(
+    MOZ_COLLECT_REPORT(
       "explicit/gfx/heap-textures", KIND_HEAP, UNITS_BYTES, sAmount,
       "Heap memory shared between threads by texture clients and hosts.");
+
+    return NS_OK;
   }
 
 private:
@@ -307,7 +297,7 @@ public:
     uint32_t mSize;
   };
 
-  explicit FixedSizeSmallShmemSectionAllocator(ClientIPCAllocator* aShmProvider);
+  explicit FixedSizeSmallShmemSectionAllocator(LayersIPCChannel* aShmProvider);
 
   ~FixedSizeSmallShmemSectionAllocator();
 
@@ -322,32 +312,11 @@ public:
 
   void ShrinkShmemSectionHeap();
 
-  ShmemAllocator* GetShmAllocator() { return mShmProvider->AsShmemAllocator(); }
-
-  /**
-    * In order to avoid shutdown crashes, we need to test for mShmProvider->AsShmemAllocator()
-    * here. Basically, there's a case where we have the following class hierarchy:
-    *
-    * ClientIPCAllocator -> TextureForwarder -> CompositableForwarder -> ShadowLayerForwarder
-    *
-    * In ShadowLayerForwarder's dtor, we tear down the actor and close the IPC channel.
-    * In TextureForwarder's dtor, we destroy the FixedSizeSmallShmemAllocator and that in turn calls
-    * ClientIPCAllocator::IPCOpen() to determine whether we can dealloc some shmem regions.
-    *
-    * This does not work. In the above class diagram, as the ShadowLayerForwarder's dtor has run
-    * its course, the ClientIPCAllocator object we're holding on to is now just a plain
-    * ClientIPCAllocator and so we call ClientIPCAllocator's IPCOpen() which unconditionally
-    * returns true. We therefore have to rely on AsShmemAllocator() to determine whether we can
-    * do these deallocs as ClientIPCAllocator::AsShmemAllocator() returns nullptr.
-    *
-    * Ideally, we should move a lot of this destruction work into non-destructor Destroy() methods
-    * which do cleanup before we destroy the objects.
-    */
-  bool IPCOpen() const { return mShmProvider->AsShmemAllocator() && mShmProvider->IPCOpen(); }
+  bool IPCOpen() const;
 
 protected:
   std::vector<mozilla::ipc::Shmem> mUsedShmems;
-  ClientIPCAllocator* mShmProvider;
+  LayersIPCChannel* mShmProvider;
 };
 
 } // namespace layers

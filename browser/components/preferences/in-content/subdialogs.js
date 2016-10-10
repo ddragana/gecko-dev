@@ -11,11 +11,12 @@ var gSubDialog = {
   _frame: null,
   _overlay: null,
   _box: null,
-  _injectedStyleSheets: ["chrome://mozapps/content/preferences/preferences.css",
-                         "chrome://browser/skin/preferences/preferences.css",
-                         "chrome://global/skin/in-content/common.css",
-                         "chrome://browser/skin/preferences/in-content/preferences.css",
-                         "chrome://browser/skin/preferences/in-content/dialog.css"],
+  _injectedStyleSheets: [
+    "chrome://browser/skin/preferences/preferences.css",
+    "chrome://global/skin/in-content/common.css",
+    "chrome://browser/skin/preferences/in-content/preferences.css",
+    "chrome://browser/skin/preferences/in-content/dialog.css",
+  ],
   _resizeObserver: null,
 
   init: function() {
@@ -336,7 +337,7 @@ var gSubDialog = {
         (isLastFocusableElement(aEvent.originalTarget) && forward)) {
       aEvent.preventDefault();
       aEvent.stopImmediatePropagation();
-      let parentWin = this._getBrowser().ownerDocument.defaultView;
+      let parentWin = this._getBrowser().ownerGlobal;
       if (forward) {
         fm.moveFocus(parentWin, null, fm.MOVEFOCUS_FIRST, fm.FLAG_BYKEY);
       } else {

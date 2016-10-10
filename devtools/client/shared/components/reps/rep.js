@@ -20,6 +20,7 @@ define(function (require, exports, module) {
   const { Number } = require("./number");
   const { ArrayRep } = require("./array");
   const { Obj } = require("./object");
+  const { SymbolRep } = require("./symbol");
 
   // DOM types (grips)
   const { Attribute } = require("./attribute");
@@ -27,7 +28,6 @@ define(function (require, exports, module) {
   const { Document } = require("./document");
   const { Event } = require("./event");
   const { Func } = require("./function");
-  const { NamedNodeMap } = require("./named-node-map");
   const { RegExp } = require("./regexp");
   const { StyleSheet } = require("./stylesheet");
   const { TextNode } = require("./text-node");
@@ -35,6 +35,7 @@ define(function (require, exports, module) {
   const { ObjectWithText } = require("./object-with-text");
   const { ObjectWithURL } = require("./object-with-url");
   const { GripArray } = require("./grip-array");
+  const { GripMap } = require("./grip-map");
   const { Grip } = require("./grip");
 
   // List of all registered template.
@@ -46,7 +47,6 @@ define(function (require, exports, module) {
     Event,
     DateTime,
     TextNode,
-    NamedNodeMap,
     Attribute,
     Func,
     ArrayRep,
@@ -55,11 +55,13 @@ define(function (require, exports, module) {
     ObjectWithText,
     ObjectWithURL,
     GripArray,
+    GripMap,
     Grip,
     Undefined,
     Null,
     StringRep,
     Number,
+    SymbolRep,
   ];
 
   /**
@@ -74,6 +76,7 @@ define(function (require, exports, module) {
     propTypes: {
       object: React.PropTypes.any,
       defaultRep: React.PropTypes.object,
+      mode: React.PropTypes.string
     },
 
     render: function () {
@@ -99,6 +102,8 @@ define(function (require, exports, module) {
     let type = typeof object;
     if (type == "object" && object instanceof String) {
       type = "string";
+    } else if (object && type == "object" && object.type === "symbol") {
+      type = "symbol";
     }
 
     if (isGrip(object)) {

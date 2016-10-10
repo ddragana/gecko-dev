@@ -51,6 +51,7 @@
 #include "ThirdPartyUtil.h"
 #include "nsStructuredCloneContainer.h"
 #include "gfxPlatform.h"
+#include "mozilla/gfx/gfxVars.h"
 
 #include "nsIEventListenerService.h"
 #include "nsIMessageManager.h"
@@ -124,12 +125,10 @@ using mozilla::dom::gonk::AudioManager;
 using mozilla::system::nsVolumeService;
 #endif
 
-#ifndef MOZ_SIMPLEPUSH
 #include "mozilla/dom/PushNotifier.h"
 using mozilla::dom::PushNotifier;
 #define PUSHNOTIFIER_CID \
 { 0x2fc2d3e3, 0x020f, 0x404e, { 0xb0, 0x6a, 0x6e, 0xcf, 0x3e, 0xa2, 0x33, 0x4a } }
-#endif
 
 #include "AudioChannelAgent.h"
 using mozilla::dom::AudioChannelAgent;
@@ -198,7 +197,6 @@ static void Shutdown();
 #include "mozilla/dom/nsContentSecurityManager.h"
 #include "mozilla/dom/nsCSPService.h"
 #include "mozilla/dom/nsCSPContext.h"
-#include "nsICellBroadcastService.h"
 #include "nsIIccService.h"
 #include "nsISmsService.h"
 #include "nsIMmsService.h"
@@ -206,7 +204,6 @@ static void Shutdown();
 #include "nsIMobileMessageService.h"
 #include "nsIMobileMessageDatabaseService.h"
 #include "nsIPowerManagerService.h"
-#include "nsIAlarmHalService.h"
 #include "nsIMediaManager.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 
@@ -216,7 +213,6 @@ static void Shutdown();
 #include "mozilla/dom/FlyWebService.h"
 
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "mozilla/dom/alarm/AlarmHalService.h"
 #include "mozilla/dom/time/TimeService.h"
 #include "StreamingProtocolService.h"
 
@@ -252,7 +248,6 @@ static void Shutdown();
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using mozilla::dom::alarm::AlarmHalService;
 using mozilla::dom::power::PowerManagerService;
 using mozilla::dom::quota::QuotaManagerService;
 using mozilla::dom::workers::ServiceWorkerManager;
@@ -351,8 +346,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsHapticFeedback)
 #endif
 #endif
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(ThirdPartyUtil, Init)
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsICellBroadcastService,
-                                         NS_CreateCellBroadcastService)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsISmsService, NS_CreateSmsService)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIIccService, NS_CreateIccService)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIMmsService, NS_CreateMmsService)
@@ -362,8 +355,6 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIMobileMessageDatabaseService,
                                          NS_CreateMobileMessageDatabaseService)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIPowerManagerService,
                                          PowerManagerService::GetInstance)
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIAlarmHalService,
-                                         AlarmHalService::GetInstance)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsITimeService,
                                          TimeService::GetInstance)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIStreamingProtocolControllerService,
@@ -399,10 +390,8 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIPresentationService,
                                          NS_CreatePresentationService)
 NS_GENERIC_FACTORY_CONSTRUCTOR(PresentationTCPSessionTransport)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(NotificationTelemetryService, Init)
-
-#ifndef MOZ_SIMPLEPUSH
 NS_GENERIC_FACTORY_CONSTRUCTOR(PushNotifier)
-#endif
+
 //-----------------------------------------------------------------------------
 
 static bool gInitialized = false;
@@ -416,6 +405,13 @@ Initialize()
   if (gInitialized) {
     NS_RUNTIMEABORT("Recursive layout module initialization");
     return NS_ERROR_FAILURE;
+  }
+  if (XRE_GetProcessType() == GeckoProcessType_GPU) {
+    // We mark the layout module as being available in the GPU process so that
+    // XPCOM's component manager initializes the power manager service, which
+    // is needed for nsAppShell. However, we don't actually need anything in
+    // the layout module itself.
+    return NS_OK;
   }
 
   static_assert(sizeof(uintptr_t) == sizeof(void*),
@@ -669,7 +665,7 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIHardwareKeyHandler,
 #endif
 
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#include "xpcAccessibilityService.h"
 
   MAKE_CTOR(CreateA11yService, nsIAccessibilityService, NS_GetAccessibilityService)
 #endif
@@ -764,10 +760,7 @@ NS_DEFINE_NAMED_CID(DOMREQUEST_SERVICE_CID);
 NS_DEFINE_NAMED_CID(QUOTAMANAGER_SERVICE_CID);
 NS_DEFINE_NAMED_CID(SERVICEWORKERMANAGER_CID);
 NS_DEFINE_NAMED_CID(NOTIFICATIONTELEMETRYSERVICE_CID);
-
-#ifndef MOZ_SIMPLEPUSH
 NS_DEFINE_NAMED_CID(PUSHNOTIFIER_CID);
-#endif
 
 NS_DEFINE_NAMED_CID(WORKERDEBUGGERMANAGER_CID);
 #ifdef MOZ_WIDGET_GONK
@@ -821,7 +814,6 @@ NS_DEFINE_NAMED_CID(NS_HAPTICFEEDBACK_CID);
 NS_DEFINE_NAMED_CID(GONK_GPS_GEOLOCATION_PROVIDER_CID);
 #endif
 #endif
-NS_DEFINE_NAMED_CID(CELLBROADCAST_SERVICE_CID);
 NS_DEFINE_NAMED_CID(TELEPHONY_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_VOICEMAIL_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MOBILE_CONNECTION_SERVICE_CID);
@@ -832,7 +824,6 @@ NS_DEFINE_NAMED_CID(MOBILE_MESSAGE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(MOBILE_MESSAGE_DATABASE_SERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_POWERMANAGERSERVICE_CID);
 NS_DEFINE_NAMED_CID(OSFILECONSTANTSSERVICE_CID);
-NS_DEFINE_NAMED_CID(NS_ALARMHALSERVICE_CID);
 NS_DEFINE_NAMED_CID(UDPSOCKETCHILD_CID);
 NS_DEFINE_NAMED_CID(NS_TIMESERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MEDIASTREAMCONTROLLERSERVICE_CID);
@@ -1072,9 +1063,7 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
   { &kQUOTAMANAGER_SERVICE_CID, false, nullptr, QuotaManagerServiceConstructor },
   { &kSERVICEWORKERMANAGER_CID, false, nullptr, ServiceWorkerManagerConstructor },
   { &kNOTIFICATIONTELEMETRYSERVICE_CID, false, nullptr, NotificationTelemetryServiceConstructor },
-#ifndef MOZ_SIMPLEPUSH
   { &kPUSHNOTIFIER_CID, false, nullptr, PushNotifierConstructor },
-#endif
   { &kWORKERDEBUGGERMANAGER_CID, true, nullptr, WorkerDebuggerManagerConstructor },
 #ifdef MOZ_WIDGET_GONK
   { &kSYSTEMWORKERMANAGER_CID, true, nullptr, SystemWorkerManagerConstructor },
@@ -1128,15 +1117,13 @@ static const mozilla::Module::CIDEntry kLayoutCIDs[] = {
 #endif
   { &kTHIRDPARTYUTIL_CID, false, nullptr, ThirdPartyUtilConstructor },
   { &kNS_STRUCTUREDCLONECONTAINER_CID, false, nullptr, nsStructuredCloneContainerConstructor },
-  { &kCELLBROADCAST_SERVICE_CID, false, nullptr, nsICellBroadcastServiceConstructor },
   { &kSMS_SERVICE_CID, false, nullptr, nsISmsServiceConstructor },
   { &kICC_SERVICE_CID, false, nullptr, nsIIccServiceConstructor },
   { &kMMS_SERVICE_CID, false, nullptr, nsIMmsServiceConstructor },
   { &kMOBILE_MESSAGE_SERVICE_CID, false, nullptr, nsIMobileMessageServiceConstructor },
   { &kMOBILE_MESSAGE_DATABASE_SERVICE_CID, false, nullptr, nsIMobileMessageDatabaseServiceConstructor },
-  { &kNS_POWERMANAGERSERVICE_CID, false, nullptr, nsIPowerManagerServiceConstructor },
+  { &kNS_POWERMANAGERSERVICE_CID, false, nullptr, nsIPowerManagerServiceConstructor, Module::ALLOW_IN_GPU_PROCESS },
   { &kOSFILECONSTANTSSERVICE_CID, true, nullptr, OSFileConstantsServiceConstructor },
-  { &kNS_ALARMHALSERVICE_CID, false, nullptr, nsIAlarmHalServiceConstructor },
   { &kUDPSOCKETCHILD_CID, false, nullptr, UDPSocketChildConstructor },
   { &kGECKO_MEDIA_PLUGIN_SERVICE_CID, true, nullptr, GeckoMediaPluginServiceConstructor },
   { &kNS_TIMESERVICE_CID, false, nullptr, nsITimeServiceConstructor },
@@ -1239,9 +1226,7 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
   { QUOTAMANAGER_SERVICE_CONTRACTID, &kQUOTAMANAGER_SERVICE_CID },
   { SERVICEWORKERMANAGER_CONTRACTID, &kSERVICEWORKERMANAGER_CID },
   { NOTIFICATIONTELEMETRYSERVICE_CONTRACTID, &kNOTIFICATIONTELEMETRYSERVICE_CID },
-#ifndef MOZ_SIMPLEPUSH
   { PUSHNOTIFIER_CONTRACTID, &kPUSHNOTIFIER_CID },
-#endif
   { WORKERDEBUGGERMANAGER_CONTRACTID, &kWORKERDEBUGGERMANAGER_CID },
 #ifdef MOZ_WIDGET_GONK
   { SYSTEMWORKERMANAGER_CONTRACTID, &kSYSTEMWORKERMANAGER_CID },
@@ -1294,15 +1279,13 @@ static const mozilla::Module::ContractIDEntry kLayoutContracts[] = {
 #endif
   { THIRDPARTYUTIL_CONTRACTID, &kTHIRDPARTYUTIL_CID },
   { NS_STRUCTUREDCLONECONTAINER_CONTRACTID, &kNS_STRUCTUREDCLONECONTAINER_CID },
-  { CELLBROADCAST_SERVICE_CONTRACTID, &kCELLBROADCAST_SERVICE_CID },
   { SMS_SERVICE_CONTRACTID, &kSMS_SERVICE_CID },
   { ICC_SERVICE_CONTRACTID, &kICC_SERVICE_CID },
   { MMS_SERVICE_CONTRACTID, &kMMS_SERVICE_CID },
   { MOBILE_MESSAGE_SERVICE_CONTRACTID, &kMOBILE_MESSAGE_SERVICE_CID },
   { MOBILE_MESSAGE_DATABASE_SERVICE_CONTRACTID, &kMOBILE_MESSAGE_DATABASE_SERVICE_CID },
-  { POWERMANAGERSERVICE_CONTRACTID, &kNS_POWERMANAGERSERVICE_CID },
+  { POWERMANAGERSERVICE_CONTRACTID, &kNS_POWERMANAGERSERVICE_CID, Module::ALLOW_IN_GPU_PROCESS },
   { OSFILECONSTANTSSERVICE_CONTRACTID, &kOSFILECONSTANTSSERVICE_CID },
-  { ALARMHALSERVICE_CONTRACTID, &kNS_ALARMHALSERVICE_CID },
   { "@mozilla.org/udp-socket-child;1", &kUDPSOCKETCHILD_CID },
   { TIMESERVICE_CONTRACTID, &kNS_TIMESERVICE_CID },
   { MEDIASTREAMCONTROLLERSERVICE_CONTRACTID, &kNS_MEDIASTREAMCONTROLLERSERVICE_CID },
@@ -1342,10 +1325,8 @@ static const mozilla::Module::CategoryEntry kLayoutCategories[] = {
   { "net-channel-event-sinks", "CSPService", CSPSERVICE_CONTRACTID },
   { "net-channel-event-sinks", NS_MIXEDCONTENTBLOCKER_CONTRACTID, NS_MIXEDCONTENTBLOCKER_CONTRACTID },
   { "app-startup", "Script Security Manager", "service," NS_SCRIPTSECURITYMANAGER_CONTRACTID },
-#ifndef MOZ_SIMPLEPUSH
   { "app-startup", "Push Notifier", "service," PUSHNOTIFIER_CONTRACTID },
-#endif
-  { "clear-origin-data", "QuotaManagerService", "service," QUOTAMANAGER_SERVICE_CONTRACTID },
+  { "clear-origin-attributes-data", "QuotaManagerService", "service," QUOTAMANAGER_SERVICE_CONTRACTID },
   { OBSERVER_TOPIC_IDLE_DAILY, "QuotaManagerService", QUOTAMANAGER_SERVICE_CONTRACTID },
 #ifdef MOZ_WIDGET_GONK
   { "app-startup", "Volume Service", "service," NS_VOLUMESERVICE_CONTRACTID },
@@ -1366,6 +1347,10 @@ static const mozilla::Module::CategoryEntry kLayoutCategories[] = {
 static void
 LayoutModuleDtor()
 {
+  if (XRE_GetProcessType() == GeckoProcessType_GPU) {
+    return;
+  }
+
   Shutdown();
   nsContentUtils::XPCOMShutdown();
 
@@ -1373,6 +1358,7 @@ LayoutModuleDtor()
   // these modules are shut down after all the layout cleanup runs.
   mozilla::image::ShutdownModule();
   gfxPlatform::Shutdown();
+  gfx::gfxVars::Shutdown();
 
   nsScriptSecurityManager::Shutdown();
   xpcModuleDtor();
@@ -1385,7 +1371,8 @@ static const mozilla::Module kLayoutModule = {
   kLayoutCategories,
   nullptr,
   Initialize,
-  LayoutModuleDtor
+  LayoutModuleDtor,
+  Module::ALLOW_IN_GPU_PROCESS
 };
 
 NSMODULE_DEFN(nsLayoutModule) = &kLayoutModule;

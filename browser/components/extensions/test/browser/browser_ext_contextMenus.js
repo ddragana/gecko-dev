@@ -2,10 +2,10 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+const PAGE = "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html";
 
 add_task(function* () {
-  let tab1 = yield BrowserTestUtils.openNewForegroundTab(gBrowser,
-    "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html");
+  let tab1 = yield BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
 
   gBrowser.selectedTab = tab1;
 
@@ -42,11 +42,8 @@ add_task(function* () {
   yield BrowserTestUtils.removeTab(tab1);
 });
 
-/* globals content */
-/* eslint-disable mozilla/no-cpows-in-tests */
 add_task(function* () {
-  let tab1 = yield BrowserTestUtils.openNewForegroundTab(gBrowser,
-    "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html");
+  let tab1 = yield BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
 
   gBrowser.selectedTab = tab1;
 
@@ -70,7 +67,7 @@ add_task(function* () {
         type: "separator",
       });
 
-      let contexts = ["page", "selection", "image"];
+      let contexts = ["page", "selection", "image", "editable"];
       for (let i = 0; i < contexts.length; i++) {
         let context = contexts[i];
         let title = context;
@@ -143,15 +140,16 @@ add_task(function* () {
     menuItemId: "ext-image",
     mediaType: "image",
     srcUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/ctxmenu-image.png",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
+    pageUrl: PAGE,
+    editable: false,
   };
 
   function checkClickInfo(result) {
     for (let i of Object.keys(expectedClickInfo)) {
       is(result.info[i], expectedClickInfo[i],
-         "click info " + i + " expected to be: " + expectedClickInfo[i] + " but was: " + info[i]);
+         "click info " + i + " expected to be: " + expectedClickInfo[i] + " but was: " + result.info[i]);
     }
-    is(expectedClickInfo.pageSrc, result.tab.url);
+    is(expectedClickInfo.pageSrc, result.tab.url, "click info page source is the right tab");
   }
 
   let extensionMenuRoot = yield openExtensionContextMenu();
@@ -180,6 +178,30 @@ add_task(function* () {
   result = yield extension.awaitMessage("browser.contextMenus.onClicked");
   checkClickInfo(result);
 
+
+  // Test "editable" context and OnClick data property.
+  extensionMenuRoot = yield openExtensionContextMenu("#edit-me");
+
+  // Check some menu items.
+  items = extensionMenuRoot.getElementsByAttribute("label", "editable");
+  is(items.length, 1, "contextMenu item for text input element was found (context=editable)");
+  let editable = items[0];
+
+  // Click on ext-editable item and check the click results.
+  yield closeExtensionContextMenu(editable);
+
+  expectedClickInfo = {
+    menuItemId: "ext-editable",
+    pageUrl: PAGE,
+    editable: true,
+  };
+
+  result = yield extension.awaitMessage("onclick");
+  checkClickInfo(result);
+  result = yield extension.awaitMessage("browser.contextMenus.onClicked");
+  checkClickInfo(result);
+
+
   // Select some text
   yield ContentTask.spawn(gBrowser.selectedBrowser, { }, function* (arg) {
     let doc = content.document;
@@ -203,7 +225,7 @@ add_task(function* () {
 
   expectedClickInfo = {
     menuItemId: "ext-without-onclick",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
+    pageUrl: PAGE,
   };
 
   result = yield extension.awaitMessage("browser.contextMenus.onClicked");
@@ -224,7 +246,7 @@ add_task(function* () {
 
   expectedClickInfo = {
     menuItemId: "ext-selection",
-    pageUrl: "http://mochi.test:8888/browser/browser/components/extensions/test/browser/context.html",
+    pageUrl: PAGE,
     selectionText: "just some text 1234567890123456789012345678901234567890123456789012345678901234567890123456789012",
   };
 
@@ -240,4 +262,63 @@ add_task(function* () {
 
   yield extension.unload();
   yield BrowserTestUtils.removeTab(tab1);
+});
+
+add_task(function* testRemoveAllWithTwoExtensions() {
+  const tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, PAGE);
+  const manifest = {permissions: ["contextMenus"]};
+
+  const first = ExtensionTestUtils.loadExtension({manifest, background() {
+    browser.contextMenus.create({title: "alpha", contexts: ["all"]});
+
+    browser.contextMenus.onClicked.addListener(() => {
+      browser.contextMenus.removeAll();
+    });
+    browser.test.onMessage.addListener(() => {
+      browser.contextMenus.create({title: "gamma", contexts: ["all"]});
+    });
+  }});
+
+  const second = ExtensionTestUtils.loadExtension({manifest, background() {
+    browser.contextMenus.create({title: "beta", contexts: ["all"]});
+
+    browser.contextMenus.onClicked.addListener(() => {
+      browser.contextMenus.removeAll();
+    });
+  }});
+
+  yield first.startup();
+  yield second.startup();
+
+  function* confirmMenuItems(...items) {
+    const menu = yield openContextMenu();
+    for (const id of ["alpha", "beta", "gamma"]) {
+      const expected = items.includes(id);
+      const found = menu.getElementsByAttribute("label", id);
+      is(found.length, expected, `menu item ${id} ${expected ? "" : "not "}found`);
+    }
+    // Return the first menu item, we need to click it.
+    return menu.getElementsByAttribute("label", items[0])[0];
+  }
+
+  // Confirm alpha, beta exist; click alpha to remove it.
+  const alpha = yield confirmMenuItems("alpha", "beta");
+  yield closeExtensionContextMenu(alpha);
+
+  // Confirm only beta exists.
+  yield confirmMenuItems("beta");
+  yield closeContextMenu();
+
+  // Create gamma, confirm, click.
+  first.sendMessage("create");
+  const beta = yield confirmMenuItems("beta", "gamma");
+  yield closeExtensionContextMenu(beta);
+
+  // Confirm only gamma is left.
+  yield confirmMenuItems("gamma");
+  yield closeContextMenu();
+
+  yield first.unload();
+  yield second.unload();
+  yield BrowserTestUtils.removeTab(tab);
 });

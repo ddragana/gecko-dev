@@ -7,6 +7,7 @@
 #ifndef EME_LOG_H_
 #define EME_LOG_H_
 
+#include "VideoUtils.h"
 #include "mozilla/Logging.h"
 #include "nsString.h"
 #include "nsTArray.h"
@@ -101,6 +102,25 @@ GetArrayBufferViewOrArrayBufferData(const dom::ArrayBufferViewOrArrayBuffer& aBu
 
 nsString
 KeySystemToGMPName(const nsAString& aKeySystem);
+
+bool
+IsClearkeyKeySystem(const nsAString& aKeySystem);
+
+bool
+IsPrimetimeKeySystem(const nsAString& aKeySystem);
+
+bool
+IsWidevineKeySystem(const nsAString& aKeySystem);
+
+enum CDMType {
+  eClearKey = 0,
+  ePrimetime = 1,
+  eWidevine = 2,
+  eUnknown = 3
+};
+
+CDMType
+ToCDMTypeTelemetryEnum(const nsString& aKeySystem);
 
 } // namespace mozilla
 

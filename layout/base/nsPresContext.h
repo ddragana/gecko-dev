@@ -43,6 +43,7 @@
 #include "mozilla/RestyleManagerHandle.h"
 #include "prenv.h"
 #include "mozilla/StaticPresData.h"
+#include "mozilla/StyleBackendType.h"
 
 class nsAString;
 class nsIPrintSettings;
@@ -160,10 +161,11 @@ public:
   nsresult Init(nsDeviceContext* aDeviceContext);
 
   /**
-   * Set the presentation shell that this context is bound to.
+   * Set and detach presentation shell that this context is bound to.
    * A presentation context may only be bound to a single shell.
    */
-  void SetShell(nsIPresShell* aShell);
+  void AttachShell(nsIPresShell* aShell, mozilla::StyleBackendType aBackendType);
+  void DetachShell();
 
 
   nsPresContextType Type() const { return mType; }
@@ -239,7 +241,10 @@ public:
 
   nsRefreshDriver* RefreshDriver() { return mRefreshDriver; }
 
-  mozilla::RestyleManagerHandle RestyleManager() { return mRestyleManager; }
+  mozilla::RestyleManagerHandle RestyleManager() {
+    MOZ_ASSERT(mRestyleManager);
+    return mRestyleManager;
+  }
 
   mozilla::CounterStyleManager* CounterStyleManager() {
     return mCounterStyleManager;
@@ -596,6 +601,9 @@ public:
   float GetFullZoom() { return mFullZoom; }
   void SetFullZoom(float aZoom);
 
+  float GetOverrideDPPX() { return mOverrideDPPX; }
+  void SetOverrideDPPX(float aDPPX);
+
   nscoord GetAutoQualityMinFontSize() {
     return DevPixelsToAppUnits(mAutoQualityMinFontSizePixelsPref);
   }
@@ -890,8 +898,8 @@ public:
   void UpdateIsChrome();
 
   // Public API for native theme code to get style internals.
-  virtual bool HasAuthorSpecifiedRules(const nsIFrame *aFrame,
-                                       uint32_t ruleTypeMask) const;
+  bool HasAuthorSpecifiedRules(const nsIFrame *aFrame,
+                               uint32_t ruleTypeMask) const;
 
   // Is it OK to let the page specify colors and backgrounds?
   bool UseDocumentColors() const {
@@ -1019,6 +1027,12 @@ public:
    * ReflowStarted call. Cannot itself trigger an interrupt check.
    */
   bool HasPendingInterrupt() { return mHasPendingInterrupt; }
+  /**
+   * Sets a flag that will trip a reflow interrupt. This only bypasses the
+   * interrupt timeout and the pending event check; other checks such as whether
+   * interrupts are enabled and the interrupt check skipping still take effect.
+   */
+  void SetPendingInterruptFromTest() { mPendingInterruptFromTest = true; }
 
   /**
    * If we have a presshell, and if the given content's current
@@ -1099,20 +1113,6 @@ public:
 
   void SetHasWarnedAboutTooLargeDashedOrDottedRadius() {
     mHasWarnedAboutTooLargeDashedOrDottedRadius = true;
-  }
-
-  static bool StyloEnabled()
-  {
-    // Stylo (the Servo backend for Gecko's style system) is generally enabled
-    // or disabled at compile-time. However, we provide the additional capability
-    // to disable it dynamically in stylo-enabled builds via an environmental
-    // variable.
-#ifdef MOZ_STYLO
-    static bool disabled = PR_GetEnv("MOZ_DISABLE_STYLO");
-    return !disabled;
-#else
-    return false;
-#endif
   }
 
 protected:
@@ -1257,7 +1257,7 @@ protected:
   int32_t               mBaseMinFontSize;
   float                 mTextZoom;      // Text zoom, defaults to 1.0
   float                 mFullZoom;      // Page zoom, defaults to 1.0
-
+  float                 mOverrideDPPX;   // DPPX overrided, defaults to 0.0
   gfxSize               mLastFontInflationScreenSize;
 
   int32_t               mCurAppUnitsPerDevPixel;
@@ -1326,6 +1326,7 @@ protected:
   mozilla::TimeStamp    mLastStyleUpdateForAllAnimations;
 
   unsigned              mHasPendingInterrupt : 1;
+  unsigned              mPendingInterruptFromTest : 1;
   unsigned              mInterruptsEnabled : 1;
   unsigned              mUseDocumentFonts : 1;
   unsigned              mUseDocumentColors : 1;

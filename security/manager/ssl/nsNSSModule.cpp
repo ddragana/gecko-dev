@@ -6,38 +6,37 @@
 
 #include "CertBlocklist.h"
 #include "ContentSignatureVerifier.h"
+#include "NSSErrorsService.h"
+#include "PSMContentListener.h"
+#include "SecretDecoderRing.h"
+#include "TransportSecurityInfo.h"
+#include "WeakCryptoOverride.h"
+#include "mozilla/ModuleUtils.h"
+#include "nsCURILoader.h"
 #include "nsCertOverrideService.h"
-#include "nsCertPicker.h"
 #include "nsCrypto.h"
 #include "nsCryptoHash.h"
-#include "nsCURILoader.h"
+#include "nsDOMCID.h" // For the NS_CRYPTO_CONTRACTID define
 #include "nsDataSignatureVerifier.h"
-#include "nsDOMCID.h" //For the NS_CRYPTO_CONTRACTID define
 #include "nsICategoryManager.h"
-#include "nsKeygenHandler.h"
 #include "nsKeyModule.h"
-#include "mozilla/ModuleUtils.h"
-#include "nsNetCID.h"
+#include "nsKeygenHandler.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSCertificateDB.h"
 #include "nsNSSCertificateFakeTransport.h"
 #include "nsNSSComponent.h"
-#include "NSSErrorsService.h"
 #include "nsNSSU2FToken.h"
 #include "nsNSSVersion.h"
 #include "nsNTLMAuthModule.h"
+#include "nsNetCID.h"
 #include "nsPK11TokenDB.h"
 #include "nsPKCS11Slot.h"
-#include "PSMContentListener.h"
 #include "nsRandomGenerator.h"
-#include "nsSDR.h"
-#include "nsSecureBrowserUIImpl.h"
-#include "nsSiteSecurityService.h"
 #include "nsSSLSocketProvider.h"
 #include "nsSSLStatus.h"
+#include "nsSecureBrowserUIImpl.h"
+#include "nsSiteSecurityService.h"
 #include "nsTLSSocketProvider.h"
-#include "TransportSecurityInfo.h"
-#include "WeakCryptoOverride.h"
 #include "nsXULAppAPI.h"
 
 #ifdef MOZ_XUL
@@ -186,7 +185,7 @@ namespace {
 
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsSSLSocketProvider)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsTLSSocketProvider)
-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsSecretDecoderRing)
+NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, SecretDecoderRing)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPK11TokenDB)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPKCS11ModuleDB)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(PSMContentListener, init)
@@ -201,7 +200,6 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_BYPROCESS(nssEnsureOnChromeOnly,
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertTree)
 #endif
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPkcs11)
-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertPicker)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsNTLMAuthModule, InitTest)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsureChromeOrContent, nsCryptoHash)
 NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsureChromeOrContent, nsCryptoHMAC)
@@ -226,7 +224,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(WeakCryptoOverride)
 NS_DEFINE_NAMED_CID(NS_NSSCOMPONENT_CID);
 NS_DEFINE_NAMED_CID(NS_SSLSOCKETPROVIDER_CID);
 NS_DEFINE_NAMED_CID(NS_STARTTLSSOCKETPROVIDER_CID);
-NS_DEFINE_NAMED_CID(NS_SDR_CID);
+NS_DEFINE_NAMED_CID(NS_SECRETDECODERRING_CID);
 NS_DEFINE_NAMED_CID(NS_PK11TOKENDB_CID);
 NS_DEFINE_NAMED_CID(NS_PKCS11MODULEDB_CID);
 NS_DEFINE_NAMED_CID(NS_PSMCONTENTLISTEN_CID);
@@ -240,7 +238,6 @@ NS_DEFINE_NAMED_CID(NS_CERTTREE_CID);
 NS_DEFINE_NAMED_CID(NS_PKCS11_CID);
 NS_DEFINE_NAMED_CID(NS_CRYPTO_HASH_CID);
 NS_DEFINE_NAMED_CID(NS_CRYPTO_HMAC_CID);
-NS_DEFINE_NAMED_CID(NS_CERT_PICKER_CID);
 NS_DEFINE_NAMED_CID(NS_NTLMAUTHMODULE_CID);
 NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECT_CID);
 NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECTFACTORY_CID);
@@ -262,7 +259,7 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
   { &kNS_NSSCOMPONENT_CID, false, nullptr, nsNSSComponentConstructor },
   { &kNS_SSLSOCKETPROVIDER_CID, false, nullptr, nsSSLSocketProviderConstructor },
   { &kNS_STARTTLSSOCKETPROVIDER_CID, false, nullptr, nsTLSSocketProviderConstructor },
-  { &kNS_SDR_CID, false, nullptr, nsSecretDecoderRingConstructor },
+  { &kNS_SECRETDECODERRING_CID, false, nullptr, SecretDecoderRingConstructor },
   { &kNS_PK11TOKENDB_CID, false, nullptr, nsPK11TokenDBConstructor },
   { &kNS_PKCS11MODULEDB_CID, false, nullptr, nsPKCS11ModuleDBConstructor },
   { &kNS_PSMCONTENTLISTEN_CID, false, nullptr, PSMContentListenerConstructor },
@@ -276,7 +273,6 @@ static const mozilla::Module::CIDEntry kNSSCIDs[] = {
   { &kNS_PKCS11_CID, false, nullptr, nsPkcs11Constructor },
   { &kNS_CRYPTO_HASH_CID, false, nullptr, nsCryptoHashConstructor },
   { &kNS_CRYPTO_HMAC_CID, false, nullptr, nsCryptoHMACConstructor },
-  { &kNS_CERT_PICKER_CID, false, nullptr, nsCertPickerConstructor },
   { &kNS_NTLMAUTHMODULE_CID, false, nullptr, nsNTLMAuthModuleConstructor },
   { &kNS_KEYMODULEOBJECT_CID, false, nullptr, nsKeyObjectConstructor },
   { &kNS_KEYMODULEOBJECTFACTORY_CID, false, nullptr, nsKeyObjectFactoryConstructor },
@@ -302,7 +298,7 @@ static const mozilla::Module::ContractIDEntry kNSSContracts[] = {
   { NS_NSSVERSION_CONTRACTID, &kNS_NSSVERSION_CID },
   { NS_SSLSOCKETPROVIDER_CONTRACTID, &kNS_SSLSOCKETPROVIDER_CID },
   { NS_STARTTLSSOCKETPROVIDER_CONTRACTID, &kNS_STARTTLSSOCKETPROVIDER_CID },
-  { NS_SDR_CONTRACTID, &kNS_SDR_CID },
+  { NS_SECRETDECODERRING_CONTRACTID, &kNS_SECRETDECODERRING_CID },
   { NS_PK11TOKENDB_CONTRACTID, &kNS_PK11TOKENDB_CID },
   { NS_PKCS11MODULEDB_CONTRACTID, &kNS_PKCS11MODULEDB_CID },
   { NS_PSMCONTENTLISTEN_CONTRACTID, &kNS_PSMCONTENTLISTEN_CID },
@@ -315,7 +311,6 @@ static const mozilla::Module::ContractIDEntry kNSSContracts[] = {
   { NS_PKCS11_CONTRACTID, &kNS_PKCS11_CID },
   { NS_CRYPTO_HASH_CONTRACTID, &kNS_CRYPTO_HASH_CID },
   { NS_CRYPTO_HMAC_CONTRACTID, &kNS_CRYPTO_HMAC_CID },
-  { NS_CERT_PICKER_CONTRACTID, &kNS_CERT_PICKER_CID },
   { "@mozilla.org/uriloader/psm-external-content-listener;1", &kNS_PSMCONTENTLISTEN_CID },
   { NS_CRYPTO_FIPSINFO_SERVICE_CONTRACTID, &kNS_PKCS11MODULEDB_CID },
   { NS_NTLMAUTHMODULE_CONTRACTID, &kNS_NTLMAUTHMODULE_CID },

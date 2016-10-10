@@ -47,7 +47,6 @@ nsNSSDialogs::~nsNSSDialogs()
 NS_IMPL_ISUPPORTS(nsNSSDialogs, nsITokenPasswordDialogs,
                   nsICertificateDialogs,
                   nsIClientAuthDialogs,
-                  nsICertPickDialogs,
                   nsITokenDialogs,
                   nsIGeneratingKeypairInfoDialogs)
 
@@ -158,9 +157,10 @@ nsNSSDialogs::ConfirmDownloadCACert(nsIInterfaceRequestor *ctx,
 
 NS_IMETHODIMP
 nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
-                                const nsAString& cnAndPort,
-                                const nsAString& organization,
-                                const nsAString& issuerOrg,
+                                const nsACString& hostname,
+                                int32_t port,
+                                const nsACString& organization,
+                                const nsACString& issuerOrg,
                                 nsIArray* certList,
                         /*out*/ uint32_t* selectedIndex,
                         /*out*/ bool* certificateChosen)
@@ -178,6 +178,8 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
     return NS_ERROR_FAILURE;
   }
 
+  // SetObjects() expects an nsIMutableArray, which is why we can't directly use
+  // |certList| and have to add an extra layer of indirection.
   nsCOMPtr<nsIMutableArray> paramBlockArray = nsArrayBase::Create();
   if (!paramBlockArray) {
     return NS_ERROR_FAILURE;
@@ -196,15 +198,20 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
     return rv;
   }
 
-  rv = block->SetString(0, PromiseFlatString(cnAndPort).get());
+  rv = block->SetString(0, NS_ConvertUTF8toUTF16(hostname).get());
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = block->SetString(1, PromiseFlatString(organization).get());
+  rv = block->SetString(1, NS_ConvertUTF8toUTF16(organization).get());
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = block->SetString(2, PromiseFlatString(issuerOrg).get());
+  rv = block->SetString(2, NS_ConvertUTF8toUTF16(issuerOrg).get());
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  rv = block->SetInt(0, port);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -249,63 +256,6 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
 
   return NS_OK;
 }
-
-
-NS_IMETHODIMP
-nsNSSDialogs::PickCertificate(nsIInterfaceRequestor *ctx, 
-                              const char16_t **certNickList, 
-                              const char16_t **certDetailsList, 
-                              uint32_t count, 
-                              int32_t *selectedIndex, 
-                              bool *canceled) 
-{
-  nsresult rv;
-  uint32_t i;
-
-  *canceled = false;
-
-  // Get the parent window for the dialog
-  nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
-
-  nsCOMPtr<nsIDialogParamBlock> block =
-           do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
-  if (!block) return NS_ERROR_FAILURE;
-
-  block->SetNumberStrings(1+count*2);
-
-  for (i = 0; i < count; i++) {
-    rv = block->SetString(i, certNickList[i]);
-    if (NS_FAILED(rv)) return rv;
-  }
-
-  for (i = 0; i < count; i++) {
-    rv = block->SetString(i+count, certDetailsList[i]);
-    if (NS_FAILED(rv)) return rv;
-  }
-
-  rv = block->SetInt(0, count);
-  if (NS_FAILED(rv)) return rv;
-
-  rv = block->SetInt(1, *selectedIndex);
-  if (NS_FAILED(rv)) return rv;
-
-  rv = nsNSSDialogHelper::openDialog(nullptr,
-                                "chrome://pippki/content/certpicker.xul",
-                                block);
-  if (NS_FAILED(rv)) return rv;
-
-  int32_t status;
-
-  rv = block->GetInt(0, &status);
-  if (NS_FAILED(rv)) return rv;
-
-  *canceled = (status == 0)?true:false;
-  if (!*canceled) {
-    rv = block->GetInt(1, selectedIndex);
-  }
-  return rv;
-}
-
 
 NS_IMETHODIMP 
 nsNSSDialogs::SetPKCS12FilePassword(nsIInterfaceRequestor *ctx, 
@@ -356,7 +306,7 @@ nsNSSDialogs::GetPKCS12FilePassword(nsIInterfaceRequestor* ctx,
 
   nsAutoString msg;
   nsresult rv = mPIPStringBundle->GetStringFromName(
-    MOZ_UTF16("getPKCS12FilePasswordMessage"), getter_Copies(msg));
+    u"getPKCS12FilePasswordMessage", getter_Copies(msg));
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -428,9 +378,6 @@ nsNSSDialogs::ChooseToken(nsIInterfaceRequestor *aCtx, const char16_t **aTokenLi
   uint32_t i;
 
   *aCanceled = false;
-
-  // Get the parent window for the dialog
-  nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(aCtx);
 
   nsCOMPtr<nsIDialogParamBlock> block =
            do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);

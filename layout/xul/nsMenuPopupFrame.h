@@ -48,6 +48,8 @@ enum nsPopupState {
   // state from when a popup is requested to be shown to after the
   // popupshowing event has been fired.
   ePopupShowing,
+  // state while a popup is waiting to be laid out and positioned
+  ePopupPositioning,
   // state while a popup is open but the widget is not yet visible
   ePopupOpening,
   // state while a popup is visible and waiting for the popupshown event
@@ -120,6 +122,7 @@ enum MenuPopupAnchorType {
 #define POPUPPOSITION_ENDAFTER 7
 #define POPUPPOSITION_OVERLAP 8
 #define POPUPPOSITION_AFTERPOINTER 9
+#define POPUPPOSITION_SELECTION 10
 
 #define POPUPPOSITION_HFLIP(v) (v ^ 1)
 #define POPUPPOSITION_VFLIP(v) (v ^ 2)
@@ -250,8 +253,10 @@ public:
   // (or the frame for mAnchorContent if aAnchorFrame is null), anchored at a
   // rectangle, or at a specific point if a screen position is set. The popup
   // will be adjusted so that it is on screen. If aIsMove is true, then the
-  // popup is being moved, and should not be flipped.
-  nsresult SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove, bool aSizedToPopup);
+  // popup is being moved, and should not be flipped. If aNotify is true, then
+  // a popuppositioned event is sent.
+  nsresult SetPopupPosition(nsIFrame* aAnchorFrame, bool aIsMove,
+                            bool aSizedToPopup, bool aNotify);
 
   bool HasGeneratedChildren() { return mGeneratedChildren; }
   void SetGeneratedChildren() { mGeneratedChildren = true; }
@@ -271,6 +276,9 @@ public:
                                       mPopupState == ePopupShown; }
   bool IsVisible() { return mPopupState == ePopupVisible ||
                             mPopupState == ePopupShown; }
+
+  // Return true if the popup is for a menulist.
+  bool IsMenuList();
 
   bool IsMouseTransparent() { return mMouseTransparent; }
 
@@ -421,6 +429,11 @@ public:
     return false;
   }
 
+  void ShowWithPositionedEvent() {
+    mPopupState = ePopupPositioning;
+    mShouldAutoPosition = true;
+  }
+
   // nsIReflowCallback
   virtual bool ReflowFinished() override;
   virtual void ReflowCallbackCanceled() override;
@@ -441,6 +454,10 @@ protected:
   // flipped in that direction if there is not enough space available.
   nsPoint AdjustPositionForAnchorAlign(nsRect& anchorRect,
                                        FlipStyle& aHFlip, FlipStyle& aVFlip);
+
+  // For popups that are going to align to their selected item, get the frame of
+  // the selected item.
+  nsIFrame* GetSelectedItemForAlignment();
 
   // check if the popup will fit into the available space and resize it. This
   // method handles only one axis at a time so is called twice, once for
@@ -515,6 +532,9 @@ protected:
   nsMenuFrame* mCurrentMenu; // The current menu that is active.
 
   RefPtr<nsXULPopupShownEvent> mPopupShownDispatcher;
+
+  // The popup's screen rectangle in app units.
+  nsIntRect mUsedScreenRect;
 
   // A popup's preferred size may be different than its actual size stored in
   // mRect in the case where the popup was resized because it was too large

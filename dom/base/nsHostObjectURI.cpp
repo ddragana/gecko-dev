@@ -21,7 +21,9 @@ NS_IMPL_ADDREF_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
 NS_IMPL_RELEASE_INHERITED(nsHostObjectURI, mozilla::net::nsSimpleURI)
 
 NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
+  NS_INTERFACE_MAP_ENTRY(nsIURIWithBlobImpl)
   NS_INTERFACE_MAP_ENTRY(nsIURIWithPrincipal)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   if (aIID.Equals(kHOSTOBJECTURICID))
     foundInterface = static_cast<nsIURI*>(this);
   else if (aIID.Equals(kThisSimpleURIImplementationCID)) {
@@ -33,6 +35,16 @@ NS_INTERFACE_MAP_BEGIN(nsHostObjectURI)
   }
   else
 NS_INTERFACE_MAP_END_INHERITING(mozilla::net::nsSimpleURI)
+
+// nsIURIWithBlobImpl methods:
+
+NS_IMETHODIMP
+nsHostObjectURI::GetBlobImpl(nsISupports** aBlobImpl)
+{
+  RefPtr<BlobImpl> blobImpl(mBlobImpl);
+  blobImpl.forget(aBlobImpl);
+  return NS_OK;
+}
 
 // nsIURIWithPrincipal methods:
 
@@ -126,12 +138,21 @@ nsHostObjectURI::Deserialize(const mozilla::ipc::URIParams& aParams)
   if (!mozilla::net::nsSimpleURI::Deserialize(hostParams.simpleParams())) {
     return false;
   }
+
   if (hostParams.principal().type() == OptionalPrincipalInfo::Tvoid_t) {
     return true;
   }
 
   mPrincipal = PrincipalInfoToPrincipal(hostParams.principal().get_PrincipalInfo());
-  return mPrincipal != nullptr;
+  if (!mPrincipal) {
+    return false;
+  }
+
+  // If this fails, we still want to complete the operation. Probably this
+  // blobURL has been revoked in the meantime.
+  NS_GetBlobForBlobURI(this, getter_AddRefs(mBlobImpl));
+
+  return true;
 }
 
 NS_IMETHODIMP
@@ -146,11 +167,12 @@ nsHostObjectURI::SetScheme(const nsACString& aScheme)
 // nsIURI methods:
 nsresult
 nsHostObjectURI::CloneInternal(mozilla::net::nsSimpleURI::RefHandlingEnum aRefHandlingMode,
+                               const nsACString& newRef,
                                nsIURI** aClone)
 {
   nsCOMPtr<nsIURI> simpleClone;
   nsresult rv =
-    mozilla::net::nsSimpleURI::CloneInternal(aRefHandlingMode, getter_AddRefs(simpleClone));
+    mozilla::net::nsSimpleURI::CloneInternal(aRefHandlingMode, newRef, getter_AddRefs(simpleClone));
   NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef DEBUG
@@ -162,6 +184,7 @@ nsHostObjectURI::CloneInternal(mozilla::net::nsSimpleURI::RefHandlingEnum aRefHa
   nsHostObjectURI* u = static_cast<nsHostObjectURI*>(simpleClone.get());
 
   u->mPrincipal = mPrincipal;
+  u->mBlobImpl = mBlobImpl;
 
   simpleClone.forget(aClone);
   return NS_OK;
@@ -190,7 +213,10 @@ nsHostObjectURI::EqualsInternal(nsIURI* aOther,
     return NS_OK;
   }
 
-  // Compare the piece of additional member data that we add to base class.
+  // Compare the piece of additional member data that we add to base class,
+  // but we cannot compare BlobImpl. This should not be a problem, because we
+  // don't support changing the underlying mBlobImpl.
+
   if (mPrincipal && otherUri->mPrincipal) {
     // Both of us have mPrincipals. Compare them.
     return mPrincipal->Equals(otherUri->mPrincipal, aResult);
@@ -255,4 +281,11 @@ nsHostObjectURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
 {
   *aClassIDNoAlloc = kHOSTOBJECTURICID;
   return NS_OK;
+}
+
+void
+nsHostObjectURI::ForgetBlobImpl()
+{
+  MOZ_ASSERT(mBlobImpl);
+  mBlobImpl = nullptr;
 }

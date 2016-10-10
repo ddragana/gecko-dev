@@ -652,7 +652,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         }
     }
     void store64(Register64 src, Address address) {
-        movq(src.reg, Operand(address));
+        storePtr(src.reg, address);
+    }
+    void store64(Imm64 imm, Address address) {
+        storePtr(ImmWord(imm.value), address);
     }
 
     void splitTag(Register src, Register dest) {
@@ -861,24 +864,35 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
     void loadConstantDouble(double d, FloatRegister dest);
     void loadConstantFloat32(float f, FloatRegister dest);
+    void loadConstantDouble(wasm::RawF64 d, FloatRegister dest);
+    void loadConstantFloat32(wasm::RawF32 f, FloatRegister dest);
+
     void loadConstantSimd128Int(const SimdConstant& v, FloatRegister dest);
     void loadConstantSimd128Float(const SimdConstant& v, FloatRegister dest);
 
-    void convertInt64ToDouble(Register input, FloatRegister output);
-    void convertInt64ToFloat32(Register input, FloatRegister output);
+    void convertInt64ToDouble(Register64 input, FloatRegister output);
+    void convertInt64ToFloat32(Register64 input, FloatRegister output);
+    static bool convertUInt64ToDoubleNeedsTemp();
+    void convertUInt64ToDouble(Register64 input, FloatRegister output, Register temp);
+    void convertUInt64ToFloat32(Register64 input, FloatRegister output, Register temp);
 
-    void convertUInt64ToDouble(Register input, FloatRegister output);
-    void convertUInt64ToFloat32(Register input, FloatRegister output);
-
-    void wasmTruncateDoubleToInt64(FloatRegister input, Register output, Label* oolEntry,
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                    Label* oolRejoin, FloatRegister tempDouble);
-    void wasmTruncateDoubleToUInt64(FloatRegister input, Register output, Label* oolEntry,
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                     Label* oolRejoin, FloatRegister tempDouble);
 
-    void wasmTruncateFloat32ToInt64(FloatRegister input, Register output, Label* oolEntry,
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                     Label* oolRejoin, FloatRegister tempDouble);
-    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register output, Label* oolEntry,
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
                                      Label* oolRejoin, FloatRegister tempDouble);
+
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        CodeOffset label = loadRipRelativeInt64(dest);
+        append(wasm::GlobalAccess(label, globalDataOffset));
+    }
+    void loadWasmPinnedRegsFromTls() {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
+    }
 
   public:
     Condition testInt32Truthy(bool truthy, const ValueOperand& operand) {
@@ -929,15 +943,17 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
 
     void convertUInt32ToDouble(Register src, FloatRegister dest) {
+        // Zero the output register to break dependencies, see convertInt32ToDouble.
+        zeroDouble(dest);
+
         vcvtsq2sd(src, dest, dest);
     }
 
     void convertUInt32ToFloat32(Register src, FloatRegister dest) {
-        vcvtsq2ss(src, dest, dest);
-    }
+        // Zero the output register to break dependencies, see convertInt32ToDouble.
+        zeroDouble(dest);
 
-    void convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest) {
-        vcvtsi2sdq(src.reg, dest);
+        vcvtsq2ss(src, dest, dest);
     }
 
     inline void incrementInt32Value(const Address& addr);

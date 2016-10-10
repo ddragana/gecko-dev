@@ -51,9 +51,6 @@ class CompileRuntime
     // &runtime()->activation_
     const void* addressOfActivation();
 
-    // &GetJitContext()->runtime->nativeIterCache.last
-    const void* addressOfLastCachedNativeIterator();
-
 #ifdef JS_GC_ZEAL
     const void* addressOfGCZealModeBits();
 #endif
@@ -69,7 +66,6 @@ class CompileRuntime
     // Compilation does not occur off thread when the SPS profiler is enabled.
     SPSProfiler& spsProfiler();
 
-    bool canUseSignalHandlers();
     bool jitSupportsFloatingPoint();
     bool hadOutOfMemory();
     bool profilingScripts();
@@ -90,6 +86,8 @@ class CompileRuntime
 
     const Nursery& gcNursery();
     void setMinorGCShouldCancelIonCompilations();
+
+    bool runtimeMatches(JSRuntime* rt);
 };
 
 class CompileZone
@@ -118,6 +116,7 @@ class CompileCompartment
 
     const void* addressOfEnumerators();
     const void* addressOfRandomNumberGenerator();
+    const void* addressOfLastCachedNativeIterator();
 
     const JitCompartment* jitCompartment();
 

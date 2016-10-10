@@ -64,14 +64,10 @@
 #include "VsyncSource.h"
 #include "mozilla/VsyncDispatcher.h"
 #include "nsThreadUtils.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/TimelineConsumers.h"
 #include "nsAnimationManager.h"
 #include "nsIDOMEvent.h"
-
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
 
 using namespace mozilla;
 using namespace mozilla::widget;
@@ -85,6 +81,20 @@ static mozilla::LazyLogModule sRefreshDriverLog("nsRefreshDriver");
 #define DEFAULT_RECOMPUTE_VISIBILITY_INTERVAL_MS 1000
 // after 10 minutes, stop firing off inactive timers
 #define DEFAULT_INACTIVE_TIMER_DISABLE_SECONDS 600
+
+// The number of seconds spent skipping frames because we are waiting for the compositor
+// before logging.
+#if defined(MOZ_ASAN)
+# define REFRESH_WAIT_WARNING 5
+#elif defined(DEBUG) && !defined(MOZ_VALGRIND)
+# define REFRESH_WAIT_WARNING 5
+#elif defined(DEBUG) && defined(MOZ_VALGRIND)
+# define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 20 : 5)
+#elif defined(MOZ_VALGRIND)
+# define REFRESH_WAIT_WARNING (RUNNING_ON_VALGRIND ? 10 : 1)
+#else
+# define REFRESH_WAIT_WARNING 1
+#endif
 
 namespace {
   // `true` if we are currently in jank-critical mode.
@@ -865,15 +875,6 @@ CreateVsyncRefreshTimer()
     return;
   }
 
-#ifdef MOZ_NUWA_PROCESS
-  // NUWA process will just use software timer. Use NuwaAddFinalConstructor()
-  // to register a callback to create the vsync-base refresh timer after a
-  // process is created.
-  if (IsNuwaProcess()) {
-    NuwaAddFinalConstructor(&CreateContentVsyncRefreshTimer, nullptr);
-    return;
-  }
-#endif
   // If this process is not created by NUWA, just create the vsync timer here.
   CreateContentVsyncRefreshTimer(nullptr);
 }
@@ -1022,13 +1023,13 @@ nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     mInRefresh(false),
     mWaitingForTransaction(false),
     mSkippedPaints(false),
-    mResizeSuppressed(false)
+    mResizeSuppressed(false),
+    mWarningThreshold(REFRESH_WAIT_WARNING)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mPresContext,
              "Need a pres context to tell us to call Disconnect() later "
              "and decrement sRefreshDriverCount.");
-
   mMostRecentRefreshEpochTime = JS_Now();
   mMostRecentRefresh = TimeStamp::Now();
   mMostRecentTick = mMostRecentRefresh;
@@ -1078,6 +1079,7 @@ nsRefreshDriver::AdvanceTimeAndRefresh(int64_t aMilliseconds)
       // Disable any refresh driver throttling when entering test mode
       mWaitingForTransaction = false;
       mSkippedPaints = false;
+      mWarningThreshold = REFRESH_WAIT_WARNING;
     }
   }
 
@@ -1668,6 +1670,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
     mRootRefresh = nullptr;
   }
   mSkippedPaints = false;
+  mWarningThreshold = 1;
 
   nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
   if (!presShell || (ObserverCount() == 0 && ImageRequestCount() == 0)) {
@@ -1742,7 +1745,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
             mStyleCause = nullptr;
           }
 
-          NS_ADDREF(shell);
+          nsCOMPtr<nsIPresShell> shellKungFuDeathGrip(shell);
           mStyleFlushObservers.RemoveElement(shell);
           RestyleManagerHandle restyleManager =
             shell->GetPresContext()->RestyleManager();
@@ -1755,8 +1758,6 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
           if (presContext) {
             presContext->NotifyFontFaceSetOnRefresh();
           }
-          NS_RELEASE(shell);
-
           mNeedToRecomputeVisibility = true;
         }
 
@@ -1784,7 +1785,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
           mReflowCause = nullptr;
         }
 
-        NS_ADDREF(shell);
+        nsCOMPtr<nsIPresShell> shellKungFuDeathGrip(shell);
         mLayoutFlushObservers.RemoveElement(shell);
         shell->mReflowScheduled = false;
         shell->mSuppressInterruptibleReflows = false;
@@ -1798,8 +1799,6 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
         if (presContext) {
           presContext->NotifyFontFaceSetOnRefresh();
         }
-        NS_RELEASE(shell);
-
         mNeedToRecomputeVisibility = true;
       }
 
@@ -1887,6 +1886,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   }
   mPresShellsToInvalidateIfHidden.Clear();
 
+  bool notifyGC = false;
   if (mViewManagerFlushIsPending) {
     RefPtr<TimelineConsumers> timelines = TimelineConsumers::Get();
 
@@ -1922,10 +1922,7 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
       timelines->AddMarkerForDocShell(docShell, "Paint",  MarkerTracingType::END);
     }
 
-    if (nsContentUtils::XPConnect()) {
-      nsContentUtils::XPConnect()->NotifyDidPaint();
-      nsJSContext::NotifyDidPaint();
-    }
+    notifyGC = true;
   }
 
 #ifndef ANDROID  /* bug 1142079 */
@@ -1941,6 +1938,15 @@ nsRefreshDriver::Tick(int64_t aNowEpoch, TimeStamp aNowTime)
   ConfigureHighPrecision();
 
   NS_ASSERTION(mInRefresh, "Still in refresh");
+
+  if (mPresContext->IsRoot() && XRE_IsContentProcess() && gfxPrefs::AlwaysPaint()) {
+    ScheduleViewManagerFlush();
+  }
+
+  if (notifyGC && nsContentUtils::XPConnect()) {
+    nsContentUtils::XPConnect()->NotifyDidPaint();
+    nsJSContext::NotifyDidPaint();
+  }
 }
 
 void
@@ -2001,6 +2007,7 @@ nsRefreshDriver::FinishedWaitingForTransaction()
     profiler_tracing("Paint", "RD", TRACING_INTERVAL_END);
   }
   mSkippedPaints = false;
+  mWarningThreshold = 1;
 }
 
 uint64_t
@@ -2013,6 +2020,7 @@ nsRefreshDriver::GetTransactionId()
       !mTestControllingRefreshes) {
     mWaitingForTransaction = true;
     mSkippedPaints = false;
+    mWarningThreshold = 1;
   }
 
   return mPendingTransaction;
@@ -2072,18 +2080,16 @@ nsRefreshDriver::IsWaitingForPaint(mozilla::TimeStamp aTime)
   if (mTestControllingRefreshes) {
     return false;
   }
-  // If we've skipped too many ticks then it's possible
-  // that something went wrong and we're waiting on
-  // a notification that will never arrive.
-  if (aTime > (mMostRecentTick + TimeDuration::FromMilliseconds(200))) {
-    mSkippedPaints = false;
-    mWaitingForTransaction = false;
-    if (mRootRefresh) {
-      mRootRefresh->RemoveRefreshObserver(this, Flush_Style);
-    }
-    return false;
-  }
+
   if (mWaitingForTransaction) {
+    if (mSkippedPaints && aTime > (mMostRecentTick + TimeDuration::FromMilliseconds(mWarningThreshold * 1000))) {
+      // XXX - Bug 1303369 - too many false positives.
+      //gfxCriticalNote << "Refresh driver waiting for the compositor for "
+      //                << (aTime - mMostRecentTick).ToSeconds()
+      //                << " seconds.";
+      mWarningThreshold *= 2;
+    }
+
     mSkippedPaints = true;
     return true;
   }

@@ -6,7 +6,7 @@
 #include "GMPDecryptorParent.h"
 #include "GMPContentParent.h"
 #include "MediaData.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 namespace mozilla {
 
@@ -41,7 +41,9 @@ GMPDecryptorParent::~GMPDecryptorParent()
 }
 
 nsresult
-GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback)
+GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback,
+                         bool aDistinctiveIdentifierRequired,
+                         bool aPersistentStateRequired)
 {
   LOGD(("GMPDecryptorParent[%p]::Init()", this));
 
@@ -50,7 +52,7 @@ GMPDecryptorParent::Init(GMPDecryptorProxyCallback* aCallback)
     return NS_ERROR_FAILURE;
   }
   mCallback = aCallback;
-  if (!SendInit()) {
+  if (!SendInit(aDistinctiveIdentifierRequired, aPersistentStateRequired)) {
     return NS_ERROR_FAILURE;
   }
   mIsOpen = true;
@@ -263,6 +265,18 @@ GMPDecryptorParent::RecvRejectPromise(const uint32_t& aPromiseId,
   return true;
 }
 
+
+static dom::MediaKeyMessageType
+ToMediaKeyMessageType(GMPSessionMessageType aMessageType) {
+  switch (aMessageType) {
+    case kGMPLicenseRequest: return dom::MediaKeyMessageType::License_request;
+    case kGMPLicenseRenewal: return dom::MediaKeyMessageType::License_renewal;
+    case kGMPLicenseRelease: return dom::MediaKeyMessageType::License_release;
+    case kGMPIndividualizationRequest: return dom::MediaKeyMessageType::Individualization_request;
+    default: return dom::MediaKeyMessageType::License_request;
+  };
+};
+
 bool
 GMPDecryptorParent::RecvSessionMessage(const nsCString& aSessionId,
                                        const GMPSessionMessageType& aMessageType,
@@ -275,7 +289,7 @@ GMPDecryptorParent::RecvSessionMessage(const nsCString& aSessionId,
     NS_WARNING("Trying to use a dead GMP decrypter!");
     return false;
   }
-  mCallback->SessionMessage(aSessionId, aMessageType, aMessage);
+  mCallback->SessionMessage(aSessionId, ToMediaKeyMessageType(aMessageType), aMessage);
   return true;
 }
 
@@ -329,18 +343,55 @@ GMPDecryptorParent::RecvSessionError(const nsCString& aSessionId,
   return true;
 }
 
+static dom::MediaKeyStatus
+ToMediaKeyStatus(GMPMediaKeyStatus aStatus) {
+  switch (aStatus) {
+    case kGMPUsable: return dom::MediaKeyStatus::Usable;
+    case kGMPExpired: return dom::MediaKeyStatus::Expired;
+    case kGMPOutputDownscaled: return dom::MediaKeyStatus::Output_downscaled;
+    case kGMPOutputRestricted: return dom::MediaKeyStatus::Output_restricted;
+    case kGMPInternalError: return dom::MediaKeyStatus::Internal_error;
+    case kGMPReleased: return dom::MediaKeyStatus::Released;
+    case kGMPStatusPending: return dom::MediaKeyStatus::Status_pending;
+    default: return dom::MediaKeyStatus::Internal_error;
+  }
+}
+
 bool
-GMPDecryptorParent::RecvKeyStatusChanged(const nsCString& aSessionId,
-                                         InfallibleTArray<uint8_t>&& aKeyId,
-                                         const GMPMediaKeyStatus& aStatus)
+GMPDecryptorParent::RecvBatchedKeyStatusChanged(const nsCString& aSessionId,
+                                                InfallibleTArray<GMPKeyInformation>&& aKeyInfos)
 {
-  LOGD(("GMPDecryptorParent[%p]::RecvKeyStatusChanged(sessionId='%s', keyId=%s, status=%d)",
-        this, aSessionId.get(), ToBase64(aKeyId).get(), aStatus));
+  LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(sessionId='%s', KeyInfos len='%d')",
+        this, aSessionId.get(), aKeyInfos.Length()));
 
   if (mIsOpen) {
-    mCallback->KeyStatusChanged(aSessionId, aKeyId, aStatus);
+    nsTArray<CDMKeyInfo> cdmKeyInfos(aKeyInfos.Length());
+    for (uint32_t i = 0; i < aKeyInfos.Length(); i++) {
+      LOGD(("GMPDecryptorParent[%p]::RecvBatchedKeyStatusChanged(keyId=%s, gmp-status=%d)",
+            this, ToBase64(aKeyInfos[i].keyId()).get(), aKeyInfos[i].status()));
+      // If the status is kGMPUnknown, we're going to forget(remove) that key info.
+      if (aKeyInfos[i].status() != kGMPUnknown) {
+        auto status = ToMediaKeyStatus(aKeyInfos[i].status());
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId(),
+                                             dom::Optional<dom::MediaKeyStatus>(status)));
+      } else {
+        cdmKeyInfos.AppendElement(CDMKeyInfo(aKeyInfos[i].keyId()));
+      }
+    }
+    mCallback->BatchedKeyStatusChanged(aSessionId, cdmKeyInfos);
   }
   return true;
+}
+
+DecryptStatus
+ToDecryptStatus(GMPErr aError)
+{
+  switch (aError) {
+    case GMPNoErr: return Ok;
+    case GMPNoKeyErr: return NoKeyErr;
+    case GMPAbortedErr: return AbortedErr;
+    default: return GenericErr;
+  }
 }
 
 bool
@@ -355,7 +406,7 @@ GMPDecryptorParent::RecvDecrypted(const uint32_t& aId,
     NS_WARNING("Trying to use a dead GMP decrypter!");
     return false;
   }
-  mCallback->Decrypted(aId, aErr, aBuffer);
+  mCallback->Decrypted(aId, ToDecryptStatus(aErr), aBuffer);
   return true;
 }
 

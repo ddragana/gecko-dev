@@ -268,11 +268,9 @@ struct WorkerLoadInfo
   bool mReportCSPViolations;
   bool mXHRParamsAllowed;
   bool mPrincipalIsSystem;
-  bool mIsInPrivilegedApp;
-  bool mIsInCertifiedApp;
   bool mStorageAllowed;
-  bool mPrivateBrowsing;
   bool mServiceWorkersTestingInWindow;
+  PrincipalOriginAttributes mOriginAttributes;
 
   WorkerLoadInfo();
   ~WorkerLoadInfo();
@@ -350,7 +348,7 @@ public:
 };
 
 WorkerCrossThreadDispatcher*
-GetWorkerCrossThreadDispatcher(JSContext* aCx, JS::Value aWorker);
+GetWorkerCrossThreadDispatcher(JSContext* aCx, const JS::Value& aWorker);
 
 // Random unique constant to facilitate JSPrincipal debugging
 const uint32_t kJSPrincipalsDebugToken = 0x7e2df9d2;

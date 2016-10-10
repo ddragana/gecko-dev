@@ -10,7 +10,7 @@ const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
 
 const webserver = Services.prefs.getCharPref("addon.test.damp.webserver");
 
-const SIMPLE_URL = "chrome://damp/content/pages/simple.html";
+const SIMPLE_URL = webserver + "/tests/devtools/addon/content/pages/simple.html";
 const COMPLICATED_URL = webserver + "/tests/tp5n/bild.de/www.bild.de/index.html";
 
 function Damp() {
@@ -19,6 +19,9 @@ function Damp() {
   this._heapSnapshotFilePath = null;
   // HeapSnapshot instance. Set by readHeapSnapshot, used by takeCensus.
   this._snapshot = null;
+
+  // Use the old console for now: https://bugzilla.mozilla.org/show_bug.cgi?id=1306780
+  Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", false);
 }
 
 Damp.prototype = {

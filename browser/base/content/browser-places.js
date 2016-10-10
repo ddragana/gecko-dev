@@ -128,6 +128,13 @@ var StarUI = {
             }
             this.panel.hidePopup();
             break;
+          // This case is for catching character-generating keypresses
+          case 0:
+            let accessKey = document.getElementById("key_close");
+            if (eventMatchesKey(aEvent, accessKey)) {
+                this.panel.hidePopup();
+            }
+            break;
         }
         break;
       case "mouseout":
@@ -253,12 +260,26 @@ var StarUI = {
         parent.setAttribute("open", "true");
       }
     }
-    this.panel.openPopup(aAnchorElement, aPosition);
+    let panel = this.panel;
+    let target = panel;
+    if (target.parentNode) {
+      // By targeting the panel's parent and using a capturing listener, we
+      // can have our listener called before others waiting for the panel to
+      // be shown (which probably expect the panel to be fully initialized)
+      target = target.parentNode;
+    }
+    target.addEventListener("popupshown", function shownListener(event) {
+      if (event.target == panel) {
+        target.removeEventListener("popupshown", shownListener, true);
 
-    gEditItemOverlay.initPanel({ node: aNode
-                               , hiddenRows: ["description", "location",
-                                              "loadInSidebar", "keyword"]
-                               , focusedElement: "preferred" });
+        gEditItemOverlay.initPanel({ node: aNode
+                                   , hiddenRows: ["description", "location",
+                                                  "loadInSidebar", "keyword"]
+                                   , focusedElement: "preferred"});
+      }
+    }, true);
+
+    this.panel.openPopup(aAnchorElement, aPosition);
   }),
 
   panelShown:
@@ -1166,7 +1187,7 @@ var PlacesToolbarHelper = {
   onWidgetUnderflow: function(aNode, aContainer) {
     // The view gets broken by being removed and reinserted by the overflowable
     // toolbar, so we have to force an uninit and reinit.
-    let win = aNode.ownerDocument.defaultView;
+    let win = aNode.ownerGlobal;
     if (aNode.id == "personal-bookmarks" && win == window) {
       this._resetView();
     }
@@ -1419,14 +1440,21 @@ var BookmarkingUI = {
         Services.prefs.removeObserver(this.RECENTLY_BOOKMARKED_PREF, prefObserver, false);
         PlacesUtils.bookmarks.removeObserver(this._recentlyBookmarkedObserver);
         this._recentlyBookmarkedObserver = null;
-        placesContextMenu.removeEventListener("popupshowing", onPlacesContextMenuShowing);
+        if (placesContextMenu) {
+          placesContextMenu.removeEventListener("popupshowing", onPlacesContextMenuShowing);
+        }
         bookmarksMenu.removeEventListener("popuphidden", onBookmarksMenuHidden);
       }
     };
 
     Services.prefs.addObserver(this.RECENTLY_BOOKMARKED_PREF, prefObserver, false);
     PlacesUtils.bookmarks.addObserver(this._recentlyBookmarkedObserver, true);
-    placesContextMenu.addEventListener("popupshowing", onPlacesContextMenuShowing);
+
+    // The context menu doesn't exist in non-browser windows on Mac
+    if (placesContextMenu) {
+      placesContextMenu.addEventListener("popupshowing", onPlacesContextMenuShowing);
+    }
+
     bookmarksMenu.addEventListener("popuphidden", onBookmarksMenuHidden);
   },
 
@@ -1626,7 +1654,7 @@ var BookmarkingUI = {
         try {
           PlacesUtils.addLazyBookmarkObserver(this);
           this._hasBookmarksObserver = true;
-        } catch(ex) {
+        } catch (ex) {
           Components.utils.reportError("BookmarkingUI failed adding a bookmarks observer: " + ex);
         }
       }
@@ -1909,7 +1937,7 @@ var BookmarkingUI = {
       gNavigatorBundle.getString("starButtonOverflowedStarred.label");
   },
   onWidgetOverflow: function(aNode, aContainer) {
-    let win = aNode.ownerDocument.defaultView;
+    let win = aNode.ownerGlobal;
     if (aNode.id != this.BOOKMARK_BUTTON_ID || win != window)
       return;
 
@@ -1925,7 +1953,7 @@ var BookmarkingUI = {
   },
 
   onWidgetUnderflow: function(aNode, aContainer) {
-    let win = aNode.ownerDocument.defaultView;
+    let win = aNode.ownerGlobal;
     if (aNode.id != this.BOOKMARK_BUTTON_ID || win != window)
       return;
 

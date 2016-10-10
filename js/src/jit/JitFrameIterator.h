@@ -378,7 +378,7 @@ struct MaybeReadFallback
         return UndefinedValue();
     }
 
-    NoGCValue noGCPlaceholder(Value v) const {
+    NoGCValue noGCPlaceholder(const Value& v) const {
         if (v.isMagic(JS_OPTIMIZED_OUT))
             return NoGC_MagicOptimizedOut;
         return NoGC_UndefinedValue;
@@ -445,7 +445,7 @@ class SnapshotIterator
 
     Value allocationValue(const RValueAllocation& a, ReadMethod rm = RM_Normal);
     MOZ_MUST_USE bool allocationReadable(const RValueAllocation& a, ReadMethod rm = RM_Normal);
-    void writeAllocationValuePayload(const RValueAllocation& a, Value v);
+    void writeAllocationValuePayload(const RValueAllocation& a, const Value& v);
     void warnUnreadableAllocation();
 
   private:
@@ -477,7 +477,7 @@ class SnapshotIterator
 
     // Used by recover instruction to store the value back into the instruction
     // results array.
-    void storeInstructionResult(Value v);
+    void storeInstructionResult(const Value& v);
 
   public:
     // Exhibits frame properties contained in the snapshot.
@@ -651,8 +651,8 @@ class InlineFrameIterator
 
   private:
     void findNextFrame();
-    JSObject* computeScopeChain(Value scopeChainValue, MaybeReadFallback& fallback,
-                                bool* hasCallObj = nullptr) const;
+    JSObject* computeEnvironmentChain(const Value& envChainValue, MaybeReadFallback& fallback,
+                                      bool* hasInitialEnv = nullptr) const;
 
   public:
     InlineFrameIterator(JSContext* cx, const JitFrameIterator* iter);
@@ -694,17 +694,17 @@ class InlineFrameIterator
 
     template <class ArgOp, class LocalOp>
     void readFrameArgsAndLocals(JSContext* cx, ArgOp& argOp, LocalOp& localOp,
-                                JSObject** scopeChain, bool* hasCallObj,
+                                JSObject** envChain, bool* hasInitialEnv,
                                 Value* rval, ArgumentsObject** argsObj, Value* thisv,
                                 ReadFrameArgsBehavior behavior,
                                 MaybeReadFallback& fallback) const
     {
         SnapshotIterator s(si_);
 
-        // Read the scope chain.
-        if (scopeChain) {
-            Value scopeChainValue = s.maybeRead(fallback);
-            *scopeChain = computeScopeChain(scopeChainValue, fallback, hasCallObj);
+        // Read the env chain.
+        if (envChain) {
+            Value envChainValue = s.maybeRead(fallback);
+            *envChain = computeEnvironmentChain(envChainValue, fallback, hasInitialEnv);
         } else {
             s.skip();
         }
@@ -744,7 +744,7 @@ class InlineFrameIterator
 
                     // Skip over all slots until we get to the last slots
                     // (= arguments slots of callee) the +3 is for [this], [returnvalue],
-                    // [scopechain], and maybe +1 for [argsObj]
+                    // [envchain], and maybe +1 for [argsObj]
                     MOZ_ASSERT(parent_s.numAllocations() >= nactual + 3 + argsObjAdj + hasNewTarget);
                     unsigned skip = parent_s.numAllocations() - nactual - 3 - argsObjAdj - hasNewTarget;
                     for (unsigned j = 0; j < skip; j++)
@@ -752,7 +752,7 @@ class InlineFrameIterator
 
                     // Get the overflown arguments
                     MaybeReadFallback unusedFallback;
-                    parent_s.skip(); // scope chain
+                    parent_s.skip(); // env chain
                     parent_s.skip(); // return value
                     parent_s.readFunctionFrameArgs(argOp, nullptr, nullptr,
                                                    nformal, nactual + isConstructing(), it.script(),
@@ -795,18 +795,18 @@ class InlineFrameIterator
     bool isFunctionFrame() const;
     bool isConstructing() const;
 
-    JSObject* scopeChain(MaybeReadFallback& fallback) const {
+    JSObject* environmentChain(MaybeReadFallback& fallback) const {
         SnapshotIterator s(si_);
 
-        // scopeChain
+        // envChain
         Value v = s.maybeRead(fallback);
-        return computeScopeChain(v, fallback);
+        return computeEnvironmentChain(v, fallback);
     }
 
     Value thisArgument(MaybeReadFallback& fallback) const {
         SnapshotIterator s(si_);
 
-        // scopeChain
+        // envChain
         s.skip();
 
         // return value

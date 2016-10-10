@@ -228,7 +228,7 @@ nsStyleUtil::AppendEscapedCSSFontFamilyList(
 
 
 /* static */ void
-nsStyleUtil::AppendBitmaskCSSValue(nsCSSProperty aProperty,
+nsStyleUtil::AppendBitmaskCSSValue(nsCSSPropertyID aProperty,
                                    int32_t aMaskedValue,
                                    int32_t aFirstMask,
                                    int32_t aLastMask,
@@ -593,36 +593,17 @@ nsStyleUtil::AppendSerializedFontSrc(const nsCSSValue& aValue,
 /* static */ void
 nsStyleUtil::AppendStepsTimingFunction(nsTimingFunction::Type aType,
                                        uint32_t aSteps,
-                                       nsTimingFunction::StepSyntax aSyntax,
                                        nsAString& aResult)
 {
   MOZ_ASSERT(aType == nsTimingFunction::Type::StepStart ||
              aType == nsTimingFunction::Type::StepEnd);
 
-  if (aSyntax == nsTimingFunction::StepSyntax::Keyword) {
-    if (aType == nsTimingFunction::Type::StepStart) {
-      aResult.AppendLiteral("step-start");
-    } else {
-      aResult.AppendLiteral("step-end");
-    }
-    return;
-  }
-
   aResult.AppendLiteral("steps(");
   aResult.AppendInt(aSteps);
-  switch (aSyntax) {
-    case nsTimingFunction::StepSyntax::Keyword:
-      // handled above
-      break;
-    case nsTimingFunction::StepSyntax::FunctionalWithStartKeyword:
-      aResult.AppendLiteral(", start)");
-      break;
-    case nsTimingFunction::StepSyntax::FunctionalWithEndKeyword:
-      aResult.AppendLiteral(", end)");
-      break;
-    case nsTimingFunction::StepSyntax::FunctionalWithoutKeyword:
-      aResult.Append(')');
-      break;
+  if (aType == nsTimingFunction::Type::StepStart) {
+    aResult.AppendLiteral(", start)");
+  } else {
+    aResult.AppendLiteral(")");
   }
 }
 
@@ -705,9 +686,8 @@ nsStyleUtil::IsSignificantChild(nsIContent* aChild, bool aTextIsSignificant,
 // For a replaced element whose concrete object size is no larger than the
 // element's content-box, this method checks whether the given
 // "object-position" coordinate might cause overflow in its dimension.
-typedef nsStyleImageLayers::Position::PositionCoord PositionCoord;
 static bool
-ObjectPositionCoordMightCauseOverflow(const PositionCoord& aCoord)
+ObjectPositionCoordMightCauseOverflow(const Position::Coord& aCoord)
 {
   // Any nonzero length in "object-position" can push us to overflow
   // (particularly if our concrete object size is exactly the same size as the
@@ -743,7 +723,7 @@ nsStyleUtil::ObjectPropsMightCauseOverflow(const nsStylePosition* aStylePos)
 
   // Check each of our "object-position" coords to see if it could cause
   // overflow in its dimension:
-  const nsStyleImageLayers::Position& objectPosistion = aStylePos->mObjectPosition;
+  const Position& objectPosistion = aStylePos->mObjectPosition;
   if (ObjectPositionCoordMightCauseOverflow(objectPosistion.mXPosition) ||
       ObjectPositionCoordMightCauseOverflow(objectPosistion.mYPosition)) {
     return true;

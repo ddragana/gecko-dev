@@ -11,19 +11,19 @@
     "TextDecoder": false,
     "TextEncoder": false,
     // Specific to WebExtensions:
-    "extensions": true,
-    "global": true,
     "Extension": true,
     "ExtensionManagement": true,
-    "ExtensionContext": true,
-    "GlobalManager": true,
+    "extensions": true,
+    "global": true,
+    "NetUtil": true,
     "openOptionsPage": true,
+    "require": false,
     "runSafe": true,
     "runSafeSync": true,
     "runSafeSyncWithoutClone": true,
-    "NetUtil": true,
     "Services": true,
     "TabManager": true,
+    "WindowListManager": true,
     "XPCOMUtils": true,
   },
 
@@ -226,7 +226,7 @@
     "space-infix-ops": [2, {"int32Hint": true}],
 
     // ++ and -- should not need spacing
-    "space-unary-ops": [1, {"nonwords": false}],
+    "space-unary-ops": [1, {"nonwords": false, "words": true, "overrides": {"typeof": false}}],
 
     // No comparisons to NaN
     "use-isnan": 2,

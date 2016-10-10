@@ -10,6 +10,8 @@
  *          promisePopupShown promisePopupHidden
  *          openContextMenu closeContextMenu
  *          openExtensionContextMenu closeExtensionContextMenu
+ *          imageBuffer getListStyleImage getPanelForNode
+ *          awaitExtensionPanel
  */
 
 var {AppConstants} = Cu.import("resource://gre/modules/AppConstants.jsm");
@@ -47,6 +49,17 @@ var focusWindow = Task.async(function* focusWindow(win) {
   yield promise;
 });
 
+let img = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQImWNgYGBgAAAABQABh6FO1AAAAABJRU5ErkJggg==";
+var imageBuffer = Uint8Array.from(atob(img), byte => byte.charCodeAt(0)).buffer;
+
+function getListStyleImage(button) {
+  let style = button.ownerDocument.defaultView.getComputedStyle(button);
+
+  let match = /^url\("(.*)"\)$/.exec(style.listStyleImage);
+
+  return match && match[1];
+}
+
 function promisePopupShown(popup) {
   return new Promise(resolve => {
     if (popup.state == "open") {
@@ -71,6 +84,32 @@ function promisePopupHidden(popup) {
   });
 }
 
+function getPanelForNode(node) {
+  while (node.localName != "panel") {
+    node = node.parentNode;
+  }
+  return node;
+}
+
+var awaitExtensionPanel = Task.async(function* (extension, win = window, filename = "popup.html") {
+  let {target} = yield BrowserTestUtils.waitForEvent(win.document, "load", true, (event) => {
+    return event.target.location && event.target.location.href.endsWith(filename);
+  });
+
+  let browser = target.defaultView
+                      .QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDocShell)
+                      .chromeEventHandler;
+
+  if (browser.matches(".webextension-preload-browser")) {
+    let event = yield BrowserTestUtils.waitForEvent(browser, "SwapDocShells");
+    browser = event.detail;
+  }
+
+  yield promisePopupShown(getPanelForNode(browser));
+
+  return browser;
+});
+
 function getBrowserActionWidget(extension) {
   return CustomizableUI.getWidget(makeWidgetId(extension.id) + "-browser-action");
 }
@@ -84,7 +123,7 @@ function getBrowserActionPopup(extension, win = window) {
   return win.PanelUI.panel;
 }
 
-var clickBrowserAction = Task.async(function* (extension, win = window) {
+var showBrowserAction = Task.async(function* (extension, win = window) {
   let group = getBrowserActionWidget(extension);
   let widget = group.forWindow(win);
 
@@ -93,6 +132,12 @@ var clickBrowserAction = Task.async(function* (extension, win = window) {
   } else if (group.areaType == CustomizableUI.TYPE_MENU_PANEL) {
     yield win.PanelUI.show();
   }
+});
+
+var clickBrowserAction = Task.async(function* (extension, win = window) {
+  yield showBrowserAction(extension, win);
+
+  let widget = getBrowserActionWidget(extension).forWindow(win);
 
   EventUtils.synthesizeMouseAtCenter(widget.node, {}, win);
 });
@@ -106,10 +151,10 @@ function closeBrowserAction(extension, win = window) {
   return Promise.resolve();
 }
 
-function* openContextMenu(id) {
+function* openContextMenu(selector = "#img1") {
   let contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   let popupShownPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popupshown");
-  yield BrowserTestUtils.synthesizeMouseAtCenter(id, {type: "contextmenu", button: 2}, gBrowser.selectedBrowser);
+  yield BrowserTestUtils.synthesizeMouseAtCenter(selector, {type: "contextmenu"}, gBrowser.selectedBrowser);
   yield popupShownPromise;
   return contentAreaContextMenu;
 }
@@ -121,8 +166,8 @@ function* closeContextMenu() {
   yield popupHiddenPromise;
 }
 
-function* openExtensionContextMenu() {
-  let contextMenu = yield openContextMenu("#img1");
+function* openExtensionContextMenu(selector = "#img1") {
+  let contextMenu = yield openContextMenu(selector);
   let topLevelMenu = contextMenu.getElementsByAttribute("ext-type", "top-level-menu");
 
   // Return null if the extension only has one item and therefore no extension menu.

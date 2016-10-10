@@ -104,9 +104,9 @@ this.GeckoDriver = function(appName, stopSignal) {
   // points to current browser
   this.curBrowser = null;
   this.context = Context.CONTENT;
-  this.scriptTimeout = null;
+  this.scriptTimeout = 30000;  // 30 seconds
   this.searchTimeout = null;
-  this.pageTimeout = null;
+  this.pageTimeout = 300000;  // five minutes
   this.timer = null;
   this.inactivityTimer = null;
   this.marionetteLog = new logging.ContentLogger();
@@ -128,9 +128,9 @@ this.GeckoDriver = function(appName, stopSignal) {
 
   this.sessionCapabilities = {
     // mandated capabilities
-    "browserName": Services.appinfo.name,
+    "browserName": Services.appinfo.name.toLowerCase(),
     "browserVersion": Services.appinfo.version,
-    "platformName": Services.sysinfo.getProperty("name"),
+    "platformName": Services.sysinfo.getProperty("name").toLowerCase(),
     "platformVersion": Services.sysinfo.getProperty("version"),
     "specificationLevel": 0,
 
@@ -307,8 +307,7 @@ GeckoDriver.prototype.addBrowser = function(win) {
  * @param {boolean=false} isNewSession
  *     True if this is the first time we're talking to this browser.
  */
-GeckoDriver.prototype.startBrowser = function(win, isNewSession=false) {
-  logger.info(`startBrowser ${this.sessionId}`)
+GeckoDriver.prototype.startBrowser = function(win, isNewSession = false) {
   this.mainFrame = win;
   this.curFrame = null;
   this.addBrowser(win);
@@ -334,13 +333,23 @@ GeckoDriver.prototype.whenBrowserStarted = function(win, isNewSession) {
       // with no children, we don't have a hope of coming back from this call,
       // so send the ack here. Otherwise, make a note of how many child scripts
       // will be loaded so we known when it's safe to return.
+      // Child managers may not have child scripts yet (e.g. socialapi), only
+      // count child managers that have children, but only count the top level
+      // children as they are the ones that we expect a response from.
       if (mm.childCount !== 0) {
-        this.curBrowser.frameRegsPending = mm.childCount;
+        this.curBrowser.frameRegsPending = 0;
+        for (let i = 0; i < mm.childCount; i++) {
+          if (mm.getChildAt(i).childCount !== 0)
+            this.curBrowser.frameRegsPending += 1;
+        }
       }
     }
 
     if (!Preferences.get(CONTENT_LISTENER_PREF) || !isNewSession) {
-      mm.loadFrameScript(FRAME_SCRIPT, true, true);
+      // load listener into the remote frame
+      // and any applicable new frames
+      // opened after this call
+      mm.loadFrameScript(FRAME_SCRIPT, true);
       Preferences.set(CONTENT_LISTENER_PREF, true);
     }
   } else {
@@ -929,20 +938,6 @@ GeckoDriver.prototype.executeJSScript = function(cmd, resp) {
 };
 
 /**
- * Set the timeout for asynchronous script execution.
- *
- * @param {number} ms
- *     Time in milliseconds.
- */
-GeckoDriver.prototype.setScriptTimeout = function(cmd, resp) {
-  let ms = parseInt(cmd.parameters.ms);
-  if (isNaN(ms)) {
-    throw new WebDriverError("Not a Number");
-  }
-  this.scriptTimeout = ms;
-};
-
-/**
  * Navigate to given URL.
  *
  * Navigates the current browsing context to the given URL and waits for
@@ -1235,12 +1230,10 @@ GeckoDriver.prototype.getChromeWindowHandles = function(cmd, resp) {
  * Get the current window position.
  *
  * @return {Object.<string, number>}
- *     Object with x and y coordinates.
+ *     Object with |x| and |y| coordinates.
  */
 GeckoDriver.prototype.getWindowPosition = function(cmd, resp) {
-  let win = this.getCurrentWindow();
-  resp.body.x = win.screenX;
-  resp.body.y = win.screenY;
+  return this.curBrowser.position;
 };
 
 /**
@@ -1252,20 +1245,25 @@ GeckoDriver.prototype.getWindowPosition = function(cmd, resp) {
  * @param {number} y
  *     Y coordinate of the top/left of the window that it will be
  *     moved to.
+ *
+ * @return {Object.<string, number>}
+ *     Object with |x| and |y| coordinates.
  */
 GeckoDriver.prototype.setWindowPosition = function(cmd, resp) {
   if (this.appName != "Firefox") {
-    throw new WebDriverError("Unable to set the window position on mobile");
+    throw new UnsupportedOperationError("Unable to set the window position on mobile");
   }
 
-  let x = parseInt(cmd.parameters.x);
-  let y  = parseInt(cmd.parameters.y);
-  if (isNaN(x) || isNaN(y)) {
-    throw new UnknownError("x and y arguments should be integers");
+  let {x, y} = cmd.parameters;
+  if (!Number.isInteger(x) || !Number.isInteger(y) ||
+      x < 0 || y < 0) {
+    throw new InvalidArgumentError();
   }
 
   let win = this.getCurrentWindow();
   win.moveTo(x, y);
+
+  return this.curBrowser.position;
 };
 
 /**
@@ -1355,13 +1353,19 @@ GeckoDriver.prototype.getActiveFrame = function(cmd, resp) {
       // no frame means top-level
       resp.body.value = null;
       if (this.curFrame) {
-        resp.body.value = this.curBrowser.seenEls
+        let elRef = this.curBrowser.seenEls
             .add(this.curFrame.frameElement);
+        let el = element.makeWebElement(elRef);
+        resp.body.value = el;
       }
       break;
 
     case Context.CONTENT:
-      resp.body.value = this.currentFrameElement;
+      resp.body.value = null;
+      if (this.currentFrameElement !== null) {
+        let el = element.makeWebElement(this.currentFrameElement);
+        resp.body.value = el;
+      }
       break;
   }
 };
@@ -1532,46 +1536,50 @@ GeckoDriver.prototype.switchToFrame = function*(cmd, resp) {
 };
 
 /**
- * Set timeout for searching for elements.
- *
- * @param {number} ms
- *     Search timeout in milliseconds.
- */
-GeckoDriver.prototype.setSearchTimeout = function(cmd, resp) {
-  let ms = parseInt(cmd.parameters.ms);
-  if (isNaN(ms)) {
-    throw new WebDriverError("Not a Number");
-  }
-  this.searchTimeout = ms;
-};
-
-/**
  * Set timeout for page loading, searching, and scripts.
  *
- * @param {string} type
- *     Type of timeout.
- * @param {number} ms
- *     Timeout in milliseconds.
+ * @param {Object.<string, number>}
+ *     Dictionary of timeout types and their new value, where all timeout
+ *     types are optional.
+ *
+ * @throws {InvalidArgumentError}
+ *     If timeout type key is unknown, or the value provided with it is
+ *     not an integer.
  */
 GeckoDriver.prototype.timeouts = function(cmd, resp) {
-  let typ = cmd.parameters.type;
-  let ms = parseInt(cmd.parameters.ms);
-  if (isNaN(ms)) {
-    throw new WebDriverError("Not a Number");
+  // backwards compatibility with old API
+  // that accepted a dictionary {type: <string>, ms: <number>}
+  let timeouts = {};
+  if (typeof cmd.parameters == "object" &&
+      "type" in cmd.parameters &&
+      "ms" in cmd.parameters) {
+    logger.warn("Using deprecated data structure for setting timeouts");
+    timeouts = {[cmd.parameters.type]: parseInt(cmd.parameters.ms)};
+  } else {
+    timeouts = cmd.parameters;
   }
 
-  switch (typ) {
-    case "implicit":
-      this.setSearchTimeout(cmd, resp);
-      break;
+  for (let [typ, ms] of Object.entries(timeouts)) {
+    if (!Number.isInteger(ms)) {
+      throw new InvalidArgumentError();
+    }
 
-    case "script":
-      this.setScriptTimeout(cmd, resp);
-      break;
+    switch (typ) {
+      case "implicit":
+        this.searchTimeout = ms;
+        break;
 
-    default:
-      this.pageTimeout = ms;
-      break;
+      case "script":
+        this.scriptTimeout = ms;
+        break;
+
+      case "page load":
+        this.pageTimeout = ms;
+        break;
+
+      default:
+        throw new InvalidArgumentError();
+    }
   }
 };
 
@@ -2007,36 +2015,7 @@ GeckoDriver.prototype.sendKeysToElement = function*(cmd, resp) {
       break;
 
     case Context.CONTENT:
-      let err;
-      let listener = function(msg) {
-        this.mm.removeMessageListener("Marionette:setElementValue", listener);
-
-        let val = msg.data.value;
-        let el = msg.objects.element;
-        let win = this.getCurrentWindow();
-
-        if (el.type == "file") {
-          Cu.importGlobalProperties(["File"]);
-          let fs = Array.prototype.slice.call(el.files);
-          let file;
-          try {
-            file = new File(val);
-          } catch (e) {
-            err = new InvalidArgumentError(`File not found: ${val}`);
-          }
-          fs.push(file);
-          el.mozSetFileArray(fs);
-        } else {
-          el.value = val;
-        }
-      }.bind(this);
-
-      this.mm.addMessageListener("Marionette:setElementValue", listener);
-      yield this.listener.sendKeysToElement({id: id, value: value});
-      this.mm.removeMessageListener("Marionette:setElementValue", listener);
-      if (err) {
-        throw err;
-      }
+      yield this.listener.sendKeysToElement(id, value);
       break;
   }
 };
@@ -2282,7 +2261,12 @@ GeckoDriver.prototype.sessionTearDown = function(cmd, resp) {
   // reset frame to the top-most frame
   this.curFrame = null;
   if (this.mainFrame) {
-    this.mainFrame.focus();
+    try {
+      this.mainFrame.focus();
+    }
+    catch (e) {
+      this.mainFrame = null;
+    }
   }
 
   this.sessionId = null;
@@ -2492,6 +2476,7 @@ GeckoDriver.prototype.setWindowSize = function(cmd, resp) {
   let {width, height} = cmd.parameters;
   let win = this.getCurrentWindow();
   win.resizeTo(width, height);
+  this.getWindowSize(cmd, resp);
 };
 
 /**
@@ -2584,7 +2569,7 @@ GeckoDriver.prototype.quitApplication = function(cmd, resp) {
   }
 
   let flags = Ci.nsIAppStartup.eAttemptQuit;
-  for (let k of cmd.parameters.flags) {
+  for (let k of cmd.parameters.flags || []) {
     flags |= Ci.nsIAppStartup[k];
   }
 
@@ -2680,23 +2665,6 @@ GeckoDriver.prototype.receiveMessage = function(message) {
       }
       return results;
 
-    case "Marionette:getFiles":
-      // Generates file objects to send back to the content script
-      // for handling file uploads.
-      let val = message.json.value;
-      let command_id = message.json.command_id;
-      Cu.importGlobalProperties(["File"]);
-      try {
-        let file = new File(val);
-        this.sendAsync("receiveFiles",
-                       {file: file, command_id: command_id});
-      } catch (e) {
-        let err = `File not found: ${val}`;
-        this.sendAsync("receiveFiles",
-                       {error: err, command_id: command_id});
-      }
-      break;
-
     case "Marionette:emitTouchEvent":
       globalMessageManager.broadcastAsyncMessage(
           "MarionetteMainListener:emitTouchEvent", message.json);
@@ -2736,14 +2704,12 @@ GeckoDriver.prototype.commands = {
   "setContext": GeckoDriver.prototype.setContext,
   "getContext": GeckoDriver.prototype.getContext,
   "executeScript": GeckoDriver.prototype.executeScript,
-  "setScriptTimeout": GeckoDriver.prototype.setScriptTimeout,
   "timeouts": GeckoDriver.prototype.timeouts,
   "singleTap": GeckoDriver.prototype.singleTap,
   "actionChain": GeckoDriver.prototype.actionChain,
   "multiAction": GeckoDriver.prototype.multiAction,
   "executeAsyncScript": GeckoDriver.prototype.executeAsyncScript,
   "executeJSScript": GeckoDriver.prototype.executeJSScript,
-  "setSearchTimeout": GeckoDriver.prototype.setSearchTimeout,
   "findElement": GeckoDriver.prototype.findElement,
   "findElements": GeckoDriver.prototype.findElements,
   "clickElement": GeckoDriver.prototype.clickElement,

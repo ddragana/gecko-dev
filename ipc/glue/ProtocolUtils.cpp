@@ -10,10 +10,13 @@
 #include <errno.h>
 #endif
 
-#include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/ipc/MessageChannel.h"
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/StaticMutex.h"
+#include "nsPrintfCString.h"
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
 #define TARGET_SANDBOX_EXPORTS
@@ -61,116 +64,16 @@ void ProtocolCloneContext::SetContentParent(ContentParent* aContentParent)
   mContentParent = aContentParent;
 }
 
-static StaticMutex gProtocolMutex;
-
 IToplevelProtocol::IToplevelProtocol(ProtocolId aProtoId)
- : mOpener(nullptr)
- , mProtocolId(aProtoId)
+ : mProtocolId(aProtoId)
 {
 }
 
 IToplevelProtocol::~IToplevelProtocol()
 {
-  StaticMutexAutoLock al(gProtocolMutex);
-
-  for (IToplevelProtocol* actor = mOpenActors.getFirst();
-       actor;
-       actor = actor->getNext()) {
-    actor->mOpener = nullptr;
-  }
-
-  mOpenActors.clear();
-
-  if (mOpener) {
-      removeFrom(mOpener->mOpenActors);
-  }
-
   if (mTrans) {
     RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(mTrans.release());
     XRE_GetIOMessageLoop()->PostTask(task.forget());
-  }
-}
-
-void
-IToplevelProtocol::AddOpenedActorLocked(IToplevelProtocol* aActor)
-{
-  gProtocolMutex.AssertCurrentThreadOwns();
-
-#ifdef DEBUG
-  for (const IToplevelProtocol* actor = mOpenActors.getFirst();
-       actor;
-       actor = actor->getNext()) {
-    NS_ASSERTION(actor != aActor,
-                 "Open the same protocol for more than one time");
-  }
-#endif
-
-  aActor->mOpener = this;
-  mOpenActors.insertBack(aActor);
-}
-
-void
-IToplevelProtocol::AddOpenedActor(IToplevelProtocol* aActor)
-{
-  StaticMutexAutoLock al(gProtocolMutex);
-  AddOpenedActorLocked(aActor);
-}
-
-void
-IToplevelProtocol::GetOpenedActorsLocked(nsTArray<IToplevelProtocol*>& aActors)
-{
-  gProtocolMutex.AssertCurrentThreadOwns();
-
-  for (IToplevelProtocol* actor = mOpenActors.getFirst();
-       actor;
-       actor = actor->getNext()) {
-    aActors.AppendElement(actor);
-  }
-}
-
-void
-IToplevelProtocol::GetOpenedActors(nsTArray<IToplevelProtocol*>& aActors)
-{
-  StaticMutexAutoLock al(gProtocolMutex);
-  GetOpenedActorsLocked(aActors);
-}
-
-size_t
-IToplevelProtocol::GetOpenedActorsUnsafe(IToplevelProtocol** aActors, size_t aActorsMax)
-{
-  size_t count = 0;
-  for (IToplevelProtocol* actor = mOpenActors.getFirst();
-       actor;
-       actor = actor->getNext()) {
-    MOZ_RELEASE_ASSERT(count < aActorsMax);
-    aActors[count++] = actor;
-  }
-  return count;
-}
-
-IToplevelProtocol*
-IToplevelProtocol::CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
-                                 base::ProcessHandle aPeerProcess,
-                                 ProtocolCloneContext* aCtx)
-{
-  NS_NOTREACHED("Clone() for this protocol actor is not implemented");
-  return nullptr;
-}
-
-void
-IToplevelProtocol::CloneOpenedToplevels(IToplevelProtocol* aTemplate,
-                                        const InfallibleTArray<ProtocolFdMapping>& aFds,
-                                        base::ProcessHandle aPeerProcess,
-                                        ProtocolCloneContext* aCtx)
-{
-  StaticMutexAutoLock al(gProtocolMutex);
-
-  nsTArray<IToplevelProtocol*> actors;
-  aTemplate->GetOpenedActorsLocked(actors);
-
-  for (size_t i = 0; i < actors.Length(); i++) {
-    IToplevelProtocol* newactor = actors[i]->CloneToplevel(aFds, aPeerProcess, aCtx);
-    AddOpenedActorLocked(newactor);
   }
 }
 
@@ -180,10 +83,10 @@ public:
   ChannelOpened(TransportDescriptor aDescriptor,
                 ProcessId aOtherProcess,
                 ProtocolId aProtocol,
-                PriorityValue aPriority = PRIORITY_NORMAL)
+                NestedLevel aNestedLevel = NOT_NESTED)
     : IPC::Message(MSG_ROUTING_CONTROL, // these only go to top-level actors
                    CHANNEL_OPENED_MESSAGE_TYPE,
-                   aPriority)
+                   aNestedLevel)
   {
     IPC::WriteParam(this, aDescriptor);
     IPC::WriteParam(this, aOtherProcess);
@@ -225,7 +128,7 @@ Bridge(const PrivateIPDLInterface&,
   if (!aParentChannel->Send(new ChannelOpened(parentSide,
                                               aChildPid,
                                               aProtocol,
-                                              IPC::Message::PRIORITY_URGENT))) {
+                                              IPC::Message::NESTED_INSIDE_CPOW))) {
     CloseDescriptor(parentSide);
     CloseDescriptor(childSide);
     return NS_ERROR_BRIDGE_OPEN_PARENT;
@@ -234,7 +137,7 @@ Bridge(const PrivateIPDLInterface&,
   if (!aChildChannel->Send(new ChannelOpened(childSide,
                                             aParentPid,
                                             aChildProtocol,
-                                            IPC::Message::PRIORITY_URGENT))) {
+                                            IPC::Message::NESTED_INSIDE_CPOW))) {
     CloseDescriptor(parentSide);
     CloseDescriptor(childSide);
     return NS_ERROR_BRIDGE_OPEN_CHILD;
@@ -315,7 +218,7 @@ bool DuplicateHandle(HANDLE aSourceHandle,
                                                 FALSE,
                                                 aTargetProcessId));
   if (!targetProcess) {
-#ifdef MOZ_CRASH_REPORTER
+#ifdef MOZ_CRASHREPORTER
     CrashReporter::AnnotateCrashReport(
       NS_LITERAL_CSTRING("IPCTransportFailureReason"),
       NS_LITERAL_CSTRING("Failed to open target process."));
@@ -345,83 +248,15 @@ AnnotateSystemError()
       nsPrintfCString("%lld", error));
   }
 }
-
-void
-AnnotateProcessInformation(base::ProcessId aPid)
-{
-#ifdef XP_WIN
-  ScopedProcessHandle processHandle(
-    OpenProcess(READ_CONTROL|PROCESS_QUERY_INFORMATION, FALSE, aPid));
-  if (!processHandle) {
-    CrashReporter::AnnotateCrashReport(
-      NS_LITERAL_CSTRING("IPCExtraSystemError"),
-      nsPrintfCString("Failed to get information of process %d, error(%d)",
-                      aPid,
-                      ::GetLastError()));
-    return;
-  }
-
-  DWORD exitCode = 0;
-  if (!::GetExitCodeProcess(processHandle, &exitCode)) {
-    CrashReporter::AnnotateCrashReport(
-      NS_LITERAL_CSTRING("IPCExtraSystemError"),
-      nsPrintfCString("Failed to get exit information of process %d, error(%d)",
-                      aPid,
-                      ::GetLastError()));
-    return;
-  }
-
-  if (exitCode != STILL_ACTIVE) {
-    CrashReporter::AnnotateCrashReport(
-      NS_LITERAL_CSTRING("IPCExtraSystemError"),
-      nsPrintfCString("Process %d is not alive. Exit code: %d",
-                      aPid,
-                      exitCode));
-    return;
-  }
-
-  ScopedPSecurityDescriptor secDesc(nullptr);
-  PSID ownerSid = nullptr;
-  DWORD rv = ::GetSecurityInfo(processHandle,
-                               SE_KERNEL_OBJECT,
-                               OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                               &ownerSid,
-                               nullptr,
-                               nullptr,
-                               nullptr,
-                               &secDesc.rwget());
-  if (rv != ERROR_SUCCESS) {
-    // GetSecurityInfo() failed.
-    CrashReporter::AnnotateCrashReport(
-      NS_LITERAL_CSTRING("IPCExtraSystemError"),
-      nsPrintfCString("Failed to get security information of process %d,"
-                      " error(%d)",
-                      aPid,
-                      rv));
-    return;
-  }
-
-  ScopedLPTStr ownerSidStr(nullptr);
-  nsString annotation{};
-  annotation.AppendLiteral("Owner: ");
-  if (::ConvertSidToStringSid(ownerSid, &ownerSidStr.rwget())) {
-    annotation.Append(ownerSidStr.get());
-  }
-
-  ScopedLPTStr secDescStr(nullptr);
-  annotation.AppendLiteral(", Security Descriptor: ");
-  if (::ConvertSecurityDescriptorToStringSecurityDescriptor(secDesc,
-                                                            SDDL_REVISION_1,
-                                                            DACL_SECURITY_INFORMATION,
-                                                            &secDescStr.rwget(),
-                                                            nullptr)) {
-    annotation.Append(secDescStr.get());
-  }
-
-  CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("IPCExtraSystemError"),
-    NS_ConvertUTF16toUTF8(annotation));
 #endif
+
+#if defined(MOZ_CRASHREPORTER) && defined(XP_MACOSX)
+void
+AnnotateCrashReportWithErrno(const char* tag, int error)
+{
+  CrashReporter::AnnotateCrashReport(
+    nsCString(tag),
+    nsPrintfCString("%d", error));
 }
 #endif
 
@@ -527,6 +362,18 @@ void ArrayLengthReadError(const char* aElementName)
 {
   nsPrintfCString message("error deserializing length of %s[]", aElementName);
   NS_RUNTIMEABORT(message.get());
+}
+
+void
+TableToArray(const nsTHashtable<nsPtrHashKey<void>>& aTable,
+             nsTArray<void*>& aArray)
+{
+  uint32_t i = 0;
+  void** elements = aArray.AppendElements(aTable.Count());
+  for (auto iter = aTable.ConstIter(); !iter.Done(); iter.Next()) {
+    elements[i] = iter.Get()->GetKey();
+    ++i;
+  }
 }
 
 } // namespace ipc

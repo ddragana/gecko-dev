@@ -18,7 +18,7 @@
 #include "nsIPrincipal.h"
 #include "FrameMetrics.h"
 #include "nsIWidget.h"
-#include "nsCSSProperty.h"
+#include "nsCSSPropertyID.h"
 #include "nsStyleCoord.h"
 #include "nsStyleConsts.h"
 #include "nsGkAtoms.h"
@@ -27,7 +27,7 @@
 #include "mozilla/gfx/2D.h"
 #include "Units.h"
 #include "mozilla/ToString.h"
-#include "nsHTMLReflowMetrics.h"
+#include "mozilla/ReflowOutput.h"
 #include "ImageContainer.h"
 #include "gfx2DGlue.h"
 
@@ -694,8 +694,9 @@ public:
   static nsIFrame* GetFloatFromPlaceholder(nsIFrame* aPlaceholder);
 
   // Combine aNewBreakType with aOrigBreakType, but limit the break types
-  // to NS_STYLE_CLEAR_LEFT, RIGHT, LEFT_AND_RIGHT.
-  static uint8_t CombineBreakType(uint8_t aOrigBreakType, uint8_t aNewBreakType);
+  // to StyleClear::Left, Right, Both.
+  static mozilla::StyleClear CombineBreakType(mozilla::StyleClear aOrigBreakType,
+                                              mozilla::StyleClear aNewBreakType);
 
   /**
    * Get the coordinates of a given DOM mouse event, relative to a given
@@ -1380,6 +1381,7 @@ public:
     IGNORE_PADDING = 0x01,
     BAIL_IF_REFLOW_NEEDED = 0x02, // returns NS_INTRINSIC_WIDTH_UNKNOWN if so
     MIN_INTRINSIC_ISIZE = 0x04, // use min-width/height instead of width/height
+    ADD_PERCENTS = 0x08, // apply AddPercents also for MIN_ISIZE
   };
   static nscoord IntrinsicForAxis(mozilla::PhysicalAxis aAxis,
                                   nsRenderingContext*   aRenderingContext,
@@ -1422,14 +1424,10 @@ public:
    * 'aPercent' percent of the returned value.  If 'aPercent' is less than
    * or equal to zero the original 'aCurrent' value is returned. If 'aPercent'
    * is greater than or equal to 1.0 the value nscoord_MAX is returned.
-   * (We don't increase the size if MIN_ISIZE is passed in, though.)
    */
-  static nscoord AddPercents(IntrinsicISizeType aType, nscoord aCurrent,
-                             float aPercent)
+  static nscoord AddPercents(nscoord aCurrent, float aPercent)
   {
-    if (aPercent > 0.0f && aType == nsLayoutUtils::PREF_ISIZE) {
-      // XXX Should we also consider percentages for min widths, up to a
-      // limit?
+    if (aPercent > 0.0f) {
       return MOZ_UNLIKELY(aPercent >= 1.0f) ? nscoord_MAX
         : NSToCoordRound(float(aCurrent) / (1.0f - aPercent));
     }
@@ -1556,7 +1554,7 @@ public:
                                     nsRenderingContext* aRenderingContext);
 
   // Get a suitable foreground color for painting aProperty for aFrame.
-  static nscolor GetColor(nsIFrame* aFrame, nsCSSProperty aProperty);
+  static nscolor GetColor(nsIFrame* aFrame, nsCSSPropertyID aProperty);
 
   // Get a baseline y position in app units that is snapped to device pixels.
   static gfxFloat GetSnappedBaselineY(nsIFrame* aFrame, gfxContext* aContext,
@@ -2232,11 +2230,11 @@ public:
                                         bool clear);
 
   /**
-   * Returns true if the frame has current (i.e. running or scheduled-to-run)
-   * animations or transitions for the property.
+   * Returns true if the frame has animations or transitions that are running
+   * or filling forwards for the specified property.
    */
-  static bool HasCurrentAnimationOfProperty(const nsIFrame* aFrame,
-                                            nsCSSProperty aProperty);
+  static bool HasActiveAnimationOfProperty(const nsIFrame* aFrame,
+                                           nsCSSPropertyID aProperty);
 
   /**
    * Returns true if the frame has any current CSS transitions.
@@ -2246,20 +2244,12 @@ public:
   static bool HasCurrentTransitions(const nsIFrame* aFrame);
 
   /**
-   * Returns true if the frame has any current animations or transitions
-   * for any of the specified properties.
-   */
-  static bool HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
-                                                const nsCSSProperty* aProperties,
-                                                size_t aPropertyCount);
-
-  /**
    * Returns true if the frame has current or in-effect (i.e. in before phase,
    * running or filling) animations or transitions for the
    * property.
    */
   static bool HasRelevantAnimationOfProperty(const nsIFrame* aFrame,
-                                             nsCSSProperty aProperty);
+                                             nsCSSPropertyID aProperty);
 
   /**
    * Checks if off-main-thread animations are enabled.
@@ -2285,12 +2275,6 @@ public:
   static gfxSize ComputeSuitableScaleForAnimation(const nsIFrame* aFrame,
                                                   const nsSize& aVisibleSize,
                                                   const nsSize& aDisplaySize);
-
-  /**
-   * Checks if we should forcibly use nearest pixel filtering for the
-   * background.
-   */
-  static bool UseBackgroundNearestFiltering();
 
   /**
    * Checks whether we want to use the GPU to scale images when
@@ -2433,6 +2417,17 @@ public:
 
   static bool TextCombineUprightDigitsEnabled() {
     return sTextCombineUprightDigitsEnabled;
+  }
+
+  // Stylo (the Servo backend for Gecko's style system) is generally enabled
+  // or disabled at compile-time. However, we provide the additional capability
+  // to disable it dynamically in stylo-enabled builds via a pref.
+  static bool StyloEnabled() {
+#ifdef MOZ_STYLO
+    return sStyloEnabled;
+#else
+    return false;
+#endif
   }
 
   /**
@@ -2738,7 +2733,7 @@ public:
   static bool IsOutlineStyleAutoEnabled();
 
   static void SetBSizeFromFontMetrics(const nsIFrame* aFrame,
-                                      nsHTMLReflowMetrics& aMetrics,
+                                      mozilla::ReflowOutput& aMetrics,
                                       const mozilla::LogicalMargin& aFramePadding,
                                       mozilla::WritingMode aLineWM,
                                       mozilla::WritingMode aFrameWM);
@@ -2875,6 +2870,9 @@ private:
   static bool sInterruptibleReflowEnabled;
   static bool sSVGTransformBoxEnabled;
   static bool sTextCombineUprightDigitsEnabled;
+#ifdef MOZ_STYLO
+  static bool sStyloEnabled;
+#endif
 
   /**
    * Helper function for LogTestDataForPaint().

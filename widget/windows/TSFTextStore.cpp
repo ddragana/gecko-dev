@@ -663,6 +663,34 @@ public:
   virtual ~GetWritingModeName() {}
 };
 
+class GetEscapedUTF8String final : public NS_ConvertUTF16toUTF8
+{
+public:
+  explicit GetEscapedUTF8String(const nsAString& aString)
+    : NS_ConvertUTF16toUTF8(aString)
+  {
+    Escape();
+  }
+  explicit GetEscapedUTF8String(const char16ptr_t aString)
+    : NS_ConvertUTF16toUTF8(aString)
+  {
+    Escape();
+  }
+  GetEscapedUTF8String(const char16ptr_t aString, uint32_t aLength)
+    : NS_ConvertUTF16toUTF8(aString, aLength)
+  {
+    Escape();
+  }
+
+private:
+  void Escape()
+  {
+    ReplaceSubstring("\r", "\\r");
+    ReplaceSubstring("\n", "\\n");
+    ReplaceSubstring("\t", "\\t");
+  }
+};
+
 /******************************************************************/
 /* InputScopeImpl                                                 */
 /******************************************************************/
@@ -807,11 +835,11 @@ public:
     return mLangID == 0x411 &&
       (mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft IME") ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("Microsoft \xC785\xB825\xAE30")) ||
+         NS_LITERAL_STRING(u"Microsoft \xC785\xB825\xAE30")) ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("\x5FAE\x8F6F\x8F93\x5165\x6CD5")) ||
+         NS_LITERAL_STRING(u"\x5FAE\x8F6F\x8F93\x5165\x6CD5")) ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("\x5FAE\x8EDF\x8F38\x5165\x6CD5")));
+         NS_LITERAL_STRING(u"\x5FAE\x8EDF\x8F38\x5165\x6CD5")));
   }
 
   bool IsMSOfficeJapaneseIME2010Active() const
@@ -831,6 +859,75 @@ public:
                             NS_LITERAL_STRING("ATOK "));
   }
 
+  bool IsATOK2011Active() const
+  {
+    // {F9C24A5C-8A53-499D-9572-93B2FF582115}
+    static const GUID kGUID = {
+      0xF9C24A5C, 0x8A53, 0x499D,
+        { 0x95, 0x72, 0x93, 0xB2, 0xFF, 0x58, 0x21, 0x15 }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  bool IsATOK2012Active() const
+  {
+    // {1DE01562-F445-401B-B6C3-E5B18DB79461}
+    static const GUID kGUID = {
+      0x1DE01562, 0xF445, 0x401B,
+        { 0xB6, 0xC3, 0xE5, 0xB1, 0x8D, 0xB7, 0x94, 0x61 }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  bool IsATOK2013Active() const
+  {
+    // {3C4DB511-189A-4168-B6EA-BFD0B4C85615}
+    static const GUID kGUID = {
+      0x3C4DB511, 0x189A, 0x4168,
+        { 0xB6, 0xEA, 0xBF, 0xD0, 0xB4, 0xC8, 0x56, 0x15 }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  bool IsATOK2014Active() const
+  {
+    // {4EF33B79-6AA9-4271-B4BF-9321C279381B}
+    static const GUID kGUID = {
+      0x4EF33B79, 0x6AA9, 0x4271,
+        { 0xB4, 0xBF, 0x93, 0x21, 0xC2, 0x79, 0x38, 0x1B }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  bool IsATOK2015Active() const
+  {
+    // {EAB4DC00-CE2E-483D-A86A-E6B99DA9599A}
+    static const GUID kGUID = {
+      0xEAB4DC00, 0xCE2E, 0x483D,
+        { 0xA8, 0x6A, 0xE6, 0xB9, 0x9D, 0xA9, 0x59, 0x9A }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  bool IsATOK2016Active() const
+  {
+    // {0B557B4C-5740-4110-A60A-1493FA10BF2B}
+    static const GUID kGUID = {
+      0x0B557B4C, 0x5740, 0x4110,
+        { 0xA6, 0x0A, 0x14, 0x93, 0xFA, 0x10, 0xBF, 0x2B }
+    };
+    return mActiveTIPGUID == kGUID;
+  }
+
+  // Note that ATOK 2011 - 2016 refers native caret position for deciding its
+  // popup window position.
+  bool IsATOKReferringNativeCaretActive() const
+  {
+    return IsATOKActive() &&
+           (IsATOK2011Active() || IsATOK2012Active() || IsATOK2013Active() ||
+            IsATOK2014Active() || IsATOK2015Active() || IsATOK2016Active());
+  }
+
   /****************************************************************************
    * Traditional Chinese TIP
    ****************************************************************************/
@@ -839,18 +936,18 @@ public:
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft ChangJie") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x4ED3\x9889")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x4ED3\x9889")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x5009\x9821"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x5009\x9821"));
   }
 
   bool IsMSQuickQuickActive() const
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Quick") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x901F\x6210")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x901F\x6210")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x901F\x6210"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x901F\x6210"));
   }
 
   bool IsFreeChangJieActive() const
@@ -864,7 +961,7 @@ public:
     return
       mActiveTIPKeyboardDescription.Equals(
         NS_LITERAL_STRING(
-          "\x4E2D\x6587 (\x7E41\x9AD4) - \x6613\x9821\x8F38\x5165\x6CD5"));
+          u"\x4E2D\x6587 (\x7E41\x9AD4) - \x6613\x9821\x8F38\x5165\x6CD5"));
   }
 
   /****************************************************************************
@@ -875,18 +972,18 @@ public:
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Pinyin") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x62FC\x97F3")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x62FC\x97F3")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x62FC\x97F3"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x62FC\x97F3"));
   }
 
   bool IsMSWubiActive() const
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Wubi") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x4E94\x7B14")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x4E94\x7B14")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x4E94\x7B46"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x4E94\x7B46"));
   }
 
 public: // ITfInputProcessorProfileActivationSink
@@ -1166,7 +1263,8 @@ StaticRefPtr<ITfInputProcessorProfiles> TSFTextStore::sInputProcessorProfiles;
 StaticRefPtr<TSFTextStore> TSFTextStore::sEnabledTextStore;
 DWORD TSFTextStore::sClientId  = 0;
 
-bool TSFTextStore::sCreateNativeCaretForATOK = false;
+bool TSFTextStore::sCreateNativeCaretForLegacyATOK = false;
+bool TSFTextStore::sDoNotReturnNoLayoutErrorToATOKOfCompositionString = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSSimplifiedTIP = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToMSTraditionalTIP = false;
 bool TSFTextStore::sDoNotReturnNoLayoutErrorToFreeChangJie = false;
@@ -1216,7 +1314,8 @@ TSFTextStore::~TSFTextStore()
 }
 
 bool
-TSFTextStore::Init(nsWindowBase* aWidget)
+TSFTextStore::Init(nsWindowBase* aWidget,
+                   const InputContext& aContext)
 {
   MOZ_LOG(sTextStoreLog, LogLevel::Info,
     ("0x%p TSFTextStore::Init(aWidget=0x%p)",
@@ -1265,6 +1364,8 @@ TSFTextStore::Init(nsWindowBase* aWidget)
     mDocumentMgr = nullptr;
     return false;
   }
+
+  SetInputScope(aContext.mHTMLInputType, aContext.mHTMLInputInputmode);
 
   hr = mDocumentMgr->Push(mContext);
   if (FAILED(hr)) {
@@ -1690,7 +1791,7 @@ TSFTextStore::FlushPendingActions()
           ("0x%p   TSFTextStore::FlushPendingActions() "
            "flushing COMPOSITION_UPDATE={ mData=\"%s\", "
            "mRanges=0x%p, mRanges->Length()=%d }",
-           this, NS_ConvertUTF16toUTF8(action.mData).get(),
+           this, GetEscapedUTF8String(action.mData).get(),
            action.mRanges.get(),
            action.mRanges ? action.mRanges->Length() : 0));
 
@@ -1732,7 +1833,7 @@ TSFTextStore::FlushPendingActions()
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
           ("0x%p   TSFTextStore::FlushPendingActions() "
            "flushing COMPOSITION_END={ mData=\"%s\" }",
-           this, NS_ConvertUTF16toUTF8(action.mData).get()));
+           this, GetEscapedUTF8String(action.mData).get()));
 
         // Dispatching eCompositionCommit causes a DOM text event, then,
         // the IME will be notified of NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED.
@@ -2056,14 +2157,37 @@ TSFTextStore::ContentForTSFRef()
      "mContentForTSF={ mText=\"%s\" (Length()=%u), "
      "mLastCompositionString=\"%s\" (Length()=%u), "
      "mMinTextModifiedOffset=%u }",
-     this, mContentForTSF.Text().Length() <= 20 ?
-       NS_ConvertUTF16toUTF8(mContentForTSF.Text()).get() : "<omitted>",
+     this, mContentForTSF.Text().Length() <= 40 ?
+       GetEscapedUTF8String(mContentForTSF.Text()).get() : "<omitted>",
      mContentForTSF.Text().Length(),
-     NS_ConvertUTF16toUTF8(mContentForTSF.LastCompositionString()).get(),
+     GetEscapedUTF8String(mContentForTSF.LastCompositionString()).get(),
      mContentForTSF.LastCompositionString().Length(),
      mContentForTSF.MinTextModifiedOffset()));
 
   return mContentForTSF;
+}
+
+bool
+TSFTextStore::CanAccessActualContentDirectly() const
+{
+  if (!mContentForTSF.IsInitialized() || mSelectionForTSF.IsDirty()) {
+    return true;
+  }
+
+  // If the cached content has been changed by something except composition,
+  // the content cache may be different from actual content.
+  if (mPendingTextChangeData.IsValid() &&
+      !mPendingTextChangeData.mCausedOnlyByComposition) {
+    return false;
+  }
+
+  // If the cached selection isn't changed, cached content and actual content
+  // should be same.
+  if (!mPendingSelectionChangeData.IsValid()) {
+    return true;
+  }
+
+  return mSelectionForTSF.EqualsExceptDirection(mPendingSelectionChangeData);
 }
 
 bool
@@ -2371,11 +2495,15 @@ TSFTextStore::RestartComposition(ITfCompositionView* aCompositionView,
   PendingAction* action = LastOrNewPendingCompositionUpdate();
   action->mData = mComposition.mString;
   action->mRanges->Clear();
-  TextRange caretRange;
-  caretRange.mStartOffset = caretRange.mEndOffset =
-    uint32_t(oldComposition.mStart + commitString.Length());
-  caretRange.mRangeType = TextRangeType::eCaret;
-  action->mRanges->AppendElement(caretRange);
+  // Note that we shouldn't append ranges when composition string
+  // is empty because it may cause TextComposition confused.
+  if (!action->mData.IsEmpty()) {
+    TextRange caretRange;
+    caretRange.mStartOffset = caretRange.mEndOffset =
+      uint32_t(oldComposition.mStart + commitString.Length());
+    caretRange.mRangeType = TextRangeType::eCaret;
+    action->mRanges->AppendElement(caretRange);
+  }
   action->mIncomplete = false;
 
   // Record compositionend action.
@@ -2455,7 +2583,7 @@ TSFTextStore::RecordCompositionUpdateAction()
      "mComposition={ mView=0x%p, mStart=%d, mString=\"%s\" "
      "(Length()=%d) }",
      this, mComposition.mView.get(), mComposition.mStart,
-     NS_ConvertUTF16toUTF8(mComposition.mString).get(),
+     GetEscapedUTF8String(mComposition.mString).get(),
      mComposition.mString.Length()));
 
   if (!mComposition.IsComposing()) {
@@ -2518,126 +2646,133 @@ TSFTextStore::RecordCompositionUpdateAction()
   // information.
   action->mRanges->Clear();
 
-  TextRange newRange;
-  // No matter if we have display attribute info or not,
-  // we always pass in at least one range to eCompositionChange
-  newRange.mStartOffset = 0;
-  newRange.mEndOffset = action->mData.Length();
-  newRange.mRangeType = TextRangeType::eRawClause;
-  action->mRanges->AppendElement(newRange);
-
-  RefPtr<ITfRange> range;
-  while (S_OK == enumRanges->Next(1, getter_AddRefs(range), nullptr) && range) {
-
-    LONG rangeStart = 0, rangeLength = 0;
-    if (FAILED(GetRangeExtent(range, &rangeStart, &rangeLength))) {
-      continue;
-    }
-    // The range may include out of composition string.  We should ignore
-    // outside of the composition string.
-    LONG start = std::min(std::max(rangeStart, mComposition.mStart),
-                          mComposition.EndOffset());
-    LONG end = std::max(std::min(rangeStart + rangeLength,
-                                 mComposition.EndOffset()),
-                        mComposition.mStart);
-    LONG length = end - start;
-    if (length < 0) {
-      MOZ_LOG(sTextStoreLog, LogLevel::Error,
-        ("0x%p   TSFTextStore::RecordCompositionUpdateAction() "
-         "ignores invalid range (%d-%d)",
-         this, rangeStart - mComposition.mStart,
-         rangeStart - mComposition.mStart + rangeLength));
-      continue;
-    }
-    if (!length) {
-      MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-        ("0x%p   TSFTextStore::RecordCompositionUpdateAction() "
-         "ignores a range due to outside of the composition or empty "
-         "(%d-%d)",
-         this, rangeStart - mComposition.mStart,
-         rangeStart - mComposition.mStart + rangeLength));
-      continue;
-    }
-
+  // Note that we shouldn't append ranges when composition string
+  // is empty because it may cause TextComposition confused.
+  if (!action->mData.IsEmpty()) {
     TextRange newRange;
-    newRange.mStartOffset = uint32_t(start - mComposition.mStart);
-    // The end of the last range in the array is
-    // always kept at the end of composition
-    newRange.mEndOffset = mComposition.mString.Length();
+    // No matter if we have display attribute info or not,
+    // we always pass in at least one range to eCompositionChange
+    newRange.mStartOffset = 0;
+    newRange.mEndOffset = action->mData.Length();
+    newRange.mRangeType = TextRangeType::eRawClause;
+    action->mRanges->AppendElement(newRange);
 
-    TF_DISPLAYATTRIBUTE attr;
-    hr = GetDisplayAttribute(attrPropetry, range, &attr);
-    if (FAILED(hr)) {
-      newRange.mRangeType = TextRangeType::eRawClause;
-    } else {
-      newRange.mRangeType = GetGeckoSelectionValue(attr);
-      if (GetColor(attr.crText, newRange.mRangeStyle.mForegroundColor)) {
-        newRange.mRangeStyle.mDefinedStyles |=
-                               TextRangeStyle::DEFINED_FOREGROUND_COLOR;
+    RefPtr<ITfRange> range;
+    while (enumRanges->Next(1, getter_AddRefs(range), nullptr) == S_OK) {
+      if (NS_WARN_IF(!range)) {
+        break;
       }
-      if (GetColor(attr.crBk, newRange.mRangeStyle.mBackgroundColor)) {
-        newRange.mRangeStyle.mDefinedStyles |=
-                               TextRangeStyle::DEFINED_BACKGROUND_COLOR;
+
+      LONG rangeStart = 0, rangeLength = 0;
+      if (FAILED(GetRangeExtent(range, &rangeStart, &rangeLength))) {
+        continue;
       }
-      if (GetColor(attr.crLine, newRange.mRangeStyle.mUnderlineColor)) {
-        newRange.mRangeStyle.mDefinedStyles |=
-                               TextRangeStyle::DEFINED_UNDERLINE_COLOR;
+      // The range may include out of composition string.  We should ignore
+      // outside of the composition string.
+      LONG start = std::min(std::max(rangeStart, mComposition.mStart),
+                            mComposition.EndOffset());
+      LONG end = std::max(std::min(rangeStart + rangeLength,
+                                   mComposition.EndOffset()),
+                          mComposition.mStart);
+      LONG length = end - start;
+      if (length < 0) {
+        MOZ_LOG(sTextStoreLog, LogLevel::Error,
+          ("0x%p   TSFTextStore::RecordCompositionUpdateAction() "
+           "ignores invalid range (%d-%d)",
+           this, rangeStart - mComposition.mStart,
+           rangeStart - mComposition.mStart + rangeLength));
+        continue;
       }
-      if (GetLineStyle(attr.lsStyle, newRange.mRangeStyle.mLineStyle)) {
-        newRange.mRangeStyle.mDefinedStyles |=
-                               TextRangeStyle::DEFINED_LINESTYLE;
-        newRange.mRangeStyle.mIsBoldLine = attr.fBoldLine != 0;
+      if (!length) {
+        MOZ_LOG(sTextStoreLog, LogLevel::Debug,
+          ("0x%p   TSFTextStore::RecordCompositionUpdateAction() "
+           "ignores a range due to outside of the composition or empty "
+           "(%d-%d)",
+           this, rangeStart - mComposition.mStart,
+           rangeStart - mComposition.mStart + rangeLength));
+        continue;
+      }
+
+      TextRange newRange;
+      newRange.mStartOffset = uint32_t(start - mComposition.mStart);
+      // The end of the last range in the array is
+      // always kept at the end of composition
+      newRange.mEndOffset = mComposition.mString.Length();
+
+      TF_DISPLAYATTRIBUTE attr;
+      hr = GetDisplayAttribute(attrPropetry, range, &attr);
+      if (FAILED(hr)) {
+        newRange.mRangeType = TextRangeType::eRawClause;
+      } else {
+        newRange.mRangeType = GetGeckoSelectionValue(attr);
+        if (GetColor(attr.crText, newRange.mRangeStyle.mForegroundColor)) {
+          newRange.mRangeStyle.mDefinedStyles |=
+                                 TextRangeStyle::DEFINED_FOREGROUND_COLOR;
+        }
+        if (GetColor(attr.crBk, newRange.mRangeStyle.mBackgroundColor)) {
+          newRange.mRangeStyle.mDefinedStyles |=
+                                 TextRangeStyle::DEFINED_BACKGROUND_COLOR;
+        }
+        if (GetColor(attr.crLine, newRange.mRangeStyle.mUnderlineColor)) {
+          newRange.mRangeStyle.mDefinedStyles |=
+                                 TextRangeStyle::DEFINED_UNDERLINE_COLOR;
+        }
+        if (GetLineStyle(attr.lsStyle, newRange.mRangeStyle.mLineStyle)) {
+          newRange.mRangeStyle.mDefinedStyles |=
+                                 TextRangeStyle::DEFINED_LINESTYLE;
+          newRange.mRangeStyle.mIsBoldLine = attr.fBoldLine != 0;
+        }
+      }
+
+      TextRange& lastRange = action->mRanges->LastElement();
+      if (lastRange.mStartOffset == newRange.mStartOffset) {
+        // Replace range if last range is the same as this one
+        // So that ranges don't overlap and confuse the editor
+        lastRange = newRange;
+      } else {
+        lastRange.mEndOffset = newRange.mStartOffset;
+        action->mRanges->AppendElement(newRange);
       }
     }
 
-    TextRange& lastRange = action->mRanges->LastElement();
-    if (lastRange.mStartOffset == newRange.mStartOffset) {
-      // Replace range if last range is the same as this one
-      // So that ranges don't overlap and confuse the editor
-      lastRange = newRange;
-    } else {
-      lastRange.mEndOffset = newRange.mStartOffset;
-      action->mRanges->AppendElement(newRange);
+    // We need to hack for Korean Input System which is Korean standard TIP.
+    // It sets no change style to IME selection (the selection is always only
+    // one).  So, the composition string looks like normal (or committed)
+    // string.  At this time, current selection range is same as the
+    // composition string range.  Other applications set a wide caret which
+    // covers the composition string,  however, Gecko doesn't support the wide
+    // caret drawing now (Gecko doesn't support XOR drawing), unfortunately.
+    // For now, we should change the range style to undefined.
+    if (!selectionForTSF.IsCollapsed() && action->mRanges->Length() == 1) {
+      TextRange& range = action->mRanges->ElementAt(0);
+      LONG start = selectionForTSF.MinOffset();
+      LONG end = selectionForTSF.MaxOffset();
+      if ((LONG)range.mStartOffset == start - mComposition.mStart &&
+          (LONG)range.mEndOffset == end - mComposition.mStart &&
+          range.mRangeStyle.IsNoChangeStyle()) {
+        range.mRangeStyle.Clear();
+        // The looks of selected type is better than others.
+        range.mRangeType = TextRangeType::eSelectedRawClause;
+      }
     }
-  }
 
-  // We need to hack for Korean Input System which is Korean standard TIP.
-  // It sets no change style to IME selection (the selection is always only
-  // one).  So, the composition string looks like normal (or committed) string.
-  // At this time, current selection range is same as the composition string
-  // range.  Other applications set a wide caret which covers the composition
-  // string,  however, Gecko doesn't support the wide caret drawing now (Gecko
-  // doesn't support XOR drawing), unfortunately.  For now, we should change
-  // the range style to undefined.
-  if (!selectionForTSF.IsCollapsed() && action->mRanges->Length() == 1) {
-    TextRange& range = action->mRanges->ElementAt(0);
-    LONG start = selectionForTSF.MinOffset();
-    LONG end = selectionForTSF.MaxOffset();
-    if ((LONG)range.mStartOffset == start - mComposition.mStart &&
-        (LONG)range.mEndOffset == end - mComposition.mStart &&
-        range.mRangeStyle.IsNoChangeStyle()) {
-      range.mRangeStyle.Clear();
-      // The looks of selected type is better than others.
-      range.mRangeType = TextRangeType::eSelectedRawClause;
+    // The caret position has to be collapsed.
+    uint32_t caretPosition =
+      static_cast<uint32_t>(selectionForTSF.MaxOffset() - mComposition.mStart);
+
+    // If caret is in the target clause and it doesn't have specific style,
+    // the target clause will be painted as normal selection range.  Since
+    // caret shouldn't be in selection range on Windows, we shouldn't append
+    // caret range in such case.
+    const TextRange* targetClause = action->mRanges->GetTargetClause();
+    if (!targetClause || targetClause->mRangeStyle.IsDefined() ||
+        caretPosition < targetClause->mStartOffset ||
+        caretPosition > targetClause->mEndOffset) {
+      TextRange caretRange;
+      caretRange.mStartOffset = caretRange.mEndOffset = caretPosition;
+      caretRange.mRangeType = TextRangeType::eCaret;
+      action->mRanges->AppendElement(caretRange);
     }
-  }
-
-  // The caret position has to be collapsed.
-  uint32_t caretPosition =
-    static_cast<uint32_t>(selectionForTSF.MaxOffset() - mComposition.mStart);
-
-  // If caret is in the target clause and it doesn't have specific style,
-  // the target clause will be painted as normal selection range.  Since caret
-  // shouldn't be in selection range on Windows, we shouldn't append caret
-  // range in such case.
-  const TextRange* targetClause = action->mRanges->GetTargetClause();
-  if (!targetClause || targetClause->mRangeStyle.IsDefined() ||
-      caretPosition < targetClause->mStartOffset ||
-      caretPosition > targetClause->mEndOffset) {
-    TextRange caretRange;
-    caretRange.mStartOffset = caretRange.mEndOffset = caretPosition;
-    caretRange.mRangeType = TextRangeType::eCaret;
-    action->mRanges->AppendElement(caretRange);
   }
 
   action->mIncomplete = false;
@@ -2931,7 +3066,7 @@ TSFTextStore::SetText(DWORD dwFlags,
                                          "not-specified",
      acpStart, acpEnd, pchText,
      pchText && cch ?
-       NS_ConvertUTF16toUTF8(pchText, cch).get() : "",
+       GetEscapedUTF8String(pchText, cch).get() : "",
      cch, pChange, GetBoolName(mComposition.IsComposing())));
 
   // Per SDK documentation, and since we don't have better
@@ -3564,9 +3699,11 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
   // caller even if we return it.  It's converted to just E_FAIL.
   // However, this is fixed on Win 10.
 
+  bool dontReturnNoLayoutError = false;
+
   const TSFStaticSink* kSink = TSFStaticSink::GetInstance();
   if (mComposition.IsComposing() && mComposition.mStart < acpEnd &&
-      mContentForTSF.IsLayoutChangedAfter(acpEnd)) {
+      mContentForTSF.IsLayoutChangedAt(acpEnd)) {
     const Selection& selectionForTSF = SelectionForTSFRef();
     // The bug of Microsoft Office IME 2010 for Japanese is similar to
     // MS-IME for Win 8.1 and Win 10.  Newer version of MS Office IME is not
@@ -3590,14 +3727,9 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
       // available, we should use it as the result.
       if ((kIsMSOfficeJapaneseIME2010 ||
            sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar) &&
-          !mContentForTSF.IsLayoutChangedAfter(acpStart) &&
           acpStart < acpEnd) {
         acpEnd = acpStart;
-        MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-          ("0x%p   TSFTextStore::GetTextExt() hacked the offsets "
-           "of the first character of changing range of the composition "
-           "string for TIP acpStart=%d, acpEnd=%d",
-           this, acpStart, acpEnd));
+        dontReturnNoLayoutError = true;
       }
       // Although, the condition is not clear, MS-IME sometimes retrieves the
       // caret rect immediately after modifying the composition string but
@@ -3608,12 +3740,35 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
                acpStart == acpEnd &&
                selectionForTSF.IsCollapsed() &&
                selectionForTSF.EndOffset() == acpEnd) {
-        acpEnd = acpStart = mContentForTSF.MinOffsetOfLayoutChanged();
-        MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-          ("0x%p   TSFTextStore::GetTextExt() hacked the offsets "
-           "of the caret of the composition string for TIP acpStart=%d, "
-           "acpEnd=%d", this, acpStart, acpEnd));
+        if (mContentForTSF.MinOffsetOfLayoutChanged() > LONG_MAX) {
+          MOZ_LOG(sTextStoreLog, LogLevel::Error,
+            ("0x%p   TSFTextStore::GetTextExt(), FAILED due to the text "
+             "is too big for TSF (cannot treat modified offset as LONG), "
+             "mContentForTSF.MinOffsetOfLayoutChanged()=%u",
+             this, mContentForTSF.MinOffsetOfLayoutChanged()));
+          return E_FAIL;
+        }
+        int32_t minOffsetOfLayoutChanged =
+          static_cast<int32_t>(mContentForTSF.MinOffsetOfLayoutChanged());
+        acpEnd = acpStart = std::max(minOffsetOfLayoutChanged - 1, 0);
+        dontReturnNoLayoutError = true;
       }
+    }
+    // ATOK fails to handle TS_E_NOLAYOUT only when it decides the position of
+    // suggest window.  In such case, ATOK tries to query rect of whole
+    // composition string.
+    // XXX For testing with legacy ATOK, we should hack it even if current ATOK
+    //     refers native caret rect on windows whose window class is one of
+    //     Mozilla window classes and we stop creating native caret for ATOK
+    //     because creating native caret causes ATOK refers caret position
+    //     when GetTextExt() returns TS_E_NOLAYOUT.
+    else if (sDoNotReturnNoLayoutErrorToATOKOfCompositionString &&
+             kSink->IsATOKActive() &&
+             (!kSink->IsATOKReferringNativeCaretActive() ||
+              !sCreateNativeCaretForLegacyATOK) &&
+             mComposition.mStart == acpStart &&
+             mComposition.EndOffset() == acpEnd) {
+      dontReturnNoLayoutError = true;
     }
     // Free ChangJie 2010 and Easy Changjei 1.0.12.0 doesn't handle
     // ITfContextView::GetTextExt() properly.  Prehaps, it's due to the bug of
@@ -3625,9 +3780,7 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
               kSink->IsEasyChangjeiActive())) {
       acpEnd = mComposition.mStart;
       acpStart = std::min(acpStart, acpEnd);
-      MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-        ("0x%p   TSFTextStore::GetTextExt() hacked the offsets for "
-         "TIP acpStart=%d, acpEnd=%d", this, acpStart, acpEnd));
+      dontReturnNoLayoutError = true;
     }
     // Some Chinese TIPs of Microsoft doesn't show candidate window in e10s
     // mode on Win8 or later.
@@ -3640,13 +3793,55 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
                  kSink->IsMSWubiActive())))) {
       acpEnd = mComposition.mStart;
       acpStart = std::min(acpStart, acpEnd);
+      dontReturnNoLayoutError = true;
+    }
+
+    // If we hack the queried range for active TIP, that means we should not
+    // return TS_E_NOLAYOUT even if hacked offset is still modified.  So, as
+    // far as possible, we should adjust the offset.
+    if (dontReturnNoLayoutError) {
+      MOZ_ASSERT(mContentForTSF.IsLayoutChanged());
+      if (mContentForTSF.MinOffsetOfLayoutChanged() > LONG_MAX) {
+        MOZ_LOG(sTextStoreLog, LogLevel::Error,
+          ("0x%p   TSFTextStore::GetTextExt(), FAILED due to the text "
+           "is too big for TSF (cannot treat modified offset as LONG), "
+           "mContentForTSF.MinOffsetOfLayoutChanged()=%u",
+           this, mContentForTSF.MinOffsetOfLayoutChanged()));
+        return E_FAIL;
+      }
+      // Note that even if all characters in the editor or the composition
+      // string was modified, 0 or start offset of the composition string is
+      // useful because it may return caret rect or old character's rect which
+      // the user still see.  That must be useful information for TIP.
+      int32_t firstModifiedOffset =
+        static_cast<int32_t>(mContentForTSF.MinOffsetOfLayoutChanged());
+      LONG lastUnmodifiedOffset = std::max(firstModifiedOffset - 1, 0);
+      if (mContentForTSF.IsLayoutChangedAt(acpStart)) {
+        // If TSF queries text rect in composition string, we should return
+        // rect at start of the composition even if its layout is changed.
+        if (acpStart >= mComposition.mStart) {
+          acpStart = mComposition.mStart;
+        }
+        // Otherwise, use first character's rect.  Even if there is no
+        // characters, the query event will return caret rect instead.
+        else {
+          acpStart = lastUnmodifiedOffset;
+        }
+        MOZ_ASSERT(acpStart <= acpEnd);
+      }
+      if (mContentForTSF.IsLayoutChangedAt(acpEnd)) {
+        // Use max larger offset of last unmodified offset or acpStart which
+        // may be the first character offset of the composition string.
+        acpEnd = std::max(acpStart, lastUnmodifiedOffset);
+      }
       MOZ_LOG(sTextStoreLog, LogLevel::Debug,
-        ("0x%p   TSFTextStore::GetTextExt() hacked the offsets for "
-         "TIP acpStart=%d, acpEnd=%d", this, acpStart, acpEnd));
+        ("0x%p   TSFTextStore::GetTextExt() hacked the queried range "
+         "for not returning TS_E_NOLAYOUT, new values are: "
+         "acpStart=%d, acpEnd=%d", this, acpStart, acpEnd));
     }
   }
 
-  if (mContentForTSF.IsLayoutChangedAfter(acpEnd)) {
+  if (!dontReturnNoLayoutError && mContentForTSF.IsLayoutChangedAt(acpEnd)) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
       ("0x%p   TSFTextStore::GetTextExt() returned TS_E_NOLAYOUT "
        "(acpEnd=%d)", this, acpEnd));
@@ -3676,8 +3871,22 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
     // the position where TSFTextStore believes it at.
     options.mRelativeToInsertionPoint = true;
     startOffset -= mComposition.mStart;
+  } else if (!CanAccessActualContentDirectly()) {
+    // If TSF/TIP cannot access actual content directly, there may be pending
+    // text and/or selection changes which have not been notified TSF yet.
+    // Therefore, we should use relative to insertion point query since
+    // TSF/TIP computes the offset from the cached selection.
+    options.mRelativeToInsertionPoint = true;
+    startOffset -= mSelectionForTSF.StartOffset();
   }
-  event.InitForQueryTextRect(startOffset, acpEnd - acpStart, options);
+  // ContentEventHandler and ContentCache return actual caret rect when
+  // the queried range is collapsed and selection is collapsed at the
+  // queried range.  Then, its height (in horizontal layout, width in vertical
+  // layout) may be different from actual font height of the line.  In such
+  // case, users see "dancing" of candidate or suggest window of TIP.
+  // For preventing it, we should query text rect with at least 1 length.
+  uint32_t length = std::max(static_cast<int32_t>(acpEnd - acpStart), 1);
+  event.InitForQueryTextRect(startOffset, length, options);
 
   DispatchEvent(event);
   if (NS_WARN_IF(!event.mSucceeded)) {
@@ -3686,6 +3895,7 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
        "eQueryTextRect failure", this));
     return TS_E_INVALIDPOS; // but unexpected failure, maybe.
   }
+
   // IMEs don't like empty rects, fix here
   if (event.mReply.mRect.width <= 0)
     event.mReply.mRect.width = 1;
@@ -3725,10 +3935,12 @@ TSFTextStore::GetTextExt(TsViewCookie vcView,
   // not equal if text rect was clipped
   *pfClipped = !::EqualRect(prc, &textRect);
 
-  // ATOK refers native caret position and size on Desktop applications for
-  // deciding candidate window.  Therefore, we need to create native caret
-  // for hacking the bug.
-  if (sCreateNativeCaretForATOK && kSink->IsATOKActive() &&
+  // ATOK 2011 - 2016 refers native caret position and size on windows whose
+  // class name is one of Mozilla's windows for deciding candidate window
+  // position.  Therefore, we need to create native caret only when ATOK 2011 -
+  // 2016 is active.
+  if (sCreateNativeCaretForLegacyATOK &&
+      kSink->IsATOKReferringNativeCaretActive() &&
       mComposition.IsComposing() &&
       mComposition.mStart <= acpStart && mComposition.EndOffset() >= acpStart &&
       mComposition.mStart <= acpEnd && mComposition.EndOffset() >= acpEnd) {
@@ -3819,14 +4031,7 @@ TSFTextStore::GetScreenExtInternal(RECT& aScreenExt)
     return false;
   }
 
-  LayoutDeviceIntRect boundRect;
-  if (NS_FAILED(refWindow->GetClientBounds(boundRect))) {
-    MOZ_LOG(sTextStoreLog, LogLevel::Error,
-      ("0x%p   TSFTextStore::GetScreenExtInternal() FAILED due to "
-       "failed to get the client bounds", this));
-    return false;
-  }
-
+  LayoutDeviceIntRect boundRect = refWindow->GetClientBounds();
   boundRect.MoveTo(0, 0);
 
   // Clip frame rect to window rect
@@ -3894,7 +4099,7 @@ TSFTextStore::InsertTextAtSelection(DWORD dwFlags,
            dwFlags == TF_IAS_NOQUERY ? "TF_IAS_NOQUERY" :
            dwFlags == TF_IAS_QUERYONLY ? "TF_IAS_QUERYONLY" : "Unknown",
      pchText,
-     pchText && cch ? NS_ConvertUTF16toUTF8(pchText, cch).get() : "",
+     pchText && cch ? GetEscapedUTF8String(pchText, cch).get() : "",
      cch, pacpStart, pacpEnd, pChange,
      GetBoolName(mComposition.IsComposing())));
 
@@ -3990,7 +4195,7 @@ TSFTextStore::InsertTextAtSelectionInternal(const nsAString& aInsertStr,
   MOZ_LOG(sTextStoreLog, LogLevel::Debug,
     ("0x%p   TSFTextStore::InsertTextAtSelectionInternal("
      "aInsertStr=\"%s\", aTextChange=0x%p), IsComposing=%s",
-     this, NS_ConvertUTF16toUTF8(aInsertStr).get(), aTextChange,
+     this, GetEscapedUTF8String(aInsertStr).get(), aTextChange,
      GetBoolName(mComposition.IsComposing())));
 
   Content& contentForTSF = ContentForTSFRef();
@@ -4023,7 +4228,7 @@ TSFTextStore::InsertTextAtSelectionInternal(const nsAString& aInsertStr,
        "(Length()=%u) }",
        this, compositionStart->mSelectionStart,
        compositionStart->mSelectionLength,
-       NS_ConvertUTF16toUTF8(compositionEnd->mData).get(),
+       GetEscapedUTF8String(compositionEnd->mData).get(),
        compositionEnd->mData.Length()));
   }
 
@@ -4183,7 +4388,7 @@ TSFTextStore::RecordCompositionEndAction()
     ("0x%p   TSFTextStore::RecordCompositionEndAction(), "
      "mComposition={ mView=0x%p, mString=\"%s\" }",
      this, mComposition.mView.get(),
-     NS_ConvertUTF16toUTF8(mComposition.mString).get()));
+     GetEscapedUTF8String(mComposition.mString).get()));
 
   MOZ_ASSERT(mComposition.IsComposing());
 
@@ -4346,7 +4551,7 @@ TSFTextStore::OnUpdateComposition(ITfCompositionView* pComposition,
        "mComposition={ mStart=%ld, mString=\"%s\" }, "
        "SelectionForTSFRef()={ acpStart=%ld, acpEnd=%ld, style.ase=%s }",
        this, mComposition.mStart,
-       NS_ConvertUTF16toUTF8(mComposition.mString).get(),
+       GetEscapedUTF8String(mComposition.mString).get(),
        selectionForTSF.StartOffset(), selectionForTSF.EndOffset(),
        GetActiveSelEndName(selectionForTSF.ActiveSelEnd())));
   }
@@ -4360,7 +4565,7 @@ TSFTextStore::OnEndComposition(ITfCompositionView* pComposition)
     ("0x%p TSFTextStore::OnEndComposition(pComposition=0x%p), "
      "mComposition={ mView=0x%p, mString=\"%s\" }",
      this, pComposition, mComposition.mView.get(),
-     NS_ConvertUTF16toUTF8(mComposition.mString).get()));
+     GetEscapedUTF8String(mComposition.mString).get()));
 
   AutoPendingActionAndContentFlusher flusher(this);
 
@@ -4568,7 +4773,7 @@ TSFTextStore::CreateAndSetFocus(nsWindowBase* aFocusedWidget,
   // So, we should set sEnabledTextStore directly.
   RefPtr<TSFTextStore> textStore = new TSFTextStore();
   sEnabledTextStore = textStore;
-  if (NS_WARN_IF(!textStore->Init(aFocusedWidget))) {
+  if (NS_WARN_IF(!textStore->Init(aFocusedWidget, aContext))) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
       ("  TSFTextStore::CreateAndSetFocus() FAILED due to "
        "TSFTextStore::Init() failure"));
@@ -4607,8 +4812,6 @@ TSFTextStore::CreateAndSetFocus(nsWindowBase* aFocusedWidget,
        "ITfTheadMgr::AssociateFocus() failure"));
     return false;
   }
-  textStore->SetInputScope(aContext.mHTMLInputType,
-                           aContext.mHTMLInputInputmode);
 
   if (textStore->mSink) {
     MOZ_LOG(sTextStoreLog, LogLevel::Info,
@@ -5141,6 +5344,13 @@ TSFTextStore::CreateNativeCaret()
     // position where TSFTextStore believes it at.
     options.mRelativeToInsertionPoint = true;
     caretOffset -= mComposition.mStart;
+  } else if (!CanAccessActualContentDirectly()) {
+    // If TSF/TIP cannot access actual content directly, there may be pending
+    // text and/or selection changes which have not been notified TSF yet.
+    // Therefore, we should use relative to insertion point query since
+    // TSF/TIP computes the offset from the cached selection.
+    options.mRelativeToInsertionPoint = true;
+    caretOffset -= mSelectionForTSF.StartOffset();
   }
   queryCaretRect.InitForQueryCaretRect(caretOffset, options);
 
@@ -5203,7 +5413,7 @@ TSFTextStore::CommitCompositionInternal(bool aDiscard)
      "mComposition.mString=\"%s\"",
      this, GetBoolName(aDiscard), mSink.get(), mContext.get(),
      mComposition.mView.get(),
-     NS_ConvertUTF16toUTF8(mComposition.mString).get()));
+     GetEscapedUTF8String(mComposition.mString).get()));
 
   // If the document is locked, TSF will fail to commit composition since
   // TSF needs another document lock.  So, let's put off the request.
@@ -5560,8 +5770,12 @@ TSFTextStore::Initialize()
   sDisabledDocumentMgr = disabledDocumentMgr;
   sDisabledContext = disabledContext;
 
-  sCreateNativeCaretForATOK =
+  sCreateNativeCaretForLegacyATOK =
     Preferences::GetBool("intl.tsf.hack.atok.create_native_caret", true);
+  sDoNotReturnNoLayoutErrorToATOKOfCompositionString =
+    Preferences::GetBool(
+      "intl.tsf.hack.atok.do_not_return_no_layout_error_of_composition_string",
+      true);
   sDoNotReturnNoLayoutErrorToMSSimplifiedTIP =
     Preferences::GetBool(
       "intl.tsf.hack.ms_simplified_chinese.do_not_return_no_layout_error",
@@ -5595,14 +5809,16 @@ TSFTextStore::Initialize()
     ("  TSFTextStore::Initialize(), sThreadMgr=0x%p, "
      "sClientId=0x%08X, sDisplayAttrMgr=0x%p, "
      "sCategoryMgr=0x%p, sDisabledDocumentMgr=0x%p, sDisabledContext=%p, "
-     "sCreateNativeCaretForATOK=%s, "
+     "sCreateNativeCaretForLegacyATOK=%s, "
+     "sDoNotReturnNoLayoutErrorToATOKOfCompositionString=%s, "
      "sDoNotReturnNoLayoutErrorToFreeChangJie=%s, "
      "sDoNotReturnNoLayoutErrorToEasyChangjei=%s, "
      "sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar=%s, "
      "sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtCaret=%s",
      sThreadMgr.get(), sClientId, sDisplayAttrMgr.get(),
      sCategoryMgr.get(), sDisabledDocumentMgr.get(), sDisabledContext.get(),
-     GetBoolName(sCreateNativeCaretForATOK),
+     GetBoolName(sCreateNativeCaretForLegacyATOK),
+     GetBoolName(sDoNotReturnNoLayoutErrorToATOKOfCompositionString),
      GetBoolName(sDoNotReturnNoLayoutErrorToFreeChangJie),
      GetBoolName(sDoNotReturnNoLayoutErrorToEasyChangjei),
      GetBoolName(sDoNotReturnNoLayoutErrorToMSJapaneseIMEAtFirstChar),
@@ -5828,9 +6044,9 @@ TSFTextStore::Content::ReplaceTextWith(LONG aStart,
          "aLength=%d, aReplaceString=\"%s\"), mComposition={ mStart=%d, "
          "mString=\"%s\" }, mLastCompositionString=\"%s\", "
          "mMinTextModifiedOffset=%u, firstDifferentOffset=%u",
-         this, aStart, aLength, NS_ConvertUTF16toUTF8(aReplaceString).get(),
-         mComposition.mStart, NS_ConvertUTF16toUTF8(mComposition.mString).get(),
-         NS_ConvertUTF16toUTF8(mLastCompositionString).get(),
+         this, aStart, aLength, GetEscapedUTF8String(aReplaceString).get(),
+         mComposition.mStart, GetEscapedUTF8String(mComposition.mString).get(),
+         GetEscapedUTF8String(mLastCompositionString).get(),
          mMinTextModifiedOffset, firstDifferentOffset));
     } else {
       firstDifferentOffset =
@@ -6072,4 +6288,3 @@ TSFTextStore::CurrentKeyboardLayoutHasIME()
 
 } // name widget
 } // name mozilla
-

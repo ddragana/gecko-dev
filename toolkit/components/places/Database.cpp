@@ -29,7 +29,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "prtime.h"
 
 #include "nsXULAppAPI.h"
@@ -854,6 +854,13 @@ Database::InitSchema(bool* aDatabaseMigrated)
 
       // Firefox 50 uses schema version 33.
 
+      if (currentSchemaVersion < 34) {
+        rv = MigrateV34Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 51 uses schema version 34.
+
       // Schema Upgrades must add migration code here.
 
       rv = UpdateBookmarkRootTitles();
@@ -980,28 +987,28 @@ Database::CreateBookmarkRoots()
   if (NS_FAILED(rv)) return rv;
 
   // Fetch the internationalized folder name from the string bundle.
-  rv = bundle->GetStringFromName(MOZ_UTF16("BookmarksMenuFolderTitle"),
+  rv = bundle->GetStringFromName(u"BookmarksMenuFolderTitle",
                                  getter_Copies(rootTitle));
   if (NS_FAILED(rv)) return rv;
   rv = CreateRoot(mMainConn, NS_LITERAL_CSTRING("menu"),
                   NS_LITERAL_CSTRING("menu________"), rootTitle);
   if (NS_FAILED(rv)) return rv;
 
-  rv = bundle->GetStringFromName(MOZ_UTF16("BookmarksToolbarFolderTitle"),
+  rv = bundle->GetStringFromName(u"BookmarksToolbarFolderTitle",
                                  getter_Copies(rootTitle));
   if (NS_FAILED(rv)) return rv;
   rv = CreateRoot(mMainConn, NS_LITERAL_CSTRING("toolbar"),
                   NS_LITERAL_CSTRING("toolbar_____"), rootTitle);
   if (NS_FAILED(rv)) return rv;
 
-  rv = bundle->GetStringFromName(MOZ_UTF16("TagsFolderTitle"),
+  rv = bundle->GetStringFromName(u"TagsFolderTitle",
                                  getter_Copies(rootTitle));
   if (NS_FAILED(rv)) return rv;
   rv = CreateRoot(mMainConn, NS_LITERAL_CSTRING("tags"),
                   NS_LITERAL_CSTRING("tags________"), rootTitle);
   if (NS_FAILED(rv)) return rv;
 
-  rv = bundle->GetStringFromName(MOZ_UTF16("OtherBookmarksFolderTitle"),
+  rv = bundle->GetStringFromName(u"OtherBookmarksFolderTitle",
                                  getter_Copies(rootTitle));
   if (NS_FAILED(rv)) return rv;
   rv = CreateRoot(mMainConn, NS_LITERAL_CSTRING("unfiled"),
@@ -1808,6 +1815,21 @@ Database::MigrateV33Up() {
 
   // Create an index on url_hash.
   rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_URL_HASH);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV34Up() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DELETE FROM moz_keywords WHERE id IN ( "
+      "SELECT id FROM moz_keywords k "
+      "WHERE NOT EXISTS (SELECT 1 FROM moz_places h WHERE k.place_id = h.id) "
+    ")"
+  ));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;

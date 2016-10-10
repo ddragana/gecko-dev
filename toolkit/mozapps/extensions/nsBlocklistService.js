@@ -866,7 +866,7 @@ Blocklist.prototype = {
     }
 
     var appFile = FileUtils.getFile(KEY_APPDIR, [FILE_BLOCKLIST]);
-    try{
+    try {
       yield this._preloadBlocklistFile(appFile.path);
       return;
     } catch (e) {
@@ -876,7 +876,7 @@ Blocklist.prototype = {
     LOG("Blocklist::_preloadBlocklist: no XML File found");
   }),
 
-  _preloadBlocklistFile: Task.async(function*(path){
+  _preloadBlocklistFile: Task.async(function*(path) {
     if (this._addonEntries) {
       // The file has been already loaded.
       return;
@@ -1173,12 +1173,11 @@ Blocklist.prototype = {
     if (AppConstants.platform == "android" ||
         AppConstants.MOZ_B2G) {
       return Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
-    } else {
-      if (!this._isBlocklistLoaded())
-        this._loadBlocklist();
-      return this._getPluginBlocklistState(plugin, this._pluginEntries,
-                                           appVersion, toolkitVersion);
     }
+    if (!this._isBlocklistLoaded())
+      this._loadBlocklist();
+    return this._getPluginBlocklistState(plugin, this._pluginEntries,
+                                         appVersion, toolkitVersion);
   },
 
   /**
@@ -1384,8 +1383,15 @@ Blocklist.prototype = {
 
         // If the add-on is already disabled for some reason then don't warn
         // about it
-        if (!addon.isActive)
+        if (!addon.isActive) {
+          // But mark it as softblocked if necessary. Note that we avoid setting
+          // softDisabled at the same time as userDisabled to make it clear
+          // which was the original cause of the add-on becoming disabled in a
+          // way that the user can change.
+          if (state == Ci.nsIBlocklistService.STATE_SOFTBLOCKED && !addon.userDisabled)
+            addon.softDisabled = true;
           continue;
+        }
 
         addonList.push({
           name: addon.name,

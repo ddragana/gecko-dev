@@ -92,8 +92,10 @@ class MacroAssemblerMIPS64 : public MacroAssemblerMIPSShared
     void ma_daddu(Register rd, Register rs, Imm32 imm);
     void ma_daddu(Register rd, Register rs);
     void ma_daddu(Register rd, Imm32 imm);
-    void ma_addTestOverflow(Register rd, Register rs, Register rt, Label* overflow);
-    void ma_addTestOverflow(Register rd, Register rs, Imm32 imm, Label* overflow);
+    template <typename L>
+    void ma_addTestOverflow(Register rd, Register rs, Register rt, L overflow);
+    template <typename L>
+    void ma_addTestOverflow(Register rd, Register rs, Imm32 imm, L overflow);
 
     // subtract
     void ma_dsubu(Register rd, Register rs, Imm32 imm);
@@ -944,9 +946,8 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
         moveToDouble(zero, reg);
     }
 
-    void clampIntToUint8(Register reg);
-
-    void convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest);
+    static bool convertUInt64ToDoubleNeedsTemp();
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp);
 
     void breakpoint();
 
@@ -1000,12 +1001,13 @@ class MacroAssemblerMIPS64Compat : public MacroAssemblerMIPS64
         as_movs(dest, src);
     }
 
-    void loadWasmActivation(Register dest) {
-        loadPtr(Address(GlobalReg, wasm::ActivationGlobalDataOffset - AsmJSGlobalRegBias), dest);
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
     }
-    void loadAsmJSHeapRegisterFromGlobalData() {
-        MOZ_ASSERT(Imm16::IsInSignedRange(wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias));
-        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias), HeapReg);
+    void loadWasmPinnedRegsFromTls() {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
+        ma_daddu(GlobalReg, Imm32(AsmJSGlobalRegBias));
     }
 
     // Instrumentation for entering and leaving the profiler.

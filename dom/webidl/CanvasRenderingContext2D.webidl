@@ -120,7 +120,7 @@ interface CanvasRenderingContext2D {
   TextMetrics measureText(DOMString text);
 
   // drawing images
-// NOT IMPLEMENTED           attribute boolean imageSmoothingEnabled; // (default true)
+  attribute boolean imageSmoothingEnabled;
 
   [Throws, LenientFloat]
   void drawImage(CanvasImageSource image, double dx, double dy);
@@ -153,19 +153,12 @@ interface CanvasRenderingContext2D {
   [Throws]
   attribute object mozCurrentTransformInverse;
 
-  attribute DOMString mozFillRule; /* "evenodd", "nonzero" (default) */
-
-  [Throws]
-  attribute any mozDash; /* default |null| */
-
-  [LenientFloat]
-  attribute double mozDashOffset; /* default 0.0 */
-
   [SetterThrows]
   attribute DOMString mozTextStyle;
 
   // image smoothing mode -- if disabled, images won't be smoothed
   // if scaled.
+  [Deprecated="PrefixedImageSmoothingEnabled"]
   attribute boolean mozImageSmoothingEnabled;
 
   // Show the caret if appropriate when drawing

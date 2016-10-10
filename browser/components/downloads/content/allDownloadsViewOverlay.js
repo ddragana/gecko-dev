@@ -302,8 +302,11 @@ HistoryDownloadElementShell.prototype = {
 
     if (this.element.selected) {
       goUpdateDownloadCommands();
+    } else {
+      // If a state change occurs in an item that is not currently selected,
+      // this is the only command that may be affected.
+      goUpdateCommand("downloadsCmd_clearDownloads");
     }
-    goUpdateCommand("downloadsCmd_clearDownloads");
   },
 
   onChanged() {
@@ -1025,7 +1028,8 @@ DownloadsPlacesView.prototype = {
     // Hack for bug 836283: reset xbl fields to their old values after the
     // binding is reattached to avoid breaking the selection state
     let xblFields = new Map();
-    for (let [key, value] in Iterator(this._richlistbox)) {
+    for (let key of Object.getOwnPropertyNames(this._richlistbox)) {
+      let value = this._richlistbox[key];
       xblFields.set(key, value);
     }
 
@@ -1136,8 +1140,7 @@ DownloadsPlacesView.prototype = {
   // nsIController
   supportsCommand(aCommand) {
     // Firstly, determine if this is a command that we can handle.
-    if (!aCommand.startsWith("cmd_") &&
-        !aCommand.startsWith("downloadsCmd_")) {
+    if (!DownloadsViewUI.isCommandName(aCommand)) {
       return false;
     }
     if (!(aCommand in this) &&
@@ -1233,6 +1236,11 @@ DownloadsPlacesView.prototype = {
 
   // nsIController
   doCommand(aCommand) {
+    // Commands may be invoked with keyboard shortcuts even if disabled.
+    if (!this.isCommandEnabled(aCommand)) {
+      return;
+    }
+
     // If this command is not selection-specific, execute it.
     if (aCommand in this) {
       this[aCommand]();
@@ -1398,12 +1406,15 @@ DownloadsPlacesView.prototype = {
       return;
     }
 
-    let name = {};
-    let url = Services.droppedLinkHandler.dropLink(aEvent, name);
-    if (url) {
-      let browserWin = RecentWindow.getMostRecentBrowserWindow();
-      let initiatingDoc = browserWin ? browserWin.document : document;
-      DownloadURL(url, name.value, initiatingDoc);
+    let links = Services.droppedLinkHandler.dropLinks(aEvent);
+    if (!links.length)
+      return;
+    let browserWin = RecentWindow.getMostRecentBrowserWindow();
+    let initiatingDoc = browserWin ? browserWin.document : document;
+    for (let link of links) {
+      if (link.url.startsWith("about:"))
+        continue;
+      DownloadURL(link.url, link.name, initiatingDoc);
     }
   },
 };
@@ -1418,11 +1429,11 @@ for (let methodName of ["load", "applyFilter", "selectNode", "selectItems"]) {
 function goUpdateDownloadCommands() {
   function updateCommandsForObject(object) {
     for (let name in object) {
-      if (name.startsWith("cmd_") || name.startsWith("downloadsCmd_")) {
+      if (DownloadsViewUI.isCommandName(name)) {
         goUpdateCommand(name);
       }
     }
   }
-  updateCommandsForObject(this);
+  updateCommandsForObject(DownloadsPlacesView.prototype);
   updateCommandsForObject(HistoryDownloadElementShell.prototype);
 }

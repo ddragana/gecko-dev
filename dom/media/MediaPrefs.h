@@ -10,6 +10,8 @@
 #include "AndroidBridge.h"
 #endif
 
+#include "mozilla/Atomics.h"
+
 // First time MediaPrefs::GetSingleton() needs to be called on the main thread,
 // before any of the methods accessing the values are used, but after
 // the Preferences system has been initialized.
@@ -33,7 +35,7 @@ public:                                                                       \
 static const Type& Name() { MOZ_ASSERT(SingletonExists()); return GetSingleton().mPref##Name.mValue; } \
 private:                                                                      \
 static const char* Get##Name##PrefName() { return Pref; }                     \
-static Type Get##Name##PrefDefault() { return Default; }                      \
+static StripAtomic<Type> Get##Name##PrefDefault() { return Default; }         \
 PrefTemplate<Type, Get##Name##PrefDefault, Get##Name##PrefName> mPref##Name
 
 // Custom Definitions.
@@ -47,10 +49,24 @@ template<class T> class StaticAutoPtr;
 
 class MediaPrefs final
 {
+  typedef Atomic<uint32_t, Relaxed> AtomicUint32;
+
+  template <typename T>
+  struct StripAtomicImpl {
+    typedef T Type;
+  };
+
+  template <typename T, MemoryOrdering Order>
+  struct StripAtomicImpl<Atomic<T, Order>> {
+    typedef T Type;
+  };
+
+  template <typename T>
+  using StripAtomic = typename StripAtomicImpl<T>::Type;
 
 private:
   // Since we cannot use const char*, use a function that returns it.
-  template <class T, T Default(), const char* Pref()>
+  template <class T, StripAtomic<T> Default(), const char* Pref()>
   class PrefTemplate
   {
   public:
@@ -76,18 +92,23 @@ private:
   DECL_MEDIA_PREF("media.resampling.rate",                    AudioSinkResampleRate, uint32_t, 48000);
   DECL_MEDIA_PREF("media.forcestereo.enabled",                AudioSinkForceStereo, bool, true);
 
+  // VideoSink
+  DECL_MEDIA_PREF("media.ruin-av-sync.enabled",               RuinAvSync, bool, false);
+
   // PlatformDecoderModule
   DECL_MEDIA_PREF("media.apple.forcevda",                     AppleForceVDA, bool, false);
   DECL_MEDIA_PREF("media.gmp.insecure.allow",                 GMPAllowInsecure, bool, false);
   DECL_MEDIA_PREF("media.gmp.async-shutdown-timeout",         GMPAsyncShutdownTimeout, uint32_t, GMP_DEFAULT_ASYNC_SHUTDOWN_TIMEOUT);
   DECL_MEDIA_PREF("media.eme.enabled",                        EMEEnabled, bool, false);
   DECL_MEDIA_PREF("media.use-blank-decoder",                  PDMUseBlankDecoder, bool, false);
+  DECL_MEDIA_PREF("media.gpu-process-decoder",                PDMUseGPUDecoder, bool, false);
 #ifdef MOZ_GONK_MEDIACODEC
   DECL_MEDIA_PREF("media.gonk.enabled",                       PDMGonkDecoderEnabled, bool, true);
 #endif
 #ifdef MOZ_WIDGET_ANDROID
   DECL_MEDIA_PREF("media.android-media-codec.enabled",        PDMAndroidMediaCodecEnabled, bool, false);
   DECL_MEDIA_PREF("media.android-media-codec.preferred",      PDMAndroidMediaCodecPreferred, bool, false);
+  DECL_MEDIA_PREF("media.android-remote-codec.enabled",       PDMAndroidRemoteCodecEnabled, bool, false);
 #endif
 #ifdef MOZ_FFMPEG
   DECL_MEDIA_PREF("media.ffmpeg.enabled",                     PDMFFmpegEnabled, bool, true);
@@ -114,7 +135,7 @@ private:
 
   // MediaDecoderStateMachine
   DECL_MEDIA_PREF("media.suspend-bkgnd-video.enabled",        MDSMSuspendBackgroundVideoEnabled, bool, false);
-  DECL_MEDIA_PREF("media.suspend-bkgnd-video.delay-ms",       MDSMSuspendBackgroundVideoDelay, uint32_t, SUSPEND_BACKGROUND_VIDEO_DELAY_MS);
+  DECL_MEDIA_PREF("media.suspend-bkgnd-video.delay-ms",       MDSMSuspendBackgroundVideoDelay, AtomicUint32, SUSPEND_BACKGROUND_VIDEO_DELAY_MS);
 
   // WebSpeech
   DECL_MEDIA_PREF("media.webspeech.synth.force_global_queue", WebSpeechForceGlobal, bool, false);
@@ -126,6 +147,17 @@ private:
 
   DECL_MEDIA_PREF("media.num-decode-threads",                 MediaThreadPoolDefaultCount, uint32_t, 4);
   DECL_MEDIA_PREF("media.decoder.limit",                      MediaDecoderLimit, int32_t, MediaDecoderLimitDefault());
+
+  // Ogg
+  DECL_MEDIA_PREF("media.ogg.enabled",                        OggEnabled, bool, true);
+  DECL_MEDIA_PREF("media.format-reader.ogg",                  OggFormatReader, bool, true);
+  // Flac
+  DECL_MEDIA_PREF("media.ogg.flac.enabled",                   FlacInOgg, bool, false);
+  DECL_MEDIA_PREF("media.flac.enabled",                       FlacEnabled, bool, true);
+
+#if defined(MOZ_RUST_MP4PARSE) && !defined(RELEASE_OR_BETA)
+  DECL_MEDIA_PREF("media.rust.test_mode",                     RustTestMode, bool, false);
+#endif
 
 public:
   // Manage the singleton:
@@ -156,6 +188,7 @@ private:
   static void PrefAddVarCache(int32_t*, const char*, int32_t);
   static void PrefAddVarCache(uint32_t*, const char*, uint32_t);
   static void PrefAddVarCache(float*, const char*, float);
+  static void PrefAddVarCache(AtomicUint32*, const char*, uint32_t);
 
   static void AssertMainThread();
 

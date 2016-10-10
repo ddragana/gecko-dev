@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
+#include <vector>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/CheckedInt.h"
@@ -18,6 +20,7 @@
 #include "WebGLFramebufferAttachable.h"
 #include "WebGLObjectModel.h"
 #include "WebGLStrongTypes.h"
+#include "WebGLTypes.h"
 
 namespace mozilla {
 class ErrorResult;
@@ -25,11 +28,19 @@ class WebGLContext;
 
 namespace dom {
 class Element;
+class HTMLVideoElement;
 class ImageData;
 class ArrayBufferViewOrSharedArrayBufferView;
 } // namespace dom
 
+namespace layers {
+class Image;
+} // namespace layers
+
 namespace webgl {
+struct DriverUnpackInfo;
+struct FormatUsageInfo;
+struct PackingInfo;
 class TexUnpackBlob;
 } // namespace webgl
 
@@ -154,9 +165,10 @@ public:
         ImageInfo& operator =(const ImageInfo& a);
 
     public:
-        uint32_t MaxMipmapLevels() const {
+        uint32_t PossibleMipmapLevels() const {
             // GLES 3.0.4, 3.8 - Mipmapping: `floor(log2(largest_of_dims)) + 1`
-            uint32_t largest = std::max(std::max(mWidth, mHeight), mDepth);
+            const uint32_t largest = std::max(std::max(mWidth, mHeight), mDepth);
+            MOZ_ASSERT(largest != 0);
             return FloorLog2Size(largest) + 1;
         }
 
@@ -189,7 +201,7 @@ public:
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLTexture)
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLTexture)
 
-    explicit WebGLTexture(WebGLContext* webgl, GLuint tex);
+    WebGLTexture(WebGLContext* webgl, GLuint tex);
 
     void Delete();
 
@@ -224,17 +236,23 @@ public:
                        GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
                        GLint zOffset, GLsizei width, GLsizei height, GLsizei depth,
                        GLint border, GLenum unpackFormat, GLenum unpackType,
-                       const dom::Nullable<dom::ArrayBufferView>& maybeView);
+                       const dom::ArrayBufferView* view);
 
     void TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
                        GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
                        GLint zOffset, GLenum unpackFormat, GLenum unpackType,
-                       dom::ImageData* imageData);
+                       const dom::ImageData& imageData);
 
     void TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
                        GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
                        GLint zOffset, GLenum unpackFormat, GLenum unpackType,
-                       dom::Element* elem, ErrorResult* const out_error);
+                       const dom::Element& elem, ErrorResult* const out_error);
+
+    void TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
+                       GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
+                       GLint zOffset, GLsizei width, GLsizei height, GLsizei depth,
+                       GLint border, GLenum unpackFormat, GLenum unpackType,
+                       WebGLsizeiptr offset);
 
 protected:
     void TexOrSubImageBlob(bool isSubImage, const char* funcName, TexImageTarget target,
@@ -252,6 +270,7 @@ protected:
                                    GLint zOffset, uint32_t width, uint32_t height,
                                    uint32_t depth,
                                    WebGLTexture::ImageInfo** const out_imageInfo);
+    bool ValidateCopyTexImageForFeedback(const char* funcName, uint32_t level) const;
 
     bool ValidateUnpack(const char* funcName, const webgl::TexUnpackBlob* blob,
                         bool isFunc3D, const webgl::PackingInfo& srcPI) const;
@@ -287,7 +306,7 @@ protected:
 
     void PopulateMipChain(uint32_t baseLevel, uint32_t maxLevel);
 
-    uint32_t MaxEffectiveMipmapLevel(uint32_t texUnit) const;
+    bool MaxEffectiveMipmapLevel(uint32_t texUnit, uint32_t* const out) const;
 
     static uint8_t FaceForTarget(TexImageTarget texImageTarget) {
         GLenum rawTexImageTarget = texImageTarget.get();
@@ -387,6 +406,9 @@ protected:
     bool GetFakeBlackType(const char* funcName, uint32_t texUnit,
                           FakeBlackType* const out_fakeBlack);
 public:
+    bool IsFeedback(WebGLContext* webgl, const char* funcName, uint32_t texUnit,
+                    const std::vector<const WebGLFBAttachPoint*>& fbAttachments) const;
+
     bool ResolveForDraw(const char* funcName, uint32_t texUnit,
                         FakeBlackType* const out_fakeBlack);
 

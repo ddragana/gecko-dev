@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -117,7 +117,7 @@ UNIFIED_SOURCES += [
 
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     SOURCES += ['AudioNodeEngineNEON.cpp']
-    SOURCES['AudioNodeEngineNEON.cpp'].flags += ['-mfpu=neon']
+    SOURCES['AudioNodeEngineNEON.cpp'].flags += CONFIG['NEON_FLAGS']
     LOCAL_INCLUDES += [
         '/media/openmax_dl/dl/api/'
     ]

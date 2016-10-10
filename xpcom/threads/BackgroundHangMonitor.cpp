@@ -14,9 +14,6 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/ThreadHangStats.h"
 #include "mozilla/ThreadLocal.h"
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
 
 #include "prinrval.h"
 #include "prthread.h"
@@ -58,12 +55,6 @@ private:
   static void MonitorThread(void* aData)
   {
     PR_SetCurrentThreadName("BgHangManager");
-
-#ifdef MOZ_NUWA_PROCESS
-    if (IsNuwaProcess()) {
-      NuwaMarkCurrentThread(nullptr, nullptr);
-    }
-#endif
 
     /* We do not hold a reference to BackgroundHangManager here
        because the monitor thread only exists as long as the
@@ -409,9 +400,12 @@ BackgroundHangThread::ReportHang(PRIntervalTime aHangTime)
   // mManager->mLock IS locked
 
   // Remove unwanted "js::RunScript" frame from the stack
-  for (const char** f = &mHangStack.back(); f >= mHangStack.begin(); f--) {
+  for (size_t i = 0; i < mHangStack.length(); ) {
+    const char** f = mHangStack.begin() + i;
     if (!mHangStack.IsInBuffer(*f) && !strcmp(*f, "js::RunScript")) {
       mHangStack.erase(f);
+    } else {
+      i++;
     }
   }
 

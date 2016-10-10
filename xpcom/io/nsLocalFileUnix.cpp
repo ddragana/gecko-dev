@@ -10,6 +10,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Sprintf.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -61,7 +62,7 @@ static nsresult MacErrorMapper(OSErr inErr);
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
+#include "GeneratedJNIWrappers.h"
 #include "nsIMIMEService.h"
 #include <linux/magic.h>
 #endif
@@ -1296,7 +1297,7 @@ GetDeviceName(int aDeviceMajor, int aDeviceMinor, nsACString& aDeviceName)
   char mountinfoLine[kMountInfoLineLength];
   char deviceNum[kMountInfoLineLength];
 
-  snprintf(deviceNum, kMountInfoLineLength, "%d:%d", aDeviceMajor, aDeviceMinor);
+  SprintfLiteral(deviceNum, "%d:%d", aDeviceMajor, aDeviceMinor);
 
   FILE* f = fopen("/proc/self/mountinfo", "rt");
   if (!f) {
@@ -1436,10 +1437,8 @@ nsLocalFile::GetParent(nsIFile** aParent)
 
   // <brendan, after jband> I promise to play nice
   char* buffer = mPath.BeginWriting();
-  char* slashp = buffer;
-
   // find the last significant slash in buffer
-  slashp = strrchr(buffer, '/');
+  char* slashp = strrchr(buffer, '/');
   NS_ASSERTION(slashp, "non-canonical path?");
   if (!slashp) {
     return NS_ERROR_FILE_INVALID_PATH;
@@ -2023,7 +2022,7 @@ nsLocalFile::Launch()
   }
 
   nsAutoCString fileUri = NS_LITERAL_CSTRING("file://") + mPath;
-  return widget::GeckoAppShell::OpenUriExternal(
+  return java::GeckoAppShell::OpenUriExternal(
     NS_ConvertUTF8toUTF16(fileUri),
     NS_ConvertUTF8toUTF16(type),
     EmptyString(),

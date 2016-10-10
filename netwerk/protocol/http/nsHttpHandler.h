@@ -108,7 +108,6 @@ public:
     bool           AllowExperiments() { return mTelemetryEnabled && mAllowExperiments; }
 
     bool           IsSpdyEnabled() { return mEnableSpdy; }
-    bool           IsSpdyV31Enabled() { return mSpdyV31; }
     bool           IsHttp2Enabled() { return mHttp2Enabled; }
     bool           IsHttp2sdtEnabled() { return mHttp2sdtEnabled; }
     bool           EnforceHttp2TlsProfile() { return mEnforceHttp2TlsProfile; }
@@ -245,14 +244,16 @@ public:
     void UpdateAltServiceMapping(AltSvcMapping *map,
                                  nsProxyInfo *proxyInfo,
                                  nsIInterfaceRequestor *callbacks,
-                                 uint32_t caps)
+                                 uint32_t caps,
+                                 const NeckoOriginAttributes &originAttributes)
     {
-        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps);
+        mConnMgr->UpdateAltServiceMapping(map, proxyInfo, callbacks, caps,
+                                          originAttributes);
     }
 
-    AltSvcMapping *GetAltServiceMapping(const nsACString &scheme,
-                                        const nsACString &host,
-                                        int32_t port, bool pb)
+    already_AddRefed<AltSvcMapping> GetAltServiceMapping(const nsACString &scheme,
+                                                         const nsACString &host,
+                                                         int32_t port, bool pb)
     {
         return mConnMgr->GetAltServiceMapping(scheme, host, port, pb);
     }
@@ -368,6 +369,11 @@ public:
     bool KeepEmptyResponseHeadersAsEmtpyString() const
     {
         return mKeepEmptyResponseHeadersAsEmtpyString;
+    }
+
+    uint32_t DefaultHpackBuffer() const
+    {
+        return mDefaultHpackBuffer;
     }
 
 private:
@@ -516,7 +522,6 @@ private:
     uint32_t           mDebugObservations : 1;
 
     uint32_t           mEnableSpdy : 1;
-    uint32_t           mSpdyV31 : 1;
     uint32_t           mHttp2Enabled : 1;
     uint32_t           mHttp2sdtEnabled : 1;
     uint32_t           mUseH2Deps : 1;
@@ -591,6 +596,8 @@ private:
     // (Bug 6699259)
     bool mKeepEmptyResponseHeadersAsEmtpyString;
 
+    // The default size (in bytes) of the HPACK decompressor table.
+    uint32_t mDefaultHpackBuffer;
     uint32_t mSdtChunkSize;
 
 private:
@@ -639,6 +646,7 @@ private:
     // UUID generator for channelIds
     nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
 
+public:
     nsresult NewChannelId(nsID *channelId);
 };
 

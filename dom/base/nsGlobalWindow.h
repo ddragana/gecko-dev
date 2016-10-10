@@ -88,7 +88,6 @@ class nsIScriptTimeoutHandler;
 class nsIWebBrowserChrome;
 
 class nsDOMWindowList;
-class nsLocation;
 class nsScreen;
 class nsHistory;
 class nsGlobalWindowObserver;
@@ -106,10 +105,12 @@ class BarProp;
 struct ChannelPixelLayout;
 class Console;
 class Crypto;
+class CustomElementsRegistry;
 class External;
 class Function;
 class Gamepad;
 enum class ImageBitmapFormat : uint32_t;
+class Location;
 class MediaQueryList;
 class MozSelfSupport;
 class Navigator;
@@ -121,7 +122,8 @@ class RequestOrUSVString;
 class Selection;
 class SpeechSynthesis;
 class U2F;
-class VRDevice;
+class VRDisplay;
+class VREventObserver;
 class WakeLock;
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
 class WindowOrientationObserver;
@@ -131,9 +133,6 @@ class CacheStorage;
 } // namespace cache
 class IDBFactory;
 } // namespace dom
-namespace gfx {
-class VRDeviceProxy;
-} // namespace gfx
 } // namespace mozilla
 
 extern already_AddRefed<nsIScriptTimeoutHandler>
@@ -199,13 +198,9 @@ public:
   // Remaining time to wait.  Used only when timeouts are suspended.
   mozilla::TimeDuration mTimeRemaining;
 
-  // Principal with which to execute
-  nsCOMPtr<nsIPrincipal> mPrincipal;
-
   // stack depth at which timeout is firing
   uint32_t mFiringDepth;
 
-  // 
   uint32_t mNestingLevel;
 
   // The popup state at timeout creation time if not created from
@@ -491,8 +486,7 @@ public:
 
   // Outer windows only.
   virtual nsresult SetFullscreenInternal(
-    FullscreenReason aReason, bool aIsFullscreen,
-    mozilla::gfx::VRDeviceProxy *aHMD = nullptr) override final;
+    FullscreenReason aReason, bool aIsFullscreen) override final;
   virtual void FinishFullscreenChange(bool aIsFullscreen) override final;
   bool SetWidgetFullscreen(FullscreenReason aReason, bool aIsFullscreen,
                            nsIWidget* aWidget, nsIScreen* aScreen);
@@ -500,6 +494,8 @@ public:
 
   // Inner windows only.
   virtual void SetHasGamepadEventListener(bool aHasGamepad = true) override;
+  void NotifyVREventListenerAdded();
+  virtual void EventListenerAdded(nsIAtom* aType) override;
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -805,8 +801,17 @@ public:
   void EnableGamepadUpdates();
   void DisableGamepadUpdates();
 
-  // Update the VR devices for this window
-  bool UpdateVRDevices(nsTArray<RefPtr<mozilla::dom::VRDevice>>& aDevices);
+  // Inner windows only.
+  // Enable/disable updates for VR
+  void EnableVRUpdates();
+  void DisableVRUpdates();
+
+  // Update the VR displays for this window
+  bool UpdateVRDisplays(nsTArray<RefPtr<mozilla::dom::VRDisplay>>& aDisplays);
+  
+  // Inner windows only.
+  // Called to inform that the set of active VR displays has changed.
+  void NotifyActiveVRDisplaysChanged();
 
 #define EVENT(name_, id_, type_, struct_)                                     \
   mozilla::dom::EventHandlerNonNull* GetOn##name_()                           \
@@ -875,9 +880,10 @@ public:
   void GetName(nsAString& aName, mozilla::ErrorResult& aError);
   void SetNameOuter(const nsAString& aName, mozilla::ErrorResult& aError);
   void SetName(const nsAString& aName, mozilla::ErrorResult& aError);
-  nsLocation* GetLocation(mozilla::ErrorResult& aError);
+  mozilla::dom::Location* GetLocation(mozilla::ErrorResult& aError);
   nsIDOMLocation* GetLocation() override;
   nsHistory* GetHistory(mozilla::ErrorResult& aError);
+  mozilla::dom::CustomElementsRegistry* CustomElements() override;
   mozilla::dom::BarProp* GetLocationbar(mozilla::ErrorResult& aError);
   mozilla::dom::BarProp* GetMenubar(mozilla::ErrorResult& aError);
   mozilla::dom::BarProp* GetPersonalbar(mozilla::ErrorResult& aError);
@@ -926,8 +932,11 @@ public:
   already_AddRefed<nsPIDOMWindowOuter> GetParent() override;
   nsPIDOMWindowOuter* GetScriptableParent() override;
   nsPIDOMWindowOuter* GetScriptableParentOrNull() override;
-  mozilla::dom::Element* GetFrameElementOuter();
-  mozilla::dom::Element* GetFrameElement(mozilla::ErrorResult& aError);
+  mozilla::dom::Element*
+  GetFrameElementOuter(const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal);
+  mozilla::dom::Element*
+  GetFrameElement(const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                  mozilla::ErrorResult& aError);
   already_AddRefed<nsIDOMElement> GetFrameElement() override;
   already_AddRefed<nsPIDOMWindowOuter>
   OpenOuter(const nsAString& aUrl,
@@ -969,32 +978,48 @@ public:
 
 protected:
   bool AlertOrConfirm(bool aAlert, const nsAString& aMessage,
+                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
 
 public:
-  void Alert(mozilla::ErrorResult& aError);
-  void AlertOuter(const nsAString& aMessage, mozilla::ErrorResult& aError);
-  void Alert(const nsAString& aMessage, mozilla::ErrorResult& aError);
+  void Alert(const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+             mozilla::ErrorResult& aError);
+  void AlertOuter(const nsAString& aMessage,
+                  const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                  mozilla::ErrorResult& aError);
+  void Alert(const nsAString& aMessage,
+             const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+             mozilla::ErrorResult& aError);
+  bool ConfirmOuter(const nsAString& aMessage,
+                    const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                    mozilla::ErrorResult& aError);
+  bool Confirm(const nsAString& aMessage,
+               const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+               mozilla::ErrorResult& aError);
+  void PromptOuter(const nsAString& aMessage, const nsAString& aInitial,
+                   nsAString& aReturn,
+                   const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                   mozilla::ErrorResult& aError);
+  void Prompt(const nsAString& aMessage, const nsAString& aInitial,
+              nsAString& aReturn,
+              const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+              mozilla::ErrorResult& aError);
   already_AddRefed<mozilla::dom::cache::CacheStorage> GetCaches(mozilla::ErrorResult& aRv);
-  bool ConfirmOuter(const nsAString& aMessage, mozilla::ErrorResult& aError);
-  bool Confirm(const nsAString& aMessage, mozilla::ErrorResult& aError);
   already_AddRefed<mozilla::dom::Promise> Fetch(const mozilla::dom::RequestOrUSVString& aInput,
                                                 const mozilla::dom::RequestInit& aInit,
                                                 mozilla::ErrorResult& aRv);
-  void PromptOuter(const nsAString& aMessage, const nsAString& aInitial,
-                   nsAString& aReturn, mozilla::ErrorResult& aError);
-  void Prompt(const nsAString& aMessage, const nsAString& aInitial,
-              nsAString& aReturn, mozilla::ErrorResult& aError);
   void PrintOuter(mozilla::ErrorResult& aError);
   void Print(mozilla::ErrorResult& aError);
   void ShowModalDialog(JSContext* aCx, const nsAString& aUrl,
                        JS::Handle<JS::Value> aArgument,
                        const nsAString& aOptions,
                        JS::MutableHandle<JS::Value> aRetval,
+                       const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                        mozilla::ErrorResult& aError);
   void PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                       const nsAString& aTargetOrigin,
                       const mozilla::dom::Optional<mozilla::dom::Sequence<JS::Value > >& aTransfer,
+                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
   int32_t SetTimeout(JSContext* aCx, mozilla::dom::Function& aFunction,
                      int32_t aTimeout,
@@ -1019,7 +1044,9 @@ public:
   void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
             mozilla::ErrorResult& aError);
   mozilla::dom::DOMStorage* GetSessionStorage(mozilla::ErrorResult& aError);
-  mozilla::dom::DOMStorage* GetLocalStorage(mozilla::ErrorResult& aError);
+  mozilla::dom::DOMStorage*
+  GetLocalStorage(const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                  mozilla::ErrorResult& aError);
   mozilla::dom::Selection* GetSelectionOuter();
   mozilla::dom::Selection* GetSelection(mozilla::ErrorResult& aError);
   already_AddRefed<nsISelection> GetSelection() override;
@@ -1226,9 +1253,9 @@ public:
                                   mozilla::ErrorResult& aError);
   void SetCursorOuter(const nsAString& aCursor, mozilla::ErrorResult& aError);
   void SetCursor(const nsAString& aCursor, mozilla::ErrorResult& aError);
-  void Maximize(mozilla::ErrorResult& aError);
-  void Minimize(mozilla::ErrorResult& aError);
-  void Restore(mozilla::ErrorResult& aError);
+  void Maximize();
+  void Minimize();
+  void Restore();
   void NotifyDefaultButtonLoaded(mozilla::dom::Element& aDefaultButton,
                                  mozilla::ErrorResult& aError);
   nsIMessageBroadcaster* GetMessageManager(mozilla::ErrorResult& aError);
@@ -1239,16 +1266,22 @@ public:
                        mozilla::ErrorResult& aError);
 
   void GetDialogArgumentsOuter(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
+                               const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                                mozilla::ErrorResult& aError);
   void GetDialogArguments(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
+                          const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                           mozilla::ErrorResult& aError);
   void GetReturnValueOuter(JSContext* aCx, JS::MutableHandle<JS::Value> aReturnValue,
+                           const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                            mozilla::ErrorResult& aError);
   void GetReturnValue(JSContext* aCx, JS::MutableHandle<JS::Value> aReturnValue,
+                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
   void SetReturnValueOuter(JSContext* aCx, JS::Handle<JS::Value> aReturnValue,
+                           const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                            mozilla::ErrorResult& aError);
   void SetReturnValue(JSContext* aCx, JS::Handle<JS::Value> aReturnValue,
+                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
 
   void GetInterface(JSContext* aCx, nsIJSID* aIID,
@@ -1539,7 +1572,8 @@ public:
 
   static bool CanSetProperty(const char *aPrefName);
 
-  static void MakeScriptDialogTitle(nsAString &aOutTitle);
+  static void MakeScriptDialogTitle(nsAString& aOutTitle,
+                                    nsIPrincipal* aSubjectPrincipal);
 
   // Outer windows only.
   bool CanMoveResizeWindows(bool aCallerIsChrome);
@@ -1670,19 +1704,25 @@ protected:
   void PostMessageMozOuter(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                            const nsAString& aTargetOrigin,
                            JS::Handle<JS::Value> aTransfer,
+                           const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                            mozilla::ErrorResult& aError);
   void PostMessageMoz(JSContext* aCx, JS::Handle<JS::Value> aMessage,
                       const nsAString& aTargetOrigin,
                       JS::Handle<JS::Value> aTransfer,
+                      const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
                       mozilla::ErrorResult& aError);
 
   already_AddRefed<nsIVariant>
     ShowModalDialogOuter(const nsAString& aUrl, nsIVariant* aArgument,
-                         const nsAString& aOptions, mozilla::ErrorResult& aError);
+                         const nsAString& aOptions,
+                         const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                         mozilla::ErrorResult& aError);
 
   already_AddRefed<nsIVariant>
     ShowModalDialog(const nsAString& aUrl, nsIVariant* aArgument,
-                    const nsAString& aOptions, mozilla::ErrorResult& aError);
+                    const nsAString& aOptions,
+                    const mozilla::Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                    mozilla::ErrorResult& aError);
 
   // Ask the user if further dialogs should be blocked, if dialogs are currently
   // being abused. This is used in the cases where we have no modifiable UI to
@@ -1702,6 +1742,10 @@ private:
   // Called only on outer windows to compute the value that will be returned by
   // IsSecureContext() for the inner window that corresponds to aDocument.
   bool ComputeIsSecureContext(nsIDocument* aDocument);
+
+public:
+
+  void GetConstellation(nsACString& aConstellation);
 
 protected:
   // This member is also used on both inner and outer windows, but
@@ -1769,6 +1813,10 @@ protected:
   // Inner windows only.
   // Indicates whether this window wants gamepad input events
   bool                   mHasGamepad : 1;
+
+  // Inner windows only.
+  // Indicates whether this window wants VR events
+  bool                   mHasVREvents : 1;
 #ifdef MOZ_GAMEPAD
   nsCheapSet<nsUint32HashKey> mGamepadIndexSet;
   nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Gamepad> mGamepads;
@@ -1836,8 +1884,9 @@ protected:
   nsTimeout*                    mTimeoutInsertionPoint;
   uint32_t                      mTimeoutPublicIdCounter;
   uint32_t                      mTimeoutFiringDepth;
-  RefPtr<nsLocation>          mLocation;
+  RefPtr<mozilla::dom::Location> mLocation;
   RefPtr<nsHistory>           mHistory;
+  RefPtr<mozilla::dom::CustomElementsRegistry> mCustomElements;
 
   // These member variables are used on both inner and the outer windows.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
@@ -1910,8 +1959,13 @@ protected:
   // This is the CC generation the last time we called CanSkip.
   uint32_t mCanSkipCCGeneration;
 
-  // The VRDevies for this window
-  nsTArray<RefPtr<mozilla::dom::VRDevice>> mVRDevices;
+  // The VR Displays for this window
+  nsTArray<RefPtr<mozilla::dom::VRDisplay>> mVRDisplays;
+
+  nsAutoPtr<mozilla::dom::VREventObserver> mVREventObserver;
+
+  uint64_t mStaticConstellation; // Only used on outer windows
+  nsCString mConstellation; // Only used on inner windows
 
   friend class nsDOMScriptableHelper;
   friend class nsDOMWindowUtils;

@@ -1416,6 +1416,12 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
         convertInt32ToFloat32(operand.valueReg(), dest);
     }
 
+    void loadConstantDouble(wasm::RawF64 d, FloatRegister dest) {
+        loadConstantDouble(d.fp(), dest);
+    }
+    void loadConstantFloat32(wasm::RawF32 f, FloatRegister dest) {
+        loadConstantFloat32(f.fp(), dest);
+    }
     void loadConstantDouble(double d, FloatRegister dest) {
         Fmov(ARMFPRegister(dest, 64), d);
     }
@@ -2232,7 +2238,12 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
         vixl::MacroAssembler::Ret(vixl::lr);
     }
 
-    void convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest) {
+    bool convertUInt64ToDoubleNeedsTemp() {
+        return false;
+    }
+
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp) {
+        MOZ_ASSERT(temp == Register::Invalid());
         Ucvtf(ARMFPRegister(dest, 64), ARMRegister(src.reg, 64));
     }
 
@@ -2242,17 +2253,6 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
 
     void stackCheck(ImmWord limitAddr, Label* label) {
         MOZ_CRASH("stackCheck");
-    }
-    void clampIntToUint8(Register reg) {
-        vixl::UseScratchRegisterScope temps(this);
-        const ARMRegister scratch32 = temps.AcquireW();
-        const ARMRegister reg32(reg, 32);
-        MOZ_ASSERT(!scratch32.Is(reg32));
-
-        Cmp(reg32, Operand(reg32, vixl::UXTB));
-        Csel(reg32, reg32, vixl::wzr, Assembler::GreaterThanOrEqual);
-        Mov(scratch32, Operand(0xff));
-        Csel(reg32, reg32, scratch32, Assembler::LessThanOrEqual);
     }
 
     void incrementInt32Value(const Address& addr) {
@@ -2305,12 +2305,13 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
 #endif
     }
 
-    void loadWasmActivation(Register dest) {
-        loadPtr(Address(GlobalReg, wasm::ActivationGlobalDataOffset - AsmJSGlobalRegBias), dest);
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
     }
-    void loadAsmJSHeapRegisterFromGlobalData() {
-        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias), HeapReg);
-        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias + 8), HeapLenReg);
+    void loadWasmPinnedRegsFromTls() {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
+        adds32(Imm32(AsmJSGlobalRegBias), GlobalReg);
     }
 
     // Overwrites the payload bits of a dest register containing a Value.

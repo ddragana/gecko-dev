@@ -73,6 +73,8 @@ public:
 
   virtual ImageClientSingle* AsImageClientSingle() { return nullptr; }
 
+  static already_AddRefed<TextureClient> CreateTextureClientForImage(Image* aImage, KnowsCompositor* aForwarder);
+
 protected:
   ImageClient(CompositableForwarder* aFwd, TextureFlags aFlags,
               CompositableType aType);
@@ -129,11 +131,6 @@ public:
   virtual TextureInfo GetTextureInfo() const override
   {
     return TextureInfo(mType);
-  }
-
-  virtual void SetIPDLActor(CompositableChild* aChild) override
-  {
-    MOZ_ASSERT(!aChild, "ImageClientBridge should not have IPDL actor");
   }
 
 protected:

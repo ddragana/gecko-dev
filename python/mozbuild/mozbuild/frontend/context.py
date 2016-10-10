@@ -945,6 +945,13 @@ VARIABLES = {
 
         """),
 
+    'IS_RUST_LIBRARY': (bool, bool,
+        """Whether the current library defined by this moz.build is built by Rust.
+
+        The library defined by this moz.build should have a build definition in
+        a Cargo.toml file that exists in this moz.build's directory.
+        """),
+
     'UNIFIED_SOURCES': (ContextDerivedTypedList(SourcePath, StrictOrderingOnAppendList), list,
         """Source code files that can be compiled together.
 
@@ -1508,12 +1515,20 @@ VARIABLES = {
         """List of manifest files defining Android instrumentation tests.
         """),
 
-    'MARIONETTE_LAYOUT_MANIFESTS': (ManifestparserManifestList, list,
-        """List of manifest files defining marionette-layout tests.
+    'FIREFOX_UI_FUNCTIONAL_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining firefox-ui-functional tests.
         """),
 
-    'MARIONETTE_LOOP_MANIFESTS': (ManifestparserManifestList, list,
-        """List of manifest files defining marionette-loop tests.
+    'FIREFOX_UI_UPDATE_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining firefox-ui-update tests.
+        """),
+
+    'PUPPETEER_FIREFOX_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining puppeteer unit tests for Firefox.
+        """),
+
+    'MARIONETTE_LAYOUT_MANIFESTS': (ManifestparserManifestList, list,
+        """List of manifest files defining marionette-layout tests.
         """),
 
     'MARIONETTE_UNIT_MANIFESTS': (ManifestparserManifestList, list,

@@ -13,8 +13,8 @@
 #include "mozilla/dom/CrashReporterChild.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
-#include "mozilla/unused.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Unused.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/TimeStamp.h"
 
@@ -108,6 +108,11 @@ using google_breakpad::ClientInfo;
 #ifdef XP_LINUX
 using google_breakpad::MinidumpDescriptor;
 #endif
+#if defined(MOZ_WIDGET_ANDROID)
+using google_breakpad::auto_wasteful_vector;
+using google_breakpad::FileID;
+using google_breakpad::PageAllocator;
+#endif
 using namespace mozilla;
 using mozilla::dom::CrashReporterChild;
 using mozilla::dom::PCrashReporterChild;
@@ -181,13 +186,14 @@ static xpstring *defaultMemoryReportPath = nullptr;
 static char const * const kCrashEventAnnotations[] = {
   "AsyncShutdownTimeout",
   "BuildID",
-  "TelemetryEnvironment",
   "ProductID",
   "ProductName",
   "ReleaseChannel",
   "SecondsSinceLastCrash",
   "ShutdownProgress",
-  "Version"
+  "StartupCrash",
+  "TelemetryEnvironment",
+  "Version",
   // The following entries are not normal annotations but are included
   // in the crash record/FHR:
   // "ContainsMemoryReport"
@@ -329,11 +335,11 @@ private:
 };
 #endif // MOZ_CRASHREPORTER_INJECTOR
 
-// Crashreporter annotations that we don't send along in subprocess
-// reports
+// Crashreporter annotations that we don't send along in subprocess reports.
 static const char* kSubprocessBlacklist[] = {
   "FramePoisonBase",
   "FramePoisonSize",
+  "StartupCrash",
   "StartupTime",
   "URL"
 };
@@ -1132,12 +1138,14 @@ bool MinidumpCallback(
   return returnValue;
 }
 
-#if defined(XP_MACOSX) || defined(__ANDROID__)
+#if defined(XP_MACOSX) || defined(__ANDROID__) || defined(XP_LINUX)
 static size_t
 EnsureTrailingSlash(XP_CHAR* aBuf, size_t aBufLen)
 {
   size_t len = XP_STRLEN(aBuf);
-  if ((len + 2) < aBufLen && aBuf[len - 1] != XP_PATH_SEPARATOR_CHAR) {
+  if ((len + 1) < aBufLen
+      && len > 0
+      && aBuf[len - 1] != XP_PATH_SEPARATOR_CHAR) {
     aBuf[len] = XP_PATH_SEPARATOR_CHAR;
     ++len;
     aBuf[len] = 0;
@@ -1160,13 +1168,11 @@ BuildTempPath(wchar_t* aBuf, size_t aBufLen)
   return GetTempPath(pathLen, aBuf);
 }
 
-#ifdef MOZ_CHAR16_IS_NOT_WCHAR
 static size_t
 BuildTempPath(char16_t* aBuf, size_t aBufLen)
 {
   return BuildTempPath(reinterpret_cast<wchar_t*>(aBuf), aBufLen);
 }
-#endif
 
 #elif defined(XP_MACOSX)
 
@@ -1212,11 +1218,14 @@ BuildTempPath(char* aBuf, size_t aBufLen)
 static size_t
 BuildTempPath(char* aBuf, size_t aBufLen)
 {
-  // we assume it's always /tmp on unix systems
-  NS_NAMED_LITERAL_CSTRING(tmpPath, "/tmp/");
+  const char *tempenv = PR_GetEnv("TMPDIR");
+  const char *tmpPath = "/tmp/";
+  if (!tempenv) {
+    tempenv = tmpPath;
+  }
   int size = (int)aBufLen;
-  Concat(aBuf, tmpPath.get(), &size);
-  return tmpPath.Length();
+  Concat(aBuf, tempenv, &size);
+  return EnsureTrailingSlash(aBuf, aBufLen);
 }
 
 #else
@@ -1663,10 +1672,12 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 
 #if defined(MOZ_WIDGET_ANDROID)
   for (unsigned int i = 0; i < library_mappings.size(); i++) {
-    u_int8_t guid[sizeof(MDGUID)];
-    google_breakpad::FileID::ElfFileIdentifierFromMappedFile((void const *)library_mappings[i].start_address, guid);
+    PageAllocator allocator;
+    auto_wasteful_vector<uint8_t, sizeof(MDGUID)> guid(&allocator);
+    FileID::ElfFileIdentifierFromMappedFile(
+      (void const *)library_mappings[i].start_address, guid);
     gExceptionHandler->AddMappingInfo(library_mappings[i].name,
-                                      guid,
+                                      guid.data(),
                                       library_mappings[i].start_address,
                                       library_mappings[i].length,
                                       library_mappings[i].file_offset);
@@ -1800,7 +1811,7 @@ InitInstallTime(nsACString& aInstallTime)
 {
   time_t t = time(nullptr);
   char buf[16];
-  snprintf_literal(buf, "%ld", t);
+  SprintfLiteral(buf, "%ld", t);
   aInstallTime = buf;
 
   return NS_OK;
@@ -2018,17 +2029,19 @@ nsresult UnsetExceptionHandler()
 static void ReplaceChar(nsCString& str, const nsACString& character,
                         const nsACString& replacement)
 {
-  nsCString::const_iterator start, end;
+  nsCString::const_iterator iter, end;
 
-  str.BeginReading(start);
+  str.BeginReading(iter);
   str.EndReading(end);
 
-  while (FindInReadable(character, start, end)) {
-    int32_t pos = end.size_backward();
+  while (FindInReadable(character, iter, end)) {
+    nsCString::const_iterator start;
+    str.BeginReading(start);
+    int32_t pos = end - start;
     str.Replace(pos - 1, 1, replacement);
 
-    str.BeginReading(start);
-    start.advance(pos + replacement.Length() - 1);
+    str.BeginReading(iter);
+    iter.advance(pos + replacement.Length() - 1);
     str.EndReading(end);
   }
 }
@@ -2128,7 +2141,7 @@ public:
     , mAppendAppNotes(true)
     {}
 
-  NS_METHOD Run() override;
+  NS_IMETHOD Run() override;
 
 private:
   nsCString mKey;
@@ -3293,7 +3306,7 @@ OOPInit()
   class ProxyToMainThread : public Runnable
   {
   public:
-    NS_IMETHOD Run() {
+    NS_IMETHOD Run() override {
       OOPInit();
       return NS_OK;
     }
@@ -4019,10 +4032,11 @@ void AddLibraryMapping(const char* library_name,
     library_mappings.push_back(info);
   }
   else {
-    u_int8_t guid[sizeof(MDGUID)];
-    google_breakpad::FileID::ElfFileIdentifierFromMappedFile((void const *)start_address, guid);
+    PageAllocator allocator;
+    auto_wasteful_vector<uint8_t, sizeof(MDGUID)> guid(&allocator);
+    FileID::ElfFileIdentifierFromMappedFile((void const *)start_address, guid);
     gExceptionHandler->AddMappingInfo(library_name,
-                                      guid,
+                                      guid.data(),
                                       start_address,
                                       mapping_length,
                                       file_offset);

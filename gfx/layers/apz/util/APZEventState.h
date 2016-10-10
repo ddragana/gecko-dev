@@ -47,14 +47,20 @@ public:
   NS_INLINE_DECL_REFCOUNTING(APZEventState);
 
   void ProcessSingleTap(const CSSPoint& aPoint,
+                        const CSSToLayoutDeviceScale& aScale,
                         Modifiers aModifiers,
-                        const ScrollableLayerGuid& aGuid);
+                        const ScrollableLayerGuid& aGuid,
+                        int32_t aClickCount);
   void ProcessLongTap(const nsCOMPtr<nsIPresShell>& aUtils,
                       const CSSPoint& aPoint,
+                      const CSSToLayoutDeviceScale& aScale,
                       Modifiers aModifiers,
                       const ScrollableLayerGuid& aGuid,
                       uint64_t aInputBlockId);
-  void ProcessLongTapUp();
+  void ProcessLongTapUp(const nsCOMPtr<nsIPresShell>& aPresShell,
+                        const CSSPoint& aPoint,
+                        const CSSToLayoutDeviceScale& aScale,
+                        Modifiers aModifiers);
   void ProcessTouchEvent(const WidgetTouchEvent& aEvent,
                          const ScrollableLayerGuid& aGuid,
                          uint64_t aInputBlockId,
@@ -74,6 +80,11 @@ public:
 private:
   ~APZEventState();
   bool SendPendingTouchPreventedResponse(bool aPreventDefault);
+  bool FireContextmenuEvents(const nsCOMPtr<nsIPresShell>& aPresShell,
+                             const CSSPoint& aPoint,
+                             const CSSToLayoutDeviceScale& aScale,
+                             Modifiers aModifiers,
+                             const nsCOMPtr<nsIWidget>& aWidget);
   already_AddRefed<nsIWidget> GetWidget() const;
 private:
   nsWeakPtr mWidget;

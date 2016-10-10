@@ -59,7 +59,7 @@ DragEvent::InitDragEvent(const nsAString& aType,
                              aView, aDetail, aScreenX, aScreenY,
                              aClientX, aClientY, aCtrlKey, aAltKey,
                              aShiftKey, aMetaKey, aButton, aRelatedTarget);
-  if (mEventIsInternal && mEvent) {
+  if (mEventIsInternal) {
     mEvent->AsDragEvent()->mDataTransfer = aDataTransfer;
   }
 }
@@ -111,6 +111,7 @@ DragEvent::Constructor(const GlobalObject& aGlobal,
                    aParam.mDataTransfer);
   e->InitializeExtraMouseEventDictionaryMembers(aParam);
   e->SetTrusted(trusted);
+  e->SetComposed(aParam.mComposed);
   return e.forget();
 }
 

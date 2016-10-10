@@ -161,7 +161,7 @@ NativeObject::extendDenseElements(ExclusiveContext* cx,
      * long as there is capacity for them.
      */
     if (!nonProxyIsExtensible() || watched()) {
-        MOZ_ASSERT(getDenseCapacity() == 0);
+        MOZ_ASSERT(getDenseCapacity() == 0 || (!watched() && getElementsHeader()->isFrozen()));
         return DenseElementResult::Incomplete;
     }
 
@@ -593,8 +593,8 @@ ThrowIfNotConstructing(JSContext *cx, const CallArgs &args, const char *builtinN
 {
     if (args.isConstructing())
         return true;
-    return JS_ReportErrorFlagsAndNumber(cx, JSREPORT_ERROR, GetErrorMessage, nullptr,
-                                        JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
+    return JS_ReportErrorFlagsAndNumberASCII(cx, JSREPORT_ERROR, GetErrorMessage, nullptr,
+                                             JSMSG_BUILTIN_CTOR_NO_NEW, builtinName);
 }
 
 inline bool

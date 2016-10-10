@@ -110,33 +110,11 @@ const DirectorRegistry = exports.DirectorRegistry = {
  * E10S parent/child setup helpers
  */
 
-var gTrackedMessageManager = new Set();
-
-exports.setupParentProcess = function setupParentProcess({mm, prefix}) {
-  // prevents multiple subscriptions on the same messagemanager
-  if (gTrackedMessageManager.has(mm)) {
-    return;
-  }
-  gTrackedMessageManager.add(mm);
-
+exports.setupParentProcess = function setupParentProcess({ mm, prefix }) {
   // listen for director-script requests from the child process
-  mm.addMessageListener("debug:director-registry-request", handleChildRequest);
-
-  DebuggerServer.once("disconnected-from-child:" + prefix, handleMessageManagerDisconnected);
+  setMessageManager(mm);
 
   /* parent process helpers */
-
-  function handleMessageManagerDisconnected(evt, { mm: disconnected_mm }) {
-    // filter out not subscribed message managers
-    if (disconnected_mm !== mm || !gTrackedMessageManager.has(mm)) {
-      return;
-    }
-
-    gTrackedMessageManager.delete(mm);
-
-    // unregister for director-script requests handlers from the parent process (if any)
-    mm.removeMessageListener("debug:director-registry-request", handleChildRequest);
-  }
 
   function handleChildRequest(msg) {
     switch (msg.json.method) {
@@ -149,52 +127,22 @@ exports.setupParentProcess = function setupParentProcess({mm, prefix}) {
         throw new Error(ERR_DIRECTOR_PARENT_UNKNOWN_METHOD);
     }
   }
-};
 
-// skip child setup if this actor module is not running in a child process
-if (DebuggerServer.isInChildProcess) {
-  setupChildProcess();
-}
-
-function setupChildProcess() {
-  const { sendSyncMessage } = DebuggerServer.parentMessageManager;
-
-  DebuggerServer.setupInParent({
-    module: "devtools/server/actors/director-registry",
-    setupParent: "setupParentProcess"
-  });
-
-  DirectorRegistry.install = notImplemented.bind(null, "install");
-  DirectorRegistry.uninstall = notImplemented.bind(null, "uninstall");
-  DirectorRegistry.clear = notImplemented.bind(null, "clear");
-
-  DirectorRegistry.get = callParentProcess.bind(null, "get");
-  DirectorRegistry.list = callParentProcess.bind(null, "list");
-
-  /* child process helpers */
-
-  function notImplemented(method) {
-    console.error(ERR_DIRECTOR_CHILD_NOTIMPLEMENTED_METHOD, method);
-    throw Error(ERR_DIRECTOR_CHILD_NOTIMPLEMENTED_METHOD);
-  }
-
-  function callParentProcess(method, ...args) {
-    var reply = sendSyncMessage("debug:director-registry-request", {
-      method: method,
-      args: args
-    });
-
-    if (reply.length === 0) {
-      console.error(ERR_DIRECTOR_CHILD_NO_REPLY);
-      throw Error(ERR_DIRECTOR_CHILD_NO_REPLY);
-    } else if (reply.length > 1) {
-      console.error(ERR_DIRECTOR_CHILD_MULTIPLE_REPLIES);
-      throw Error(ERR_DIRECTOR_CHILD_MULTIPLE_REPLIES);
+  function setMessageManager(newMM) {
+    if (mm) {
+      mm.removeMessageListener("debug:director-registry-request", handleChildRequest);
     }
-
-    return reply[0];
+    mm = newMM;
+    if (mm) {
+      mm.addMessageListener("debug:director-registry-request", handleChildRequest);
+    }
   }
-}
+
+  return {
+    onBrowserSwap: setMessageManager,
+    onDisconnected: () => setMessageManager(null),
+  };
+};
 
 /**
  * The DirectorRegistry Actor is a global actor which manages install/uninstall of
@@ -204,6 +152,7 @@ const DirectorRegistryActor = exports.DirectorRegistryActor = protocol.ActorClas
   /* init & destroy methods */
   initialize: function (conn, parentActor) {
     protocol.Actor.prototype.initialize.call(this, conn);
+    this.maybeSetupChildProcess(conn);
   },
   destroy: function (conn) {
     protocol.Actor.prototype.destroy.call(this, conn);
@@ -212,6 +161,51 @@ const DirectorRegistryActor = exports.DirectorRegistryActor = protocol.ActorClas
 
   finalize: function () {
     // nothing to cleanup
+  },
+
+  maybeSetupChildProcess(conn) {
+    // skip child setup if this actor module is not running in a child process
+    if (!DebuggerServer.isInChildProcess) {
+      return;
+    }
+
+    const { sendSyncMessage } = conn.parentMessageManager;
+
+    conn.setupInParent({
+      module: "devtools/server/actors/director-registry",
+      setupParent: "setupParentProcess"
+    });
+
+    DirectorRegistry.install = notImplemented.bind(null, "install");
+    DirectorRegistry.uninstall = notImplemented.bind(null, "uninstall");
+    DirectorRegistry.clear = notImplemented.bind(null, "clear");
+
+    DirectorRegistry.get = callParentProcess.bind(null, "get");
+    DirectorRegistry.list = callParentProcess.bind(null, "list");
+
+    /* child process helpers */
+
+    function notImplemented(method) {
+      console.error(ERR_DIRECTOR_CHILD_NOTIMPLEMENTED_METHOD, method);
+      throw Error(ERR_DIRECTOR_CHILD_NOTIMPLEMENTED_METHOD);
+    }
+
+    function callParentProcess(method, ...args) {
+      var reply = sendSyncMessage("debug:director-registry-request", {
+        method: method,
+        args: args
+      });
+
+      if (reply.length === 0) {
+        console.error(ERR_DIRECTOR_CHILD_NO_REPLY);
+        throw Error(ERR_DIRECTOR_CHILD_NO_REPLY);
+      } else if (reply.length > 1) {
+        console.error(ERR_DIRECTOR_CHILD_MULTIPLE_REPLIES);
+        throw Error(ERR_DIRECTOR_CHILD_MULTIPLE_REPLIES);
+      }
+
+      return reply[0];
+    }
   },
 
   /**

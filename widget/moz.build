@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -133,6 +133,7 @@ EXPORTS.mozilla.widget += [
     'InProcessCompositorWidget.h',
     'PuppetBidiKeyboard.h',
     'WidgetMessageUtils.h',
+    'WindowSurface.h'
 ]
 
 UNIFIED_SOURCES += [
@@ -161,7 +162,6 @@ UNIFIED_SOURCES += [
     'nsScreenManagerProxy.cpp',
     'nsTransferable.cpp',
     'nsXPLookAndFeel.cpp',
-    'PluginWidgetProxy.cpp',
     'PuppetBidiKeyboard.cpp',
     'PuppetWidget.cpp',
     'ScreenProxy.cpp',
@@ -171,6 +171,14 @@ UNIFIED_SOURCES += [
     'WidgetEventImpl.cpp',
     'WidgetUtils.cpp',
 ]
+
+if CONFIG['OS_ARCH'] == 'Linux':
+    EXPORTS.mozilla.widget += [
+        'LSBUtils.h'
+    ]
+    SOURCES += [
+        'LSBUtils.cpp'
+    ]
 
 if CONFIG['MOZ_XUL'] and CONFIG['NS_PRINTING']:
     EXPORTS += [
@@ -185,9 +193,12 @@ if CONFIG['MOZ_XUL'] and CONFIG['NS_PRINTING']:
 
 # nsBaseWidget.cpp needs to be built separately because of name clashes in the OS X headers
 # nsBaseDragService.cpp moved out of UNIFIED to fix xgill crash (bug 1259850) after moving widget/ContentHelper -> apz/util/TouchActionHelper
+# PluginWidgetProxy includes MacOS system headers which define a Point struct
+# that conflicts with mozilla::gfx::Point
 SOURCES += [
     'nsBaseDragService.cpp',
-    'nsBaseWidget.cpp'
+    'nsBaseWidget.cpp',
+    'PluginWidgetProxy.cpp',
 ]
 
 if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
@@ -203,7 +214,8 @@ if CONFIG['MOZ_X11']:
         'GfxInfoX11.cpp'
     ]
     SOURCES += [
-        'nsShmImage.cpp'
+        'nsShmImage.cpp',
+        'WindowSurfaceX11SHM.cpp',
     ]
 
 if toolkit in ('cocoa', 'windows'):
@@ -246,6 +258,11 @@ if toolkit == 'windows':
     IPDL_SOURCES = [
         'windows/PCompositorWidget.ipdl',
         'windows/PlatformWidgetTypes.ipdlh',
+    ]
+elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] and CONFIG['MOZ_X11']:
+    IPDL_SOURCES = [
+        'gtk/PCompositorWidget.ipdl',
+        'gtk/PlatformWidgetTypes.ipdlh',
     ]
 else:
     IPDL_SOURCES = [

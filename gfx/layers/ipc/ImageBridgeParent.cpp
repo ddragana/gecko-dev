@@ -26,7 +26,7 @@
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
 #include "nsISupportsImpl.h"            // for ImageBridgeParent::Release, etc
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
@@ -51,30 +51,22 @@ CompositorThreadHolder* GetCompositorThreadHolder();
 
 ImageBridgeParent::ImageBridgeParent(MessageLoop* aLoop,
                                      ProcessId aChildProcessId)
-  : CompositableParentManager("ImageBridgeParent")
-  , mMessageLoop(aLoop)
+  : mMessageLoop(aLoop)
   , mSetChildThreadPriority(false)
   , mClosed(false)
 {
   MOZ_ASSERT(NS_IsMainThread());
   sMainLoop = MessageLoop::current();
 
-  // top-level actors must be destroyed on the main thread.
-  SetMessageLoopToPostDestructionTo(sMainLoop);
-
   // creates the map only if it has not been created already, so it is safe
   // with several bridges
   CompositableMap::Create();
   sImageBridges[aChildProcessId] = this;
   SetOtherProcessId(aChildProcessId);
-  // DeferredDestroy clears mSelfRef.
-  mSelfRef = this;
 }
 
 ImageBridgeParent::~ImageBridgeParent()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   nsTArray<PImageContainerParent*> parents;
   ManagedPImageContainerParent(parents);
   for (PImageContainerParent* p : parents) {
@@ -82,6 +74,38 @@ ImageBridgeParent::~ImageBridgeParent()
   }
 
   sImageBridges.erase(OtherPid());
+}
+
+static StaticRefPtr<ImageBridgeParent> sImageBridgeParentSingleton;
+
+void ReleaseImageBridgeParentSingleton() {
+  sImageBridgeParentSingleton = nullptr;
+}
+
+/* static */ ImageBridgeParent*
+ImageBridgeParent::CreateSameProcess()
+{
+  RefPtr<ImageBridgeParent> parent =
+    new ImageBridgeParent(CompositorThreadHolder::Loop(), base::GetCurrentProcId());
+  parent->mSelfRef = parent;
+
+  sImageBridgeParentSingleton = parent;
+  return parent;
+}
+
+/* static */ bool
+ImageBridgeParent::CreateForGPUProcess(Endpoint<PImageBridgeParent>&& aEndpoint)
+{
+  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_GPU);
+
+  MessageLoop* loop = CompositorThreadHolder::Loop();
+  RefPtr<ImageBridgeParent> parent = new ImageBridgeParent(loop, aEndpoint.OtherPid());
+
+  loop->PostTask(NewRunnableMethod<Endpoint<PImageBridgeParent>&&>(
+    parent, &ImageBridgeParent::Bind, Move(aEndpoint)));
+
+  sImageBridgeParentSingleton = parent;
+  return true;
 }
 
 void
@@ -144,6 +168,8 @@ ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
                               const uint64_t& aFwdTransactionId,
                               EditReplyArray* aReply)
 {
+  // This ensures that destroy operations are always processed. It is not safe
+  // to early-return from RecvUpdate without doing so.
   AutoImageBridgeParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
   UpdateFwdTransactionId(aFwdTransactionId);
 
@@ -179,23 +205,24 @@ ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDest
   return success;
 }
 
-static void
-ConnectImageBridgeInParentProcess(ImageBridgeParent* aBridge,
-                                  Transport* aTransport,
-                                  base::ProcessId aOtherPid)
-{
-  aBridge->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop(), ipc::ParentSide);
-}
-
-/*static*/ PImageBridgeParent*
-ImageBridgeParent::Create(Transport* aTransport, ProcessId aChildProcessId)
+/* static */ bool
+ImageBridgeParent::CreateForContent(Endpoint<PImageBridgeParent>&& aEndpoint)
 {
   MessageLoop* loop = CompositorThreadHolder::Loop();
-  RefPtr<ImageBridgeParent> bridge = new ImageBridgeParent(loop, aChildProcessId);
 
-  loop->PostTask(NewRunnableFunction(ConnectImageBridgeInParentProcess,
-                                     bridge.get(), aTransport, aChildProcessId));
-  return bridge.get();
+  RefPtr<ImageBridgeParent> bridge = new ImageBridgeParent(loop, aEndpoint.OtherPid());
+  loop->PostTask(NewRunnableMethod<Endpoint<PImageBridgeParent>&&>(
+    bridge, &ImageBridgeParent::Bind, Move(aEndpoint)));
+
+  return true;
+}
+
+void
+ImageBridgeParent::Bind(Endpoint<PImageBridgeParent>&& aEndpoint)
+{
+  if (!aEndpoint.Bind(this))
+    return;
+  mSelfRef = this;
 }
 
 bool ImageBridgeParent::RecvWillClose()
@@ -338,27 +365,6 @@ ImageBridgeParent::GetInstance(ProcessId aId)
 {
   NS_ASSERTION(sImageBridges.count(aId) == 1, "ImageBridgeParent for the process");
   return sImageBridges[aId];
-}
-
-IToplevelProtocol*
-ImageBridgeParent::CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
-                                 base::ProcessHandle aPeerProcess,
-                                 mozilla::ipc::ProtocolCloneContext* aCtx)
-{
-  for (unsigned int i = 0; i < aFds.Length(); i++) {
-    if (aFds[i].protocolId() == unsigned(GetProtocolId())) {
-      UniquePtr<Transport> transport =
-        OpenDescriptor(aFds[i].fd(), Transport::MODE_SERVER);
-      PImageBridgeParent* bridge = Create(transport.get(), base::GetProcId(aPeerProcess));
-      bridge->CloneManagees(this, aCtx);
-      bridge->IToplevelProtocol::SetTransport(Move(transport));
-      // The reference to the compositor thread is held in OnChannelConnected().
-      // We need to do this for cloned actors, too.
-      bridge->OnChannelConnected(base::GetProcId(aPeerProcess));
-      return bridge;
-    }
-  }
-  return nullptr;
 }
 
 void

@@ -24,23 +24,21 @@
 #include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Object.h"
-#include "builtin/RegExp.h"
-
-#ifdef NIGHTLY_BUILD
+#ifdef SPIDERMONKEY_PROMISE
 #include "builtin/Promise.h"
 #endif
-
+#include "builtin/RegExp.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/SymbolObject.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
 #include "builtin/WeakSetObject.h"
 #include "vm/Debugger.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/PIC.h"
 #include "vm/RegExpStatics.h"
 #include "vm/RegExpStaticsObject.h"
-#include "vm/ScopeObject.h"
 #include "vm/StopIterationObject.h"
 
 #include "jscompartmentinlines.h"
@@ -101,7 +99,7 @@ js::GlobalObject::getTypedObjectModule() const {
 GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key)
 {
     if (key == JSProto_Wasm || key == JSProto_WebAssembly)
-        return !cx->options().wasm();
+        return !cx->options().wasm() || !wasm::HasCompilerSupport(cx);
 
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
     // Return true if the given constructor has been disabled at run-time.
@@ -222,12 +220,12 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     RootedId id(cx, NameToId(ClassName(key, cx)));
     if (isObjectOrFunction) {
         if (clasp->specShouldDefineConstructor()) {
-            if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+            RootedValue ctorValue(cx, ObjectValue(*ctor));
+            if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
                 return false;
         }
 
         global->setConstructor(key, ObjectValue(*ctor));
-        global->setConstructorPropertySlot(key, ObjectValue(*ctor));
     }
 
     // Define any specified functions and properties, unless we're a dependent
@@ -269,21 +267,15 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
 
         // Fallible operation that modifies the global object.
         if (clasp->specShouldDefineConstructor()) {
-            if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+            RootedValue ctorValue(cx, ObjectValue(*ctor));
+            if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
                 return false;
         }
 
         // Infallible operations that modify the global object.
         global->setConstructor(key, ObjectValue(*ctor));
-        global->setConstructorPropertySlot(key, ObjectValue(*ctor));
         if (proto)
             global->setPrototype(key, ObjectValue(*proto));
-    }
-
-    if (clasp->specShouldDefineConstructor()) {
-        // Stash type information, so that what we do here is equivalent to
-        // initBuiltinConstructor.
-        AddTypePropertyId(cx, global, id, ObjectValue(*ctor));
     }
 
     return true;
@@ -301,14 +293,12 @@ GlobalObject::initBuiltinConstructor(JSContext* cx, Handle<GlobalObject*> global
     RootedId id(cx, NameToId(ClassName(key, cx)));
     MOZ_ASSERT(!global->lookup(cx, id));
 
-    if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+    RootedValue ctorValue(cx, ObjectValue(*ctor));
+    if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
         return false;
 
     global->setConstructor(key, ObjectValue(*ctor));
     global->setPrototype(key, ObjectValue(*proto));
-    global->setConstructorPropertySlot(key, ObjectValue(*ctor));
-
-    AddTypePropertyId(cx, global, id, ObjectValue(*ctor));
     return true;
 }
 
@@ -330,10 +320,16 @@ GlobalObject::createInternal(JSContext* cx, const Class* clasp)
     if (clasp->flags & JSCLASS_HAS_PRIVATE)
         global->setPrivate(nullptr);
 
-    Rooted<ClonedBlockObject*> lexical(cx, ClonedBlockObject::createGlobal(cx, global));
+    Rooted<LexicalEnvironmentObject*> lexical(cx,
+        LexicalEnvironmentObject::createGlobal(cx, global));
     if (!lexical)
         return nullptr;
-    global->setReservedSlot(LEXICAL_SCOPE, ObjectValue(*lexical));
+    global->setReservedSlot(LEXICAL_ENVIRONMENT, ObjectValue(*lexical));
+
+    Rooted<GlobalScope*> emptyGlobalScope(cx, GlobalScope::createEmpty(cx, ScopeKind::Global));
+    if (!emptyGlobalScope)
+        return nullptr;
+    global->setReservedSlot(EMPTY_GLOBAL_SCOPE, PrivateGCThingValue(emptyGlobalScope));
 
     cx->compartment()->initGlobal(*global);
 
@@ -388,10 +384,18 @@ GlobalObject::new_(JSContext* cx, const Class* clasp, JSPrincipals* principals,
     return global;
 }
 
-ClonedBlockObject&
-GlobalObject::lexicalScope() const
+LexicalEnvironmentObject&
+GlobalObject::lexicalEnvironment() const
 {
-    return getReservedSlot(LEXICAL_SCOPE).toObject().as<ClonedBlockObject>();
+    return getReservedSlot(LEXICAL_ENVIRONMENT).toObject().as<LexicalEnvironmentObject>();
+}
+
+GlobalScope&
+GlobalObject::emptyGlobalScope() const
+{
+    const Value& v = getReservedSlot(EMPTY_GLOBAL_SCOPE);
+    MOZ_ASSERT(v.isPrivateGCThing() && v.traceKind() == JS::TraceKind::Scope);
+    return static_cast<Scope*>(v.toGCThing())->as<GlobalScope>();
 }
 
 /* static */ bool
@@ -405,7 +409,7 @@ GlobalObject::getOrCreateEval(JSContext* cx, Handle<GlobalObject*> global,
 }
 
 bool
-GlobalObject::valueIsEval(Value val)
+GlobalObject::valueIsEval(const Value& val)
 {
     Value eval = getSlot(EVAL);
     return eval.isObject() && eval == val;
@@ -561,8 +565,8 @@ GlobalObject::warnOnceAbout(JSContext* cx, HandleObject obj, WarnOnceFlag flag,
     MOZ_ASSERT_IF(!v.isUndefined(), v.toInt32());
     int32_t flags = v.isUndefined() ? 0 : v.toInt32();
     if (!(flags & flag)) {
-        if (!JS_ReportErrorFlagsAndNumber(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
-                                          errorNumber))
+        if (!JS_ReportErrorFlagsAndNumberASCII(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
+                                               errorNumber))
         {
             return false;
         }
@@ -645,9 +649,18 @@ js::DefinePropertiesAndFunctions(JSContext* cx, HandleObject obj,
     return true;
 }
 
+bool
+js::DefineToStringTag(JSContext *cx, HandleObject obj, JSAtom* tag)
+{
+    RootedId toStringTagId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().toStringTag));
+    RootedValue tagString(cx, StringValue(tag));
+    return DefineProperty(cx, obj, toStringTagId, tagString, nullptr, nullptr, JSPROP_READONLY);
+}
+
 static void
 GlobalDebuggees_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->maybeOffMainThread());
     fop->delete_((GlobalObject::DebuggerVector*) obj->as<NativeObject>().getPrivate());
 }
 
@@ -665,7 +678,9 @@ GlobalDebuggees_classOps = {
 
 static const Class
 GlobalDebuggees_class = {
-    "GlobalDebuggee", JSCLASS_HAS_PRIVATE,
+    "GlobalDebuggee",
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_BACKGROUND_FINALIZE,
     &GlobalDebuggees_classOps
 };
 
@@ -842,7 +857,7 @@ GlobalObject::addIntrinsicValue(JSContext* cx, Handle<GlobalObject*> global,
 
     RootedId id(cx, NameToId(name));
     Rooted<StackShape> child(cx, StackShape(base, id, slot, 0, 0));
-    Shape* shape = cx->compartment()->propertyTree.getChild(cx, last, child);
+    Shape* shape = cx->zone()->propertyTree.getChild(cx, last, child);
     if (!shape)
         return false;
 

@@ -33,6 +33,36 @@ static const char kCookiesMaxPerHost[] = "network.cookie.maxPerHost";
 
 static char *sBuffer;
 
+#define OFFSET_ONE_WEEK int64_t(604800) * PR_USEC_PER_SEC
+#define OFFSET_ONE_DAY int64_t(86400) * PR_USEC_PER_SEC
+
+//Set server time or expiry time
+void
+SetTime(PRTime offsetTime,nsAutoCString& serverString,nsAutoCString& cookieString,bool expiry)
+{
+    char timeStringPreset[40];
+    PRTime CurrentTime = PR_Now();
+    PRTime SetCookieTime = CurrentTime + offsetTime;
+    PRTime SetExpiryTime;
+    if (expiry) {
+      SetExpiryTime = SetCookieTime - OFFSET_ONE_DAY;
+    } else {
+      SetExpiryTime = SetCookieTime + OFFSET_ONE_DAY;
+    }
+
+    // Set server time string
+    PRExplodedTime explodedTime;
+    PR_ExplodeTime(SetCookieTime , PR_GMTParameters, &explodedTime);
+    PR_FormatTimeUSEnglish(timeStringPreset, 40, "%c GMT", &explodedTime);
+    serverString.Assign(timeStringPreset);
+
+    // Set cookie string
+    PR_ExplodeTime(SetExpiryTime , PR_GMTParameters, &explodedTime);
+    PR_FormatTimeUSEnglish(timeStringPreset, 40, "%c GMT", &explodedTime);
+    cookieString.Replace(0, strlen("test=expiry; expires=") + strlen(timeStringPreset) + 1, "test=expiry; expires=");
+    cookieString.Append(timeStringPreset);
+}
+
 nsresult
 SetACookie(nsICookieService *aCookieService, const char *aSpec1, const char *aSpec2, const char* aCookieString, const char *aServerTime)
 {
@@ -463,8 +493,29 @@ main(int32_t argc, char *argv[])
       GetACookie(cookieService, "http://expireme.org/", nullptr, getter_Copies(cookie));
       rv[15] = CheckResult(cookie.get(), MUST_BE_NULL);
 
-      allTestsPassed = PrintResult(rv, 16) && allTestsPassed;
+      nsAutoCString ServerTime;
+      nsAutoCString CookieString;
 
+      SetTime(-OFFSET_ONE_WEEK, ServerTime, CookieString, true);
+      SetACookie(cookieService, "http://expireme.org/", nullptr, CookieString.get(), ServerTime.get());
+      GetACookie(cookieService, "http://expireme.org/", nullptr, getter_Copies(cookie));
+      rv[16] = CheckResult(cookie.get(), MUST_BE_NULL);
+      // Set server time earlier than client time for one year + one day, and expirty time earlier than server time for one day.
+      SetTime(-(OFFSET_ONE_DAY + OFFSET_ONE_WEEK), ServerTime, CookieString, false);
+      SetACookie(cookieService, "http://expireme.org/", nullptr, CookieString.get(), ServerTime.get());
+      GetACookie(cookieService, "http://expireme.org/", nullptr, getter_Copies(cookie));
+      rv[17] = CheckResult(cookie.get(), MUST_BE_NULL);
+      // Set server time later than client time for one year, and expiry time later than server time for one day.
+      SetTime(OFFSET_ONE_WEEK, ServerTime, CookieString, false);
+      SetACookie(cookieService, "http://expireme.org/", nullptr, CookieString.get(), ServerTime.get());
+      GetACookie(cookieService, "http://expireme.org/", nullptr, getter_Copies(cookie));
+      rv[18] = CheckResult(cookie.get(), MUST_EQUAL, "test=expiry");
+      // Set server time later than client time for one year + one day, and expiry time earlier than server time for one day.
+      SetTime((OFFSET_ONE_DAY + OFFSET_ONE_WEEK), ServerTime, CookieString, true);
+      SetACookie(cookieService, "http://expireme.org/", nullptr, CookieString.get(), ServerTime.get());
+      GetACookie(cookieService, "http://expireme.org/", nullptr, getter_Copies(cookie));
+      rv[19] = CheckResult(cookie.get(), MUST_EQUAL, "test=expiry");
+      allTestsPassed = PrintResult(rv, 20) && allTestsPassed;
 
       // *** multiple cookie tests
       sBuffer = PR_sprintf_append(sBuffer, "*** Beginning multiple cookie tests...\n");
@@ -706,9 +757,9 @@ main(int32_t argc, char *argv[])
       uint32_t hostCookies = 0;
       rv[8] = NS_SUCCEEDED(cookieMgr2->CountCookiesFromHost(NS_LITERAL_CSTRING("cookiemgr.test"), &hostCookies)) &&
               hostCookies == 2;
-      // check CookieExists() using the third cookie
+      // check CookieExistsNative() using the third cookie
       bool found;
-      rv[9] = NS_SUCCEEDED(cookieMgr2->CookieExists(newDomainCookie, &found)) && found;
+      rv[9] = NS_SUCCEEDED(cookieMgr2->CookieExistsNative(newDomainCookie, &attrs,  &found)) && found;
 
 
       // remove the cookie, block it, and ensure it can't be added again
@@ -717,7 +768,7 @@ main(int32_t argc, char *argv[])
                                                     NS_LITERAL_CSTRING("/rabbit"),    // path
                                                     true,                             // is blocked
                                                     &attrs));                         // originAttributes
-      rv[11] = NS_SUCCEEDED(cookieMgr2->CookieExists(newDomainCookie, &found)) && !found;
+      rv[11] = NS_SUCCEEDED(cookieMgr2->CookieExistsNative(newDomainCookie, &attrs, &found)) && !found;
       rv[12] = NS_SUCCEEDED(cookieMgr2->AddNative(NS_LITERAL_CSTRING("new.domain"),     // domain
                                             NS_LITERAL_CSTRING("/rabbit"),        // path
                                             NS_LITERAL_CSTRING("test3"),          // name
@@ -727,14 +778,14 @@ main(int32_t argc, char *argv[])
                                             true,                              // is session
                                             INT64_MIN,                            // expiry time
                                             &attrs));                         // originAttributes
-      rv[13] = NS_SUCCEEDED(cookieMgr2->CookieExists(newDomainCookie, &found)) && !found;
+      rv[13] = NS_SUCCEEDED(cookieMgr2->CookieExistsNative(newDomainCookie, &attrs, &found)) && !found;
       // sleep four seconds, to make sure the second cookie has expired
       PR_Sleep(4 * PR_TicksPerSecond());
-      // check that both CountCookiesFromHost() and CookieExists() count the
+      // check that both CountCookiesFromHost() and CookieExistsNative() count the
       // expired cookie
       rv[14] = NS_SUCCEEDED(cookieMgr2->CountCookiesFromHost(NS_LITERAL_CSTRING("cookiemgr.test"), &hostCookies)) &&
               hostCookies == 2;
-      rv[15] = NS_SUCCEEDED(cookieMgr2->CookieExists(expiredCookie, &found)) && found;
+      rv[15] = NS_SUCCEEDED(cookieMgr2->CookieExistsNative(expiredCookie, &attrs, &found)) && found;
       // double-check RemoveAll() using the enumerator
       rv[16] = NS_SUCCEEDED(cookieMgr->RemoveAll());
       rv[17] = NS_SUCCEEDED(cookieMgr->GetEnumerator(getter_AddRefs(enumerator))) &&

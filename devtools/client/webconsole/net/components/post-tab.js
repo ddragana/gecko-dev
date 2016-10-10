@@ -6,8 +6,7 @@
 const React = require("devtools/client/shared/vendor/react");
 
 // Reps
-const { createFactories } = require("devtools/client/shared/components/reps/rep-utils");
-const { parseURLEncodedText } = require("devtools/client/shared/components/reps/url");
+const { createFactories, parseURLEncodedText } = require("devtools/client/shared/components/reps/rep-utils");
 const TreeView = React.createFactory(require("devtools/client/shared/components/tree/tree-view"));
 const { Rep } = createFactories(require("devtools/client/shared/components/reps/rep"));
 
@@ -39,9 +38,9 @@ var PostTab = React.createClass({
   displayName: "PostTab",
 
   isJson(file) {
-    let postData = file.request.postData;
+    let text = file.request.postData.text;
     let value = NetUtils.getHeaderValue(file.request.headers, "content-type");
-    return Json.isJSON(value, postData);
+    return Json.isJSON(value, text);
   },
 
   parseJson(file) {
@@ -78,7 +77,9 @@ var PostTab = React.createClass({
         columns: [{id: "value"}],
         object: json,
         mode: "tiny",
-        renderValue: props => Rep(props)
+        renderValue: props => Rep(Object.assign({}, props, {
+          cropLimit: 50,
+        })),
       }),
       name: Locale.$STR("jsonScopeName")
     };
@@ -181,7 +182,7 @@ var PostTab = React.createClass({
         key: "raw-longstring",
         name: Locale.$STR("netRequest.rawData"),
         content: DOM.div({className: "netInfoResponseContent"},
-          text.initial,
+          sanitize(text.initial),
           SizeLimit({
             actions: this.props.actions,
             data: file.request.postData,
@@ -203,9 +204,17 @@ var PostTab = React.createClass({
     return group;
   },
 
+  componentDidMount() {
+    let { actions, data: file } = this.props;
+
+    if (!file.request.postData) {
+      // TODO: use async action objects as soon as Redux is in place
+      actions.requestData("requestPostData");
+    }
+  },
+
   render() {
-    let actions = this.props.actions;
-    let file = this.props.data;
+    let { actions, data: file } = this.props;
 
     if (file.discardRequestBody) {
       return DOM.span({className: "netInfoBodiesDiscarded"},
@@ -213,10 +222,7 @@ var PostTab = React.createClass({
       );
     }
 
-    let postData = file.request.postData;
-    if (!postData) {
-      // TODO: use async action objects as soon as Redux is in place
-      actions.requestData("requestPostData");
+    if (!file.request.postData) {
       return (
         Spinner()
       );

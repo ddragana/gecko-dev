@@ -12,8 +12,10 @@
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for IntSize, Point
+#include "mozilla/gfx/Polygon.h"        // for Polygon3D
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float
+#include "mozilla/gfx/Triangle.h"       // for Triangle, TexturedTriangle
 #include "mozilla/layers/CompositorTypes.h"  // for DiagnosticTypes, etc
 #include "mozilla/layers/FenceUtils.h"  // for FenceHandle
 #include "mozilla/layers/LayersTypes.h"  // for LayersBackend
@@ -310,6 +312,25 @@ public:
    */
   virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) = 0;
 
+  void DrawGeometry(const gfx::Rect& aRect,
+                    const gfx::IntRect& aClipRect,
+                    const EffectChain &aEffectChain,
+                    gfx::Float aOpacity,
+                    const gfx::Matrix4x4& aTransform,
+                    const gfx::Rect& aVisibleRect,
+                    const Maybe<gfx::Polygon3D>& aGeometry);
+
+  void DrawGeometry(const gfx::Rect& aRect,
+                    const gfx::IntRect& aClipRect,
+                    const EffectChain &aEffectChain,
+                    gfx::Float aOpacity,
+                    const gfx::Matrix4x4& aTransform,
+                    const Maybe<gfx::Polygon3D>& aGeometry)
+  {
+    DrawGeometry(aRect, aClipRect, aEffectChain, aOpacity,
+                 aTransform, aRect, aGeometry);
+  }
+
   /**
    * Tell the compositor to draw a quad. What to do draw and how it is
    * drawn is specified by aEffectChain. aRect is the quad to draw, in user space.
@@ -334,6 +355,16 @@ public:
       DrawQuad(aRect, aClipRect, aEffectChain, aOpacity, aTransform, aRect);
   }
 
+  virtual void DrawTriangle(const gfx::TexturedTriangle& aTriangle,
+                            const gfx::IntRect& aClipRect,
+                            const EffectChain& aEffectChain,
+                            gfx::Float aOpacity,
+                            const gfx::Matrix4x4& aTransform,
+                            const gfx::Rect& aVisibleRect)
+  {
+    MOZ_CRASH("Compositor::DrawTriangle is not implemented for the current platform!");
+  }
+
   /**
    * Draw an unfilled solid color rect. Typically used for debugging overlays.
    */
@@ -348,6 +379,18 @@ public:
   void FillRect(const gfx::Rect& aRect, const gfx::Color& color,
                     const gfx::IntRect& aClipRect = gfx::IntRect(),
                     const gfx::Matrix4x4& aTransform = gfx::Matrix4x4());
+
+  void SetClearColor(const gfx::Color& aColor) {
+    mClearColor = aColor;
+  }
+
+  void SetDefaultClearColor(const gfx::Color& aColor) {
+    mDefaultClearColor = aColor;
+  }
+
+  void SetClearColorToDefault() {
+    mClearColor = mDefaultClearColor;
+  }
 
   /*
    * Clear aRect on current render target.
@@ -477,6 +520,10 @@ public:
 
   virtual void ForcePresent() { }
 
+  virtual bool IsPendingComposite() { return false; }
+
+  virtual void FinishPendingComposite() {}
+
   widget::CompositorWidget* GetWidget() const { return mWidget; }
 
   virtual bool HasImageHostOverlays() { return false; }
@@ -576,12 +623,18 @@ protected:
    * The transformed layer quad is also optionally returned - this is the same as
    * the result rect, before rounding.
    */
-  gfx::IntRect ComputeBackdropCopyRect(
-    const gfx::Rect& aRect,
-    const gfx::IntRect& aClipRect,
-    const gfx::Matrix4x4& aTransform,
-    gfx::Matrix4x4* aOutTransform,
-    gfx::Rect* aOutLayerQuad = nullptr);
+  gfx::IntRect ComputeBackdropCopyRect(const gfx::Rect& aRect,
+                                       const gfx::IntRect& aClipRect,
+                                       const gfx::Matrix4x4& aTransform,
+                                       gfx::Matrix4x4* aOutTransform,
+                                       gfx::Rect* aOutLayerQuad = nullptr);
+
+  gfx::IntRect ComputeBackdropCopyRect(const gfx::Triangle& aTriangle,
+                                       const gfx::IntRect& aClipRect,
+                                       const gfx::Matrix4x4& aTransform,
+                                       gfx::Matrix4x4* aOutTransform,
+                                       gfx::Rect* aOutLayerQuad = nullptr);
+
 
   /**
    * An array of locks that will need to be unlocked after the next composition.
@@ -592,6 +645,11 @@ protected:
    * An array of TextureHosts that will need to call NotifyNotUsed() after the next composition.
    */
   nsTArray<RefPtr<TextureHost>> mNotifyNotUsedAfterComposition;
+
+  /**
+   * Last Composition end time.
+   */
+  TimeStamp mLastCompositionEndTime;
 
   /**
    * Render time for the current composition.
@@ -628,6 +686,9 @@ protected:
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
   FenceHandle mReleaseFenceHandle;
 #endif
+
+  gfx::Color mClearColor;
+  gfx::Color mDefaultClearColor;
 
 private:
   static LayersBackend sBackend;

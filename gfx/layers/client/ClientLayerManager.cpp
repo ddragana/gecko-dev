@@ -35,7 +35,7 @@
 #include "LayerMetricsWrapper.h"
 #endif
 #ifdef XP_WIN
-#include "gfxWindowsPlatform.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 
 namespace mozilla {
@@ -93,6 +93,7 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
   : mPhase(PHASE_NONE)
   , mWidget(aWidget)
   , mLatestTransactionId(0)
+  , mLastPaintTime(TimeDuration::Forever())
   , mTargetRotation(ROTATION_0)
   , mRepeatTransaction(false)
   , mIsRepeatTransaction(false)
@@ -188,6 +189,12 @@ ClientLayerManager::CreateReadbackLayer()
 void
 ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
+  MOZ_ASSERT(mForwarder, "ClientLayerManager::BeginTransaction without forwarder");
+  if (!mForwarder->IPCOpen()) {
+    gfxCriticalNote << "ClientLayerManager::BeginTransaction with IPC channel down. GPU process may have died.";
+    return;
+  }
+
   mInTransaction = true;
   mTransactionStart = TimeStamp::Now();
 
@@ -271,6 +278,10 @@ ClientLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback,
   PROFILER_LABEL("ClientLayerManager", "EndTransactionInternal",
     js::ProfileEntry::Category::GRAPHICS);
 
+  if (!mForwarder || !mForwarder->IPCOpen()) {
+    return false;
+  }
+
 #ifdef MOZ_LAYERS_HAVE_LOG
   MOZ_LAYERS_LOG(("  ----- (beginning paint)"));
   Log();
@@ -283,17 +294,29 @@ ClientLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback,
   ClientLayer* root = ClientLayer::ToClientLayer(GetRoot());
 
   mTransactionIncomplete = false;
-      
+
   // Apply pending tree updates before recomputing effective
   // properties.
   GetRoot()->ApplyPendingUpdatesToSubtree();
-    
+
   mPaintedLayerCallback = aCallback;
   mPaintedLayerCallbackData = aCallbackData;
 
   GetRoot()->ComputeEffectiveTransforms(Matrix4x4());
 
-  root->RenderLayer();
+  // Skip the painting if the device is in device-reset status.
+  if (!gfxPlatform::GetPlatform()->DidRenderingDeviceReset()) {
+    if (gfxPrefs::AlwaysPaint() && XRE_IsContentProcess()) {
+      TimeStamp start = TimeStamp::Now();
+      root->RenderLayer();
+      mLastPaintTime = TimeStamp::Now() - start;
+    } else {
+      root->RenderLayer();
+    }
+  } else {
+    gfxCriticalNote << "LayerManager::EndTransaction skip RenderLayer().";
+  }
+
   if (!mRepeatTransaction && !GetRoot()->GetInvalidRegion().IsEmpty()) {
     GetRoot()->Mutated();
   }
@@ -512,8 +535,7 @@ ClientLayerManager::MakeSnapshotIfRequired()
       // The compositor doesn't draw to a different sized surface
       // when there's a rotation. Instead we rotate the result
       // when drawing into dt
-      LayoutDeviceIntRect outerBounds;
-      mWidget->GetBounds(outerBounds);
+      LayoutDeviceIntRect outerBounds = mWidget->GetBounds();
 
       IntRect bounds = ToOutsideIntRect(mShadowTarget->GetClipExtents());
       if (mTargetRotation) {
@@ -609,8 +631,12 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 {
   TimeStamp start = TimeStamp::Now();
 
-  if (mForwarder->GetSyncObject()) {
-    mForwarder->GetSyncObject()->FinalizeFrame();
+  // Skip the synchronization for buffer since we also skip the painting during
+  // device-reset status.
+  if (!gfxPlatform::GetPlatform()->DidRenderingDeviceReset()) {
+    if (mForwarder->GetSyncObject()) {
+      mForwarder->GetSyncObject()->FinalizeFrame();
+    }
   }
 
   mPhase = PHASE_FORWARD;
@@ -621,6 +647,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
     transactionStart = mTransactionIdAllocator->GetTransactionStart();
   } else {
     transactionStart = mTransactionStart;
+  }
+
+  if (gfxPrefs::AlwaysPaint() && XRE_IsContentProcess()) {
+    mForwarder->SendPaintTime(mLatestTransactionId, mLastPaintTime);
   }
 
   // forward this transaction's changeset to our LayerManagerComposite
@@ -638,10 +668,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpContentBufferSwap& obs = reply.get_OpContentBufferSwap();
 
-        CompositableClient* compositable =
+        RefPtr<CompositableClient> compositable =
           CompositableClient::FromIPDLActor(obs.compositableChild());
         ContentClientRemote* contentClient =
-          static_cast<ContentClientRemote*>(compositable);
+          static_cast<ContentClientRemote*>(compositable.get());
         MOZ_ASSERT(contentClient);
 
         contentClient->SwapBuffers(obs.frontUpdatedRegion());
@@ -728,10 +758,6 @@ ClientLayerManager::ClearCachedResources(Layer* aSubtree)
   } else if (mRoot) {
     ClearLayer(mRoot);
   }
-
-  if (GetCompositorBridgeChild()) {
-    GetCompositorBridgeChild()->ClearTexturePool();
-  }
 }
 
 void
@@ -776,7 +802,7 @@ ClientLayerManager::GetBackendName(nsAString& aName)
     case LayersBackend::LAYERS_D3D9: aName.AssignLiteral("Direct3D 9"); return;
     case LayersBackend::LAYERS_D3D11: {
 #ifdef XP_WIN
-      if (gfxWindowsPlatform::GetPlatform()->IsWARP()) {
+      if (DeviceManagerDx::Get()->IsWARP()) {
         aName.AssignLiteral("Direct3D 11 WARP");
       } else {
         aName.AssignLiteral("Direct3D 11");
@@ -789,34 +815,6 @@ ClientLayerManager::GetBackendName(nsAString& aName)
 }
 
 bool
-ClientLayerManager::ProgressiveUpdateCallback(bool aHasPendingNewThebesContent,
-                                              FrameMetrics& aMetrics,
-                                              bool aDrawingCritical)
-{
-#ifdef MOZ_WIDGET_ANDROID
-  MOZ_ASSERT(aMetrics.IsScrollable());
-  // This is derived from the code in
-  // gfx/layers/ipc/CompositorBridgeParent.cpp::TransformShadowTree.
-  CSSToLayerScale paintScale = aMetrics.LayersPixelsPerCSSPixel().ToScaleFactor();
-  const CSSRect& metricsDisplayPort =
-    (aDrawingCritical && !aMetrics.GetCriticalDisplayPort().IsEmpty()) ?
-      aMetrics.GetCriticalDisplayPort() : aMetrics.GetDisplayPort();
-  LayerRect displayPort = (metricsDisplayPort + aMetrics.GetScrollOffset()) * paintScale;
-
-  ParentLayerPoint scrollOffset;
-  CSSToParentLayerScale zoom;
-  bool ret = AndroidBridge::Bridge()->ProgressiveUpdateCallback(
-    aHasPendingNewThebesContent, displayPort, paintScale.scale, aDrawingCritical,
-    scrollOffset, zoom);
-  aMetrics.SetScrollOffset(scrollOffset / zoom);
-  aMetrics.SetZoom(CSSToParentLayerScale2D(zoom));
-  return ret;
-#else
-  return false;
-#endif
-}
-
-bool
 ClientLayerManager::AsyncPanZoomEnabled() const
 {
   return mWidget && mWidget->AsyncPanZoomEnabled();
@@ -826,6 +824,12 @@ void
 ClientLayerManager::SetNextPaintSyncId(int32_t aSyncId)
 {
   mForwarder->SetPaintSyncId(aSyncId);
+}
+
+void
+ClientLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
+{
+  mForwarder->SetLayerObserverEpoch(aLayerObserverEpoch);
 }
 
 void
@@ -853,7 +857,12 @@ already_AddRefed<PersistentBufferProvider>
 ClientLayerManager::CreatePersistentBufferProvider(const gfx::IntSize& aSize,
                                                    gfx::SurfaceFormat aFormat)
 {
-  if (gfxPrefs::PersistentBufferProviderSharedEnabled()) {
+  // Don't use a shared buffer provider if compositing is considered "not cheap"
+  // because the canvas will most likely be flattened into a thebes layer instead
+  // of being sent to the compositor, in which case rendering into shared memory
+  // is wasteful.
+  if (IsCompositingCheap() &&
+      gfxPrefs::PersistentBufferProviderSharedEnabled()) {
     RefPtr<PersistentBufferProvider> provider
       = PersistentBufferProviderShared::Create(aSize, aFormat, AsShadowForwarder());
     if (provider) {

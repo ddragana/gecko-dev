@@ -182,6 +182,9 @@ class ObjectElements
         // memory.  This is a static property of the TypedArray, set when it
         // is created and never changed.
         SHARED_MEMORY               = 0x8,
+
+        // These elements are set to integrity level "frozen".
+        FROZEN                      = 0x10,
     };
 
   private:
@@ -286,6 +289,21 @@ class ObjectElements
 
     static bool ConvertElementsToDoubles(JSContext* cx, uintptr_t elements);
     static bool MakeElementsCopyOnWrite(ExclusiveContext* cx, NativeObject* obj);
+    static bool FreezeElements(ExclusiveContext* cx, HandleNativeObject obj);
+
+    bool isFrozen() const {
+        return flags & FROZEN;
+    }
+    void freeze() {
+        MOZ_ASSERT(!isFrozen());
+        MOZ_ASSERT(!isCopyOnWrite());
+        flags |= FROZEN;
+    }
+    void markNotFrozen() {
+        MOZ_ASSERT(isFrozen());
+        MOZ_ASSERT(!isCopyOnWrite());
+        flags &= ~FROZEN;
+    }
 
     // This is enough slots to store an object of this class. See the static
     // assertion below.
@@ -311,7 +329,7 @@ class NewObjectCache;
 
 #ifdef DEBUG
 static inline bool
-IsObjectValueInCompartment(Value v, JSCompartment* comp);
+IsObjectValueInCompartment(const Value& v, JSCompartment* comp);
 #endif
 
 // Operations which change an object's dense elements can either succeed, fail,
@@ -614,6 +632,7 @@ class NativeObject : public ShapedObject
         uint32_t nslots = lastProperty()->slotSpan(getClass());
         return Min(nslots, numFixedSlots());
     }
+    uint32_t numFixedSlotsForCompilation() const;
 
     uint32_t slotSpan() const {
         if (inDictionaryMode())
@@ -1257,6 +1276,7 @@ class NativeObject : public ShapedObject
          HandleNativeObject templateObject);
 
     void updateShapeAfterMovingGC();
+    void sweepDictionaryListPointer();
 
     /* JIT Accessors */
     static size_t offsetOfElements() { return offsetof(NativeObject, elements_); }
@@ -1289,7 +1309,7 @@ NativeObject::privateWriteBarrierPre(void** oldval)
 
 #ifdef DEBUG
 static inline bool
-IsObjectValueInCompartment(Value v, JSCompartment* comp)
+IsObjectValueInCompartment(const Value& v, JSCompartment* comp)
 {
     if (!v.isObject())
         return true;

@@ -81,6 +81,7 @@ public:
    *   the caller. The caller may decide to override the actual SVG bbox.
    */
   nsSVGFilterInstance(const nsStyleFilter& aFilter,
+                      nsIFrame* aTargetFrame,
                       nsIContent* aTargetContent,
                       const UserSpaceMetrics& aMetrics,
                       const gfxRect& aTargetBBox,
@@ -140,7 +141,7 @@ private:
   /**
    * Finds the filter frame associated with this SVG filter.
    */
-  nsSVGFilterFrame* GetFilterFrame();
+  nsSVGFilterFrame* GetFilterFrame(nsIFrame* aTargetFrame);
 
   /**
    * Computes the filter primitive subregion for the given primitive.
@@ -254,16 +255,16 @@ private:
   /**
    * The index of the FilterPrimitiveDescription that this SVG filter should use
    * as its SourceGraphic, or the SourceGraphic keyword index if this is the
-   * first filter in a chain.
+   * first filter in a chain. Initialized in BuildPrimitives
    */
-  int32_t mSourceGraphicIndex;
+  MOZ_INIT_OUTSIDE_CTOR int32_t mSourceGraphicIndex;
 
   /**
    * The index of the FilterPrimitiveDescription that this SVG filter should use
    * as its SourceAlpha, or the SourceAlpha keyword index if this is the first
-   * filter in a chain.
+   * filter in a chain. Initialized in BuildPrimitives
    */
-  int32_t mSourceAlphaIndex;
+  MOZ_INIT_OUTSIDE_CTOR int32_t mSourceAlphaIndex;
 
   /**
    * SourceAlpha is available if GetOrCreateSourceAlphaIndex has been called.

@@ -40,6 +40,8 @@ TalosPowersService.prototype = {
     Services.mm.addMessageListener("Talos:ForceQuit", this);
     Services.mm.addMessageListener("TalosContentProfiler:Command", this);
     Services.mm.addMessageListener("TalosPowersContent:ForceCCAndGC", this);
+    Services.mm.addMessageListener("TalosPowersContent:GetStartupInfo", this);
+    Services.mm.addMessageListener("TalosPowers:ParentExec:QueryMsg", this);
     Services.obs.addObserver(this, "xpcom-shutdown", false);
   },
 
@@ -61,6 +63,14 @@ TalosPowersService.prototype = {
         Cu.forceGC();
         Cu.forceCC();
         Cu.forceShrinkingGC();
+        break;
+      }
+      case "TalosPowersContent:GetStartupInfo": {
+        this.receiveGetStartupInfo(message);
+        break;
+      }
+      case "TalosPowers:ParentExec:QueryMsg": {
+        this.RecieveParentExecCommand(message);
         break;
       }
     }
@@ -230,6 +240,80 @@ TalosPowersService.prototype = {
       dump('Force Quit failed: ' + e);
     }
   },
+
+  receiveGetStartupInfo(message) {
+    let mm = message.target.messageManager;
+    let startupInfo = Services.startup.getStartupInfo();
+
+    if (!startupInfo["firstPaint"]) {
+      // It's possible that we were called early enough that
+      // the firstPaint measurement hasn't been set yet. In
+      // that case, we set up an observer for the next time
+      // a window is painted and re-retrieve the startup info.
+      let obs = function(subject, topic) {
+        Services.obs.removeObserver(this, topic);
+        startupInfo = Services.startup.getStartupInfo();
+        mm.sendAsyncMessage("TalosPowersContent:GetStartupInfo:Result",
+                            startupInfo);
+      };
+      Services.obs.addObserver(obs, "widget-first-paint", false);
+    } else {
+      mm.sendAsyncMessage("TalosPowersContent:GetStartupInfo:Result",
+                          startupInfo);
+    }
+  },
+
+  // These services are exposed to local unprivileged content.
+  // Each service is a function which accepts an argument, a callback for sending
+  // the reply (possibly async), and the parent window as a utility.
+  // arg/reply semantice are service-specific.
+  // To add a service: add a method at ParentExecServices here, then at the content:
+  // <script src="chrome://talos-powers-content/content/TalosPowersContent.js"></script>
+  // and then e.g. TalosPowersParent.exec("sampleParentService", myArg, myCallback)
+  // Sample service:
+  /*
+    // arg: anything. return: sample reply
+    sampleParentService: function(arg, callback, win) {
+      win.setTimeout(function() {
+        callback("sample reply for: " + arg);
+      }, 500);
+    },
+  */
+  ParentExecServices: {
+
+    // arg: ignored. return: handle (number) for use with stopFrameTimeRecording
+    startFrameTimeRecording: function(arg, callback, win) {
+      var rv = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                  .getInterface(Ci.nsIDOMWindowUtils)
+                  .startFrameTimeRecording();
+      callback(rv);
+    },
+
+    // arg: handle from startFrameTimeRecording. return: array with composition intervals
+    stopFrameTimeRecording: function(arg, callback, win) {
+      var rv = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                  .getInterface(Ci.nsIDOMWindowUtils)
+                  .stopFrameTimeRecording(arg);
+      callback(rv);
+    },
+  },
+
+  RecieveParentExecCommand(msg) {
+    function sendResult(result) {
+      let mm = msg.target.messageManager;
+      mm.sendAsyncMessage("TalosPowers:ParentExec:ReplyMsg", {
+        id: msg.data.id,
+        result: result
+      });
+    }
+
+    let command = msg.data.command;
+    if (!this.ParentExecServices.hasOwnProperty(command.name))
+      throw new Error("TalosPowers:ParentExec: Invalid service '" + command.name + "'");
+
+    this.ParentExecServices[command.name](command.data, sendResult, msg.target.ownerGlobal);
+  },
+
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([TalosPowersService]);

@@ -355,7 +355,7 @@ RotatedContentBuffer::EnsureBuffer()
     }
   }
 
-  NS_WARN_IF_FALSE(mDTBuffer && mDTBuffer->IsValid(), "no buffer");
+  NS_WARNING_ASSERTION(mDTBuffer && mDTBuffer->IsValid(), "no buffer");
   return !!mDTBuffer;
 }
 
@@ -370,7 +370,7 @@ RotatedContentBuffer::EnsureBufferOnWhite()
     }
   }
 
-  NS_WARN_IF_FALSE(mDTBufferOnWhite, "no buffer");
+  NS_WARNING_ASSERTION(mDTBufferOnWhite, "no buffer");
   return !!mDTBufferOnWhite;
 }
 
@@ -654,7 +654,9 @@ RotatedContentBuffer::BeginPaint(PaintedLayer* aLayer,
                          &destDTBuffer, &destDTBufferOnWhite);
             if (!destDTBuffer ||
                 (!destDTBufferOnWhite && (bufferFlags & BUFFER_COMPONENT_ALPHA))) {
-              gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(IntSize(destBufferRect.width, destBufferRect.height)))) << "Failed 1 buffer db=" << hexa(destDTBuffer.get()) << " dw=" << hexa(destDTBufferOnWhite.get()) << " for " << destBufferRect.x << ", " << destBufferRect.y << ", " << destBufferRect.width << ", " << destBufferRect.height;
+              if (Factory::ReasonableSurfaceSize(IntSize(destBufferRect.width, destBufferRect.height))) {
+                gfxCriticalNote << "Failed 1 buffer db=" << hexa(destDTBuffer.get()) << " dw=" << hexa(destDTBufferOnWhite.get()) << " for " << destBufferRect.x << ", " << destBufferRect.y << ", " << destBufferRect.width << ", " << destBufferRect.height;
+              }
               return result;
             }
           }
@@ -676,7 +678,9 @@ RotatedContentBuffer::BeginPaint(PaintedLayer* aLayer,
                  &destDTBuffer, &destDTBufferOnWhite);
     if (!destDTBuffer ||
         (!destDTBufferOnWhite && (bufferFlags & BUFFER_COMPONENT_ALPHA))) {
-      gfxCriticalError(CriticalLog::DefaultOptions(Factory::ReasonableSurfaceSize(IntSize(destBufferRect.width, destBufferRect.height)))) << "Failed 2 buffer db=" << hexa(destDTBuffer.get()) << " dw=" << hexa(destDTBufferOnWhite.get()) << " for " << destBufferRect.x << ", " << destBufferRect.y << ", " << destBufferRect.width << ", " << destBufferRect.height;
+      if (Factory::ReasonableSurfaceSize(IntSize(destBufferRect.width, destBufferRect.height))) {
+        gfxCriticalNote << "Failed 2 buffer db=" << hexa(destDTBuffer.get()) << " dw=" << hexa(destDTBufferOnWhite.get()) << " for " << destBufferRect.x << ", " << destBufferRect.y << ", " << destBufferRect.width << ", " << destBufferRect.height;
+      }
       return result;
     }
   }

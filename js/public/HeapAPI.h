@@ -69,19 +69,15 @@ static const uint32_t BLACK = 0;
 static const uint32_t GRAY = 1;
 
 /*
- * The "location" field in the Chunk trailer is a bit vector indicting various
- * roles of the chunk.
- *
- * The value 0 for the "location" field is invalid, at least one bit must be
- * set.
- *
- * Some bits preclude others, for example, any "nursery" bit precludes any
- * "tenured" or "middle generation" bit.
+ * The "location" field in the Chunk trailer is a enum indicating various roles
+ * of the chunk.
  */
-const uintptr_t ChunkLocationBitNursery = 1;       // Standard GGC nursery
-const uintptr_t ChunkLocationBitTenuredHeap = 2;   // Standard GGC tenured generation
-
-const uintptr_t ChunkLocationAnyNursery = ChunkLocationBitNursery;
+enum class ChunkLocation : uint32_t
+{
+    Invalid = 0,
+    Nursery = 1,
+    TenuredHeap = 2
+};
 
 #ifdef JS_DEBUG
 /* When downcasting, ensure we are actually the right type. */
@@ -126,9 +122,8 @@ struct Zone
         barrierTracer_(barrierTracerArg),
         needsIncrementalBarrier_(false)
     {
-        for (auto& stackRootPtr : stackRoots_) {
+        for (auto& stackRootPtr : stackRoots_)
             stackRootPtr = nullptr;
-        }
     }
 
     bool needsIncrementalBarrier() const {
@@ -340,9 +335,9 @@ IsInsideNursery(const js::gc::Cell* cell)
     uintptr_t addr = uintptr_t(cell);
     addr &= ~js::gc::ChunkMask;
     addr |= js::gc::ChunkLocationOffset;
-    uint32_t location = *reinterpret_cast<uint32_t*>(addr);
-    MOZ_ASSERT(location != 0);
-    return location & ChunkLocationAnyNursery;
+    auto location = *reinterpret_cast<ChunkLocation*>(addr);
+    MOZ_ASSERT(location == ChunkLocation::Nursery || location == ChunkLocation::TenuredHeap);
+    return location == ChunkLocation::Nursery;
 }
 
 } /* namespace gc */
@@ -365,31 +360,6 @@ GetStringZone(JSString* str)
 
 extern JS_PUBLIC_API(Zone*)
 GetObjectZone(JSObject* obj);
-
-static MOZ_ALWAYS_INLINE bool
-ObjectIsTenured(JSObject* obj)
-{
-    return !js::gc::IsInsideNursery(reinterpret_cast<js::gc::Cell*>(obj));
-}
-
-static MOZ_ALWAYS_INLINE bool
-ObjectIsMarkedGray(JSObject* obj)
-{
-    /*
-     * GC things residing in the nursery cannot be gray: they have no mark bits.
-     * All live objects in the nursery are moved to tenured at the beginning of
-     * each GC slice, so the gray marker never sees nursery things.
-     */
-    if (js::gc::IsInsideNursery(reinterpret_cast<js::gc::Cell*>(obj)))
-        return false;
-    return js::gc::detail::CellIsMarkedGray(reinterpret_cast<js::gc::Cell*>(obj));
-}
-
-static MOZ_ALWAYS_INLINE bool
-ScriptIsMarkedGray(JSScript* script)
-{
-    return js::gc::detail::CellIsMarkedGray(reinterpret_cast<js::gc::Cell*>(script));
-}
 
 static MOZ_ALWAYS_INLINE bool
 GCThingIsMarkedGray(GCCellPtr thing)

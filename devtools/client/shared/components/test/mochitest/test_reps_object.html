@@ -30,6 +30,9 @@ window.onload = Task.async(function* () {
 
     // Test that properties are rendered as expected by PropRep
     yield testNested();
+
+    // Test that 'more' property doesn't clobber the caption.
+    yield testMoreProp();
   } catch(e) {
     ok(false, "Got an error: " + DevToolsUtils.safeErrorString(e));
   } finally {
@@ -72,7 +75,7 @@ window.onload = Task.async(function* () {
     const testName = "testMaxProps";
 
     const stub = {a: "a", b: "b", c: "c"};
-    const defaultOutput = `Object{a: "a", b: "b", c: "c"}`;
+    const defaultOutput = `Object { a: "a", b: "b", c: "c" }`;
 
     const modeTests = [
       {
@@ -101,7 +104,7 @@ window.onload = Task.async(function* () {
     for (let i = 0; i<100; i++) {
       stub[`p${i}`] = i
     }
-    const defaultOutput = `Object{p0: 0, p1: 1, p2: 2, more...}`;
+    const defaultOutput = `Object { p0: 0, p1: 1, p2: 2, 97 more… }`;
 
     const modeTests = [
       {
@@ -127,7 +130,7 @@ window.onload = Task.async(function* () {
 
   function testUninterestingProps() {
     const stub = {a:undefined, b:undefined, c:"c", d:0};
-    const defaultOutput = `Object{c: "c", d: 0, a: undefined, more...}`;
+    const defaultOutput = `Object { c: "c", d: 0, a: undefined, 1 more… }`;
 
     const modeTests = [
       {
@@ -160,7 +163,7 @@ window.onload = Task.async(function* () {
       strProp: "test string",
       arrProp: [1]
     };
-    const defaultOutput = `Object{strProp: "test string", objProp: Object{id: 1, arr: [2]}, arrProp: [1]}`;
+    const defaultOutput = `Object { strProp: "test string", objProp: Object, arrProp: [1] }`;
 
     const modeTests = [
       {
@@ -183,7 +186,37 @@ window.onload = Task.async(function* () {
 
     testRepRenderModes(modeTests, "testNestedObject", componentUnderTest, stub);
   }
-});
+
+  function testMoreProp() {
+    const stub = {
+      a: undefined,
+      b: 1,
+      'more': 2,
+      d: 3
+    };
+    const defaultOutput = `Object { b: 1, more: 2, d: 3, 1 more… }`;
+
+    const modeTests = [
+      {
+        mode: undefined,
+        expectedOutput: defaultOutput,
+      },
+      {
+        mode: "tiny",
+        expectedOutput: `Object`,
+      },
+      {
+        mode: "short",
+        expectedOutput: defaultOutput,
+      },
+      {
+        mode: "long",
+        expectedOutput: defaultOutput,
+      }
+    ];
+
+    testRepRenderModes(modeTests, "testMoreProp", componentUnderTest, stub);
+  }});
 </script>
 </pre>
 </body>

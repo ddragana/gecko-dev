@@ -7,6 +7,7 @@
 #include "signaling/src/jsep/JsepSessionImpl.h"
 #include <string>
 #include <set>
+#include <bitset>
 #include <stdlib.h>
 
 #include "nspr.h"
@@ -36,6 +37,17 @@ MOZ_MTLOG_MODULE("jsep")
     mLastError = os.str();                                                     \
     MOZ_MTLOG(ML_ERROR, mLastError);                                           \
   } while (0);
+
+static std::bitset<128> GetForbiddenSdpPayloadTypes() {
+  std::bitset<128> forbidden(0);
+  forbidden[1] = true;
+  forbidden[2] = true;
+  forbidden[19] = true;
+  for (uint16_t i = 64; i < 96; ++i) {
+    forbidden[i] = true;
+  }
+  return forbidden;
+}
 
 nsresult
 JsepSessionImpl::Init()
@@ -186,44 +198,40 @@ JsepSessionImpl::AddDtlsFingerprint(const std::string& algorithm,
 }
 
 nsresult
-JsepSessionImpl::AddAudioRtpExtension(const std::string& extensionName)
+JsepSessionImpl::AddRtpExtension(std::vector<SdpExtmapAttributeList::Extmap>& extensions,
+                                 const std::string& extensionName,
+                                 SdpDirectionAttribute::Direction direction)
 {
   mLastError.clear();
 
-  if (mAudioRtpExtensions.size() + 1 > UINT16_MAX) {
-    JSEP_SET_ERROR("Too many audio rtp extensions have been added");
+  if (extensions.size() + 1 > UINT16_MAX) {
+    JSEP_SET_ERROR("Too many rtp extensions have been added");
     return NS_ERROR_FAILURE;
   }
 
   SdpExtmapAttributeList::Extmap extmap =
-      { static_cast<uint16_t>(mAudioRtpExtensions.size() + 1),
-        SdpDirectionAttribute::kSendrecv,
-        false, // don't actually specify direction
+      { static_cast<uint16_t>(extensions.size() + 1),
+        direction,
+        direction != SdpDirectionAttribute::kSendrecv, // do we want to specify direction?
         extensionName,
         "" };
 
-  mAudioRtpExtensions.push_back(extmap);
+  extensions.push_back(extmap);
   return NS_OK;
 }
 
 nsresult
-JsepSessionImpl::AddVideoRtpExtension(const std::string& extensionName)
+JsepSessionImpl::AddAudioRtpExtension(const std::string& extensionName,
+                                      SdpDirectionAttribute::Direction direction)
 {
-  mLastError.clear();
+  return AddRtpExtension(mAudioRtpExtensions, extensionName, direction);
+}
 
-  if (mVideoRtpExtensions.size() + 1 > UINT16_MAX) {
-    JSEP_SET_ERROR("Too many video rtp extensions have been added");
-    return NS_ERROR_FAILURE;
-  }
-
-  SdpExtmapAttributeList::Extmap extmap =
-      { static_cast<uint16_t>(mVideoRtpExtensions.size() + 1),
-        SdpDirectionAttribute::kSendrecv,
-        false, // don't actually specify direction
-        extensionName, "" };
-
-  mVideoRtpExtensions.push_back(extmap);
-  return NS_OK;
+nsresult
+JsepSessionImpl::AddVideoRtpExtension(const std::string& extensionName,
+                                      SdpDirectionAttribute::Direction direction)
+{
+  return AddRtpExtension(mVideoRtpExtensions, extensionName, direction);
 }
 
 template<class T>
@@ -275,6 +283,22 @@ JsepSessionImpl::SetParameters(const std::string& streamId,
     JSEP_SET_ERROR("Track " << streamId << "/" << trackId << " was never added.");
     return NS_ERROR_INVALID_ARG;
   }
+
+  // Add RtpStreamId Extmap
+  // SdpDirectionAttribute::Direction is a bitmask
+  SdpDirectionAttribute::Direction addVideoExt = SdpDirectionAttribute::kInactive;
+  for (auto constraintEntry: constraints) {
+    if (constraintEntry.rid != "") {
+      if (it->mTrack->GetMediaType() == SdpMediaSection::kVideo) {
+        addVideoExt = static_cast<SdpDirectionAttribute::Direction>(addVideoExt
+                                                                    | it->mTrack->GetDirection());
+      }
+    }
+  }
+  if (addVideoExt != SdpDirectionAttribute::kInactive) {
+    AddVideoRtpExtension("urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id", addVideoExt);
+  }
+
   it->mTrack->SetJsConstraints(constraints);
   return NS_OK;
 }
@@ -1103,12 +1127,10 @@ JsepSessionImpl::SetLocalDescription(JsepSdpType type, const std::string& sdp)
 
   // Create transport objects.
   mOldTransports = mTransports; // Save in case we need to rollback
+  mTransports.clear();
   for (size_t t = 0; t < parsed->GetMediaSectionCount(); ++t) {
-    if (t >= mTransports.size()) {
-      mTransports.push_back(RefPtr<JsepTransport>(new JsepTransport));
-    }
-
-    UpdateTransport(parsed->GetMediaSection(t), mTransports[t].get());
+    mTransports.push_back(RefPtr<JsepTransport>(new JsepTransport));
+    InitTransport(parsed->GetMediaSection(t), mTransports[t].get());
   }
 
   switch (type) {
@@ -1442,8 +1464,8 @@ JsepSessionImpl::MakeNegotiatedTrackPair(const SdpMediaSection& remote,
 }
 
 void
-JsepSessionImpl::UpdateTransport(const SdpMediaSection& msection,
-                                 JsepTransport* transport)
+JsepSessionImpl::InitTransport(const SdpMediaSection& msection,
+                               JsepTransport* transport)
 {
   if (mSdpHelper.MsectionIsDisabled(msection)) {
     transport->Close();
@@ -1658,6 +1680,7 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
       return rv;
     }
 
+    static const std::bitset<128> forbidden = GetForbiddenSdpPayloadTypes();
     if (msection.GetMediaType() == SdpMediaSection::kAudio ||
         msection.GetMediaType() == SdpMediaSection::kVideo) {
       // Sanity-check that payload type can work with RTP
@@ -1668,6 +1691,10 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
           JSEP_SET_ERROR("audio/video payload type is too large: " << fmt);
           return NS_ERROR_INVALID_ARG;
         }
+	if (forbidden.test(payloadType)) {
+	  JSEP_SET_ERROR("Illegal audio/video payload type: " << fmt);
+          return NS_ERROR_INVALID_ARG;
+	}
       }
     }
   }
@@ -2123,18 +2150,20 @@ JsepSessionImpl::SetupDefaultCodecs()
                                     8 * 8000 * 1 // 8 * frequency * channels
                                     ));
 
+  // note: because telephone-event is effectively a marker codec that indicates
+  // that dtmf rtp packets may be passed, the packetSize and bitRate fields
+  // don't make sense here.  For now, use zero. (mjf)
+  mSupportedCodecs.values.push_back(
+      new JsepAudioCodecDescription("101",
+                                    "telephone-event",
+                                    8000,
+                                    1,
+                                    0, // packetSize doesn't make sense here
+                                    0  // bitRate doesn't make sense here
+                                    ));
+
   // Supported video codecs.
   // Note: order here implies priority for building offers!
-  JsepVideoCodecDescription* vp9 = new JsepVideoCodecDescription(
-      "121",
-      "VP9",
-      90000
-      );
-  // Defaults for mandatory params
-  vp9->mConstraints.maxFs = 12288; // Enough for 2048x1536
-  vp9->mConstraints.maxFps = 60;
-  mSupportedCodecs.values.push_back(vp9);
-
   JsepVideoCodecDescription* vp8 = new JsepVideoCodecDescription(
       "120",
       "VP8",
@@ -2144,6 +2173,16 @@ JsepSessionImpl::SetupDefaultCodecs()
   vp8->mConstraints.maxFs = 12288; // Enough for 2048x1536
   vp8->mConstraints.maxFps = 60;
   mSupportedCodecs.values.push_back(vp8);
+
+  JsepVideoCodecDescription* vp9 = new JsepVideoCodecDescription(
+      "121",
+      "VP9",
+      90000
+      );
+  // Defaults for mandatory params
+  vp9->mConstraints.maxFs = 12288; // Enough for 2048x1536
+  vp9->mConstraints.maxFps = 60;
+  mSupportedCodecs.values.push_back(vp9);
 
   JsepVideoCodecDescription* h264_1 = new JsepVideoCodecDescription(
       "126",
@@ -2165,17 +2204,36 @@ JsepSessionImpl::SetupDefaultCodecs()
   h264_0->mProfileLevelId = 0x42E00D;
   mSupportedCodecs.values.push_back(h264_0);
 
+  JsepVideoCodecDescription* red = new JsepVideoCodecDescription(
+      "122", // payload type
+      "red", // codec name
+      90000  // clock rate (match other video codecs)
+      );
+  mSupportedCodecs.values.push_back(red);
+
+  JsepVideoCodecDescription* ulpfec = new JsepVideoCodecDescription(
+      "123",    // payload type
+      "ulpfec", // codec name
+      90000     // clock rate (match other video codecs)
+      );
+  mSupportedCodecs.values.push_back(ulpfec);
+
   mSupportedCodecs.values.push_back(new JsepApplicationCodecDescription(
       "5000",
       "webrtc-datachannel",
       WEBRTC_DATACHANNEL_STREAMS_DEFAULT
       ));
+
+  // Update the redundant encodings for the RED codec with the supported
+  // codecs.  Note: only uses the video codecs.
+  red->UpdateRedundantEncodings(mSupportedCodecs.values);
 }
 
 void
 JsepSessionImpl::SetupDefaultRtpExtensions()
 {
-  AddAudioRtpExtension("urn:ietf:params:rtp-hdrext:ssrc-audio-level");
+  AddAudioRtpExtension("urn:ietf:params:rtp-hdrext:ssrc-audio-level",
+                       SdpDirectionAttribute::Direction::kSendonly);
 }
 
 void

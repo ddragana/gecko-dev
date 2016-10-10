@@ -11,6 +11,7 @@
 #include "gfxFontEntry.h"
 #include "nsString.h"
 #include "gfxPoint.h"
+#include "gfxPattern.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
@@ -45,7 +46,6 @@ class gfxGlyphExtents;
 class gfxShapedText;
 class gfxShapedWord;
 class gfxSkipChars;
-class gfxTextContextPaint;
 
 #define FONT_MAX_SIZE                  2000.0
 
@@ -66,6 +66,7 @@ class gfxTextContextPaint;
 struct gfxTextRunDrawCallbacks;
 
 namespace mozilla {
+class SVGContextPaint;
 namespace gfx {
 class GlyphRenderingOptions;
 } // namespace gfx
@@ -302,7 +303,7 @@ public:
     already_AddRefed<gfxFont>
     Lookup(const gfxFontEntry* aFontEntry,
            const gfxFontStyle* aStyle,
-           const gfxCharacterMap* aUnicodeRangeMap = nullptr);
+           const gfxCharacterMap* aUnicodeRangeMap);
 
     // We created a new font (presumably because Lookup returned null);
     // put it in the cache. The font's refcount should be nonzero. It is
@@ -567,8 +568,6 @@ public:
 
         // Set if the textrun should use the OpenType 'math' script.
         TEXT_USE_MATH_SCRIPT = 0x80000000,
-
-        TEXT_UNUSED_FLAGS = 0x10000000
     };
 
     /**
@@ -1336,6 +1335,7 @@ class gfxFont {
 protected:
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::unicode::Script Script;
+    typedef mozilla::SVGContextPaint SVGContextPaint;
 
 public:
     nsrefcnt AddRef(void) {
@@ -1433,7 +1433,7 @@ public:
         return nullptr;
     }
 
-    virtual gfxFloat GetAdjustedSize() const {
+    gfxFloat GetAdjustedSize() const {
         return mAdjustedSize > 0.0
                  ? mAdjustedSize
                  : (mStyle.sizeAdjust == 0.0 ? 0.0 : mStyle.size);
@@ -1512,6 +1512,7 @@ public:
 
     // Font metrics
     struct Metrics {
+        gfxFloat capHeight;
         gfxFloat xHeight;
         gfxFloat strikeoutSize;
         gfxFloat strikeoutOffset;
@@ -1793,7 +1794,8 @@ public:
         FONT_TYPE_FT2,
         FONT_TYPE_MAC,
         FONT_TYPE_OS2,
-        FONT_TYPE_CAIRO
+        FONT_TYPE_CAIRO,
+        FONT_TYPE_FONTCONFIG
     } FontType;
 
     virtual FontType GetType() const = 0;
@@ -2148,9 +2150,9 @@ protected:
     void SanitizeMetrics(Metrics *aMetrics, bool aIsBadUnderlineFont);
 
     bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
-                        uint32_t aGlyphId, gfxTextContextPaint *aContextPaint) const;
+                        uint32_t aGlyphId, SVGContextPaint* aContextPaint) const;
     bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
-                        uint32_t aGlyphId, gfxTextContextPaint *aContextPaint,
+                        uint32_t aGlyphId, SVGContextPaint* aContextPaint,
                         gfxTextRunDrawCallbacks *aCallbacks,
                         bool& aEmittedGlyphs) const;
 
@@ -2184,12 +2186,14 @@ struct TextRunDrawParams {
     gfxContext              *context;
     gfxFont::Spacing        *spacing;
     gfxTextRunDrawCallbacks *callbacks;
-    gfxTextContextPaint     *runContextPaint;
+    mozilla::SVGContextPaint *runContextPaint;
     mozilla::gfx::Color      fontSmoothingBGColor;
     gfxFloat                 direction;
     double                   devPerApp;
-    float                    textStrokeWidth;
     nscolor                  textStrokeColor;
+    gfxPattern              *textStrokePattern;
+    const mozilla::gfx::StrokeOptions *strokeOpts;
+    const mozilla::gfx::DrawOptions   *drawOpts;
     DrawMode                 drawMode;
     bool                     isVerticalRun;
     bool                     isRTL;
@@ -2199,7 +2203,7 @@ struct TextRunDrawParams {
 struct FontDrawParams {
     RefPtr<mozilla::gfx::ScaledFont>            scaledFont;
     RefPtr<mozilla::gfx::GlyphRenderingOptions> renderingOptions;
-    gfxTextContextPaint      *contextPaint;
+    mozilla::SVGContextPaint *contextPaint;
     mozilla::gfx::Matrix     *passedInvMatrix;
     mozilla::gfx::Matrix      matInv;
     double                    synBoldOnePixelOffset;

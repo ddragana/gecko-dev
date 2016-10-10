@@ -288,7 +288,7 @@ CheckGeneratedImage(Decoder* aDecoder,
                     uint8_t aFuzz /* = 0 */)
 {
   RawAccessFrameRef currentFrame = aDecoder->GetCurrentFrameRef();
-  RefPtr<SourceSurface> surface = currentFrame->GetSurface();
+  RefPtr<SourceSurface> surface = currentFrame->GetSourceSurface();
   const IntSize surfaceSize = surface->GetSize();
 
   // This diagram shows how the surface is divided into regions that the code
@@ -533,6 +533,15 @@ ImageTestCase CorruptTestCase()
                        TEST_CASE_HAS_ERROR);
 }
 
+ImageTestCase CorruptBMPWithTruncatedHeader()
+{
+  // This BMP has a header which is truncated right between the BIH and the
+  // bitfields, which is a particularly error-prone place w.r.t. the BMP decoder
+  // state machine.
+  return ImageTestCase("invalid-truncated-metadata.bmp", "image/bmp",
+                       IntSize(100, 100), TEST_CASE_HAS_ERROR);
+}
+
 ImageTestCase CorruptICOWithBadBMPWidthTestCase()
 {
   // This ICO contains a BMP icon which has a width that doesn't match the size
@@ -653,6 +662,11 @@ ImageTestCase DownscaledTransparentICOWithANDMaskTestCase()
   return ImageTestCase("transparent-ico-with-and-mask.ico", "image/x-icon",
                        IntSize(32, 32), IntSize(20, 20),
                        TEST_CASE_IS_TRANSPARENT | TEST_CASE_IGNORE_OUTPUT);
+}
+
+ImageTestCase TruncatedSmallGIFTestCase()
+{
+  return ImageTestCase("green-1x1-truncated.gif", "image/gif", IntSize(1, 1));
 }
 
 } // namespace image

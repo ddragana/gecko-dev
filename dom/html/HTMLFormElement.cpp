@@ -87,7 +87,7 @@ static const uint8_t NS_FORM_AUTOCOMPLETE_OFF = 0;
 static const nsAttrValue::EnumTable kFormAutocompleteTable[] = {
   { "on",  NS_FORM_AUTOCOMPLETE_ON },
   { "off", NS_FORM_AUTOCOMPLETE_OFF },
-  { 0 }
+  { nullptr, 0 }
 };
 // Default autocomplete value is 'on'.
 static const nsAttrValue::EnumTable* kFormDefaultAutocomplete = &kFormAutocompleteTable[0];
@@ -119,6 +119,8 @@ HTMLFormElement::HTMLFormElement(already_AddRefed<mozilla::dom::NodeInfo>& aNode
     mInvalidElementsCount(0),
     mEverTriedInvalidSubmit(false)
 {
+  // We start out valid.
+  AddStatesSilently(NS_EVENT_STATE_VALID);
 }
 
 HTMLFormElement::~HTMLFormElement()
@@ -145,15 +147,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFormElement,
                                                 nsGenericHTMLElement)
   tmp->Clear();
-  tmp->mExpandoAndGeneration.Unlink();
+  tmp->mExpandoAndGeneration.OwnerUnlinked();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(HTMLFormElement,
-                                               nsGenericHTMLElement)
-  if (tmp->PreservingWrapper()) {
-    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mExpandoAndGeneration.expando)
-  }
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_ADDREF_INHERITED(HTMLFormElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
@@ -694,7 +689,7 @@ HTMLFormElement::BuildSubmission(HTMLFormSubmission** aFormSubmission,
   if (aEvent) {
     InternalFormEvent* formEvent = aEvent->AsFormEvent();
     if (formEvent) {
-      nsIContent* originator = formEvent->originator;
+      nsIContent* originator = formEvent->mOriginator;
       if (originator) {
         if (!originator->IsHTMLElement()) {
           return NS_ERROR_UNEXPECTED;
@@ -932,12 +927,12 @@ HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
   nsAutoString message;
   nsAutoString cont;
   stringBundle->GetStringFromName(
-    MOZ_UTF16("formPostSecureToInsecureWarning.title"), getter_Copies(title));
+    u"formPostSecureToInsecureWarning.title", getter_Copies(title));
   stringBundle->GetStringFromName(
-    MOZ_UTF16("formPostSecureToInsecureWarning.message"),
+    u"formPostSecureToInsecureWarning.message",
     getter_Copies(message));
   stringBundle->GetStringFromName(
-    MOZ_UTF16("formPostSecureToInsecureWarning.continue"),
+    u"formPostSecureToInsecureWarning.continue",
     getter_Copies(cont));
   int32_t buttonPressed;
   bool checkState = false; // this is unused (ConfirmEx requires this parameter)
@@ -1542,7 +1537,7 @@ HTMLFormElement::NamedGetter(const nsAString& aName, bool &aFound)
 void
 HTMLFormElement::GetSupportedNames(nsTArray<nsString >& aRetval)
 {
-  // TODO https://www.w3.org/Bugs/Public/show_bug.cgi?id=22320
+  // TODO https://github.com/whatwg/html/issues/1731
 }
 
 already_AddRefed<nsISupports>
@@ -1757,7 +1752,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     NS_ConvertUTF8toUTF16 reportScheme(scheme);
 
     const char16_t* params[] = { reportSpec.get(), reportScheme.get() };
-    CSP_LogLocalizedStr(MOZ_UTF16("upgradeInsecureRequest"),
+    CSP_LogLocalizedStr(u"upgradeInsecureRequest",
                         params, ArrayLength(params),
                         EmptyString(), // aSourceFile
                         EmptyString(), // aScriptSample
@@ -1939,14 +1934,6 @@ HTMLFormElement::CheckValidFormSubmission()
   NS_ASSERTION(!HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate),
                "We shouldn't be there if novalidate is set!");
 
-  // Don't do validation for a form submit done by a sandboxed document that
-  // doesn't have 'allow-forms', the submit will have been blocked and the
-  // HTML5 spec says we shouldn't validate in this case.
-  nsIDocument* doc = GetComposedDoc();
-  if (doc && (doc->GetSandboxFlags() & SANDBOXED_FORMS)) {
-    return true;
-  }
-
   // When .submit() is called aEvent = nullptr so we can rely on that to know if
   // we have to check the validity of the form.
   nsCOMPtr<nsIObserverService> service =
@@ -2032,6 +2019,41 @@ One should be implemented!");
   }
 
   return true;
+}
+
+bool
+HTMLFormElement::SubmissionCanProceed(Element* aSubmitter)
+{
+#ifdef DEBUG
+  if (aSubmitter) {
+    nsCOMPtr<nsIFormControl> fc = do_QueryInterface(aSubmitter);
+    MOZ_ASSERT(fc);
+
+    uint32_t type = fc->GetType();
+    MOZ_ASSERT(type == NS_FORM_INPUT_SUBMIT ||
+               type == NS_FORM_INPUT_IMAGE ||
+               type == NS_FORM_BUTTON_SUBMIT,
+               "aSubmitter is not a submit control?");
+  }
+#endif
+
+  // Modified step 2 of
+  // https://html.spec.whatwg.org/multipage/forms.html#concept-form-submit --
+  // we're not checking whether the node document is disconnected yet...
+  if (OwnerDoc()->GetSandboxFlags() & SANDBOXED_FORMS) {
+    return false;
+  }
+
+  if (HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate)) {
+    return true;
+  }
+
+  if (aSubmitter &&
+      aSubmitter->HasAttr(kNameSpaceID_None, nsGkAtoms::formnovalidate)) {
+    return true;
+  }
+
+  return CheckValidFormSubmission();
 }
 
 void

@@ -7,7 +7,7 @@
 #include "ImageContainer.h"
 #include "mozilla/layers/BufferTexture.h"
 #include "mozilla/layers/ISurfaceAllocator.h"
-#include "mozilla/layers/CompositableForwarder.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "TextureClientRecycleAllocator.h"
 
 namespace mozilla {
@@ -22,6 +22,7 @@ public:
 
   explicit TextureClientHolder(TextureClient* aClient)
     : mTextureClient(aClient)
+    , mWillRecycle(true)
   {}
 
   TextureClient* GetTextureClient()
@@ -29,9 +30,20 @@ public:
     return mTextureClient;
   }
 
+  bool WillRecycle()
+  {
+    return mWillRecycle;
+  }
+
+  void ClearWillRecycle()
+  {
+    mWillRecycle = false;
+  }
+
   void ClearTextureClient() { mTextureClient = nullptr; }
 protected:
   RefPtr<TextureClient> mTextureClient;
+  bool mWillRecycle;
 };
 
 class DefaultTextureClientAllocationHelper : public ITextureClientAllocationHelper
@@ -60,7 +72,7 @@ public:
     return true;
   }
 
-  already_AddRefed<TextureClient> Allocate(CompositableForwarder* aAllocator) override
+  already_AddRefed<TextureClient> Allocate(KnowsCompositor* aAllocator) override
   {
     return mAllocator->Allocate(mFormat,
                                 mSize,
@@ -102,7 +114,7 @@ YCbCrTextureClientAllocationHelper::IsCompatible(TextureClient* aTextureClient)
 }
 
 already_AddRefed<TextureClient>
-YCbCrTextureClientAllocationHelper::Allocate(CompositableForwarder* aAllocator)
+YCbCrTextureClientAllocationHelper::Allocate(KnowsCompositor* aAllocator)
 {
   return TextureClient::CreateForYCbCr(aAllocator,
                                        mData.mYSize, mData.mCbCrSize,
@@ -110,10 +122,11 @@ YCbCrTextureClientAllocationHelper::Allocate(CompositableForwarder* aAllocator)
                                        mTextureFlags);
 }
 
-TextureClientRecycleAllocator::TextureClientRecycleAllocator(CompositableForwarder* aAllocator)
+TextureClientRecycleAllocator::TextureClientRecycleAllocator(KnowsCompositor* aAllocator)
   : mSurfaceAllocator(aAllocator)
   , mMaxPooledSize(kMaxPooledSized)
   , mLock("TextureClientRecycleAllocatorImp.mLock")
+  , mIsDestroyed(false)
 {
 }
 
@@ -164,6 +177,9 @@ TextureClientRecycleAllocator::CreateOrRecycle(ITextureClientAllocationHelper& a
 
   {
     MutexAutoLock lock(mLock);
+    if (mIsDestroyed) {
+      return nullptr;
+    }
     if (!mPooledClients.empty()) {
       textureHolder = mPooledClients.top();
       mPooledClients.pop();
@@ -173,7 +189,7 @@ TextureClientRecycleAllocator::CreateOrRecycle(ITextureClientAllocationHelper& a
         RefPtr<Runnable> task = new TextureClientReleaseTask(textureHolder->GetTextureClient());
         textureHolder->ClearTextureClient();
         textureHolder = nullptr;
-        mSurfaceAllocator->GetMessageLoop()->PostTask(task.forget());
+        mSurfaceAllocator->GetTextureForwarder()->GetMessageLoop()->PostTask(task.forget());
       } else {
         textureHolder->GetTextureClient()->RecycleTexture(aHelper.mTextureFlags);
       }
@@ -210,8 +226,8 @@ TextureClientRecycleAllocator::Allocate(gfx::SurfaceFormat aFormat,
                                         TextureFlags aTextureFlags,
                                         TextureAllocationFlags aAllocFlags)
 {
-  return TextureClient::CreateForDrawing(mSurfaceAllocator, aFormat, aSize, aSelector,
-                                         aTextureFlags, aAllocFlags);
+  return TextureClient::CreateForDrawing(mSurfaceAllocator, aFormat, aSize,
+                                         aSelector, aTextureFlags, aAllocFlags);
 }
 
 void
@@ -221,6 +237,23 @@ TextureClientRecycleAllocator::ShrinkToMinimumSize()
   while (!mPooledClients.empty()) {
     mPooledClients.pop();
   }
+  // We can not clear using TextureClients safely.
+  // Just clear WillRecycle here.
+  std::map<TextureClient*, RefPtr<TextureClientHolder> >::iterator it;
+  for (it = mInUseClients.begin(); it != mInUseClients.end(); it++) {
+    RefPtr<TextureClientHolder> holder = it->second;
+    holder->ClearWillRecycle();
+  }
+}
+
+void
+TextureClientRecycleAllocator::Destroy()
+{
+  MutexAutoLock lock(mLock);
+  while (!mPooledClients.empty()) {
+    mPooledClients.pop();
+  }
+  mIsDestroyed = true;
 }
 
 void
@@ -236,7 +269,8 @@ TextureClientRecycleAllocator::RecycleTextureClient(TextureClient* aClient)
     MutexAutoLock lock(mLock);
     if (mInUseClients.find(aClient) != mInUseClients.end()) {
       textureHolder = mInUseClients[aClient]; // Keep reference count of TextureClientHolder within lock.
-      if (mPooledClients.size() < mMaxPooledSize) {
+      if (textureHolder->WillRecycle() &&
+          !mIsDestroyed && mPooledClients.size() < mMaxPooledSize) {
         mPooledClients.push(textureHolder);
       }
       mInUseClients.erase(aClient);

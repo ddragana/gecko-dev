@@ -40,9 +40,7 @@ extern JS_FRIEND_DATA(const js::Class* const) FunctionClassPtr;
 
 namespace JS {
 
-template <typename T>
-class AutoVectorRooter;
-typedef AutoVectorRooter<jsid> AutoIdVector;
+class AutoIdVector;
 
 /**
  * The answer to a successful query as to whether an object is an Array per
@@ -381,8 +379,8 @@ typedef bool
 /**
  * Function type for trace operation of the class called to enumerate all
  * traceable things reachable from obj's private data structure. For each such
- * thing, a trace implementation must call one of the JS_Call*Tracer variants
- * on the thing.
+ * thing, a trace implementation must call JS::TraceEdge on the thing's
+ * location.
  *
  * JSTraceOp implementation can assume that no other threads mutates object
  * state. It must not change state of the object or corresponding native
@@ -767,6 +765,7 @@ struct JSClass {
 #define JSCLASS_USERBIT3                (1<<(JSCLASS_HIGH_FLAGS_SHIFT+7))
 
 #define JSCLASS_BACKGROUND_FINALIZE     (1<<(JSCLASS_HIGH_FLAGS_SHIFT+8))
+#define JSCLASS_FOREGROUND_FINALIZE     (1<<(JSCLASS_HIGH_FLAGS_SHIFT+9))
 
 // Bits 26 through 31 are reserved for the CACHED_PROTO_KEY mechanism, see
 // below.
@@ -786,7 +785,7 @@ struct JSClass {
 // application.
 #define JSCLASS_GLOBAL_APPLICATION_SLOTS 5
 #define JSCLASS_GLOBAL_SLOT_COUNT                                             \
-    (JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 3 + 36)
+    (JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 2 + 37)
 #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n)                                    \
     (JSCLASS_IS_GLOBAL | JSCLASS_HAS_RESERVED_SLOTS(JSCLASS_GLOBAL_SLOT_COUNT + (n)))
 #define JSCLASS_GLOBAL_FLAGS                                                  \

@@ -8,8 +8,6 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
-
 const ToolDefinitions = require("devtools/client/definitions").Tools;
 const CssLogic = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
@@ -20,28 +18,17 @@ const {OutputParser} = require("devtools/client/shared/output-parser");
 const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
 const {createChild} = require("devtools/client/inspector/shared/utils");
 const {gDevTools} = require("devtools/client/framework/devtools");
-const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-loader.lazyRequireGetter(this, "overlays",
-  "devtools/client/inspector/shared/style-inspector-overlays");
-loader.lazyRequireGetter(this, "StyleInspectorMenu",
-  "devtools/client/inspector/shared/style-inspector-menu");
-loader.lazyRequireGetter(this, "KeyShortcuts",
-  "devtools/client/shared/key-shortcuts", true);
+const overlays = require("devtools/client/inspector/shared/style-inspector-overlays");
+const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
+const {BoxModelView} = require("devtools/client/inspector/components/box-model");
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
-                                  "resource://gre/modules/PluralForm.jsm");
-
-XPCOMUtils.defineLazyGetter(CssComputedView, "_strings", function () {
-  return Services.strings.createBundle(
-    "chrome://devtools-shared/locale/styleinspector.properties");
-});
-
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-         .getService(Ci.nsIClipboardHelper);
-});
+const STYLE_INSPECTOR_PROPERTIES = "devtools-shared/locale/styleinspector.properties";
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const STYLE_INSPECTOR_L10N = new LocalizationHelper(STYLE_INSPECTOR_PROPERTIES);
 
 const FILTER_CHANGED_TIMEOUT = 150;
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -151,11 +138,7 @@ function CssComputedView(inspector, document, pageStyle) {
   this.propertyViews = [];
 
   let cssProperties = getCssProperties(inspector.toolbox);
-  this._outputParser = new OutputParser(document, cssProperties.supportsType);
-
-  let chromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"]
-    .getService(Ci.nsIXULChromeRegistry);
-  this.getRTLAttr = chromeReg.isLocaleRTL("global") ? "rtl" : "ltr";
+  this._outputParser = new OutputParser(document, cssProperties);
 
   // Create bound methods.
   this.focusWindow = this.focusWindow.bind(this);
@@ -165,11 +148,8 @@ function CssComputedView(inspector, document, pageStyle) {
   this._onFilterStyles = this._onFilterStyles.bind(this);
   this._onClearSearch = this._onClearSearch.bind(this);
   this._onIncludeBrowserStyles = this._onIncludeBrowserStyles.bind(this);
-  this._onFilterTextboxContextMenu =
-    this._onFilterTextboxContextMenu.bind(this);
 
   let doc = this.styleDocument;
-  this.root = doc.getElementById("root");
   this.element = doc.getElementById("propertyContainer");
   this.searchField = doc.getElementById("computedview-searchbox");
   this.searchClearButton = doc.getElementById("computedview-searchinput-clear");
@@ -185,10 +165,9 @@ function CssComputedView(inspector, document, pageStyle) {
   this.element.addEventListener("copy", this._onCopy);
   this.element.addEventListener("contextmenu", this._onContextMenu);
   this.searchField.addEventListener("input", this._onFilterStyles);
-  this.searchField.addEventListener("contextmenu",
-                                    this._onFilterTextboxContextMenu);
+  this.searchField.addEventListener("contextmenu", this.inspector.onTextBoxContextMenu);
   this.searchClearButton.addEventListener("click", this._onClearSearch);
-  this.includeBrowserStylesCheckbox.addEventListener("command",
+  this.includeBrowserStylesCheckbox.addEventListener("input",
     this._onIncludeBrowserStyles);
 
   this.searchClearButton.hidden = true;
@@ -221,7 +200,7 @@ function CssComputedView(inspector, document, pageStyle) {
 }
 
 /**
- * Memoized lookup of a l10n string from a string bundle.
+ * Lookup a l10n string in the shared styleinspector string bundle.
  *
  * @param {String} name
  *        The key to lookup.
@@ -229,7 +208,7 @@ function CssComputedView(inspector, document, pageStyle) {
  */
 CssComputedView.l10n = function (name) {
   try {
-    return CssComputedView._strings.GetStringFromName(name);
+    return STYLE_INSPECTOR_L10N.getStr(name);
   } catch (ex) {
     console.log("Error reading '" + name + "'");
     throw new Error("l10n error with " + name);
@@ -482,6 +461,9 @@ CssComputedView.prototype = {
           onItem: (propView) => {
             propView.refresh();
           },
+          onCancel: () => {
+            deferred.reject("_refreshProcess of computed view cancelled");
+          },
           onDone: () => {
             this._refreshProcess = null;
             this.noResults.hidden = this.numVisibleProperties > 0;
@@ -550,26 +532,15 @@ CssComputedView.prototype = {
     this._filterChangedTimeout = setTimeout(() => {
       if (this.searchField.value.length > 0) {
         this.searchField.setAttribute("filled", true);
+        this.inspector.emit("computed-view-filtered", true);
       } else {
         this.searchField.removeAttribute("filled");
+        this.inspector.emit("computed-view-filtered", false);
       }
 
       this.refreshPanel();
       this._filterChangeTimeout = null;
     }, filterTimeout);
-  },
-
-  /**
-   * Context menu handler for filter style search box.
-   */
-  _onFilterTextboxContextMenu: function (event) {
-    try {
-      this.styleDocument.defaultView.focus();
-      let contextmenu = this.inspector.toolbox.textboxContextMenuPopup;
-      contextmenu.openPopupAtScreen(event.screenX, event.screenY, true);
-    } catch (e) {
-      console.error(e);
-    }
   },
 
   /**
@@ -667,8 +638,7 @@ CssComputedView.prototype = {
    * Focus the window on mousedown.
    */
   focusWindow: function () {
-    let win = this.styleDocument.defaultView;
-    win.focus();
+    this.styleWindow.focus();
   },
 
   /**
@@ -705,7 +675,7 @@ CssComputedView.prototype = {
    */
   copySelection: function () {
     try {
-      let win = this.styleDocument.defaultView;
+      let win = this.styleWindow;
       let text = win.getSelection().toString().trim();
 
       // Tidy up block headings by moving CSS property names and their
@@ -771,13 +741,12 @@ CssComputedView.prototype = {
     this.element.removeEventListener("contextmenu", this._onContextMenu);
     this.searchField.removeEventListener("input", this._onFilterStyles);
     this.searchField.removeEventListener("contextmenu",
-                                         this._onFilterTextboxContextMenu);
+      this.inspector.onTextBoxContextMenu);
     this.searchClearButton.removeEventListener("click", this._onClearSearch);
-    this.includeBrowserStylesCheckbox.removeEventListener("command",
-      this.includeBrowserStylesChanged);
+    this.includeBrowserStylesCheckbox.removeEventListener("input",
+      this._onIncludeBrowserStyles);
 
     // Nodes used in templating
-    this.root = null;
     this.element = null;
     this.panel = null;
     this.searchField = null;
@@ -825,7 +794,6 @@ PropertyInfo.prototype = {
 function PropertyView(tree, name) {
   this.tree = tree;
   this.name = name;
-  this.getRTLAttr = tree.getRTLAttr;
 
   this.link = "https://developer.mozilla.org/CSS/" + name;
 
@@ -976,6 +944,9 @@ PropertyView.prototype = {
     // Reset its tabindex attribute otherwise, if an ellipsis is applied
     // it will be reachable via TABing
     this.nameNode.setAttribute("tabindex", "");
+    // Avoid english text (css properties) from being altered
+    // by RTL mode
+    this.nameNode.setAttribute("dir", "ltr");
     this.nameNode.textContent = this.nameNode.title = this.name;
     // Make it hand over the focus to the container
     this.onFocus = () => this.element.focus();
@@ -1407,8 +1378,9 @@ function ComputedViewTool(inspector, window) {
   this.inspector = inspector;
   this.document = window.document;
 
-  this.view = new CssComputedView(this.inspector, this.document,
+  this.computedView = new CssComputedView(this.inspector, this.document,
     this.inspector.pageStyle);
+  this.boxModelView = new BoxModelView(this.inspector, this.document);
 
   this.onSelected = this.onSelected.bind(this);
   this.refresh = this.refresh.bind(this);
@@ -1416,7 +1388,7 @@ function ComputedViewTool(inspector, window) {
   this.onMutations = this.onMutations.bind(this);
   this.onResized = this.onResized.bind(this);
 
-  this.inspector.selection.on("detached", this.onSelected);
+  this.inspector.selection.on("detached-front", this.onSelected);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
   this.inspector.sidebar.on("computedview-selected", this.onPanelSelected);
@@ -1424,14 +1396,14 @@ function ComputedViewTool(inspector, window) {
   this.inspector.walker.on("mutations", this.onMutations);
   this.inspector.walker.on("resize", this.onResized);
 
-  this.view.selectElement(null);
+  this.computedView.selectElement(null);
 
   this.onSelected();
 }
 
 ComputedViewTool.prototype = {
   isSidebarActive: function () {
-    if (!this.view) {
+    if (!this.computedView) {
       return false;
     }
     return this.inspector.sidebar.getCurrentTabID() == "computedview";
@@ -1442,7 +1414,7 @@ ComputedViewTool.prototype = {
     // But only if the current selection isn't null. If it's been set to null,
     // let the update go through as this is needed to empty the view on
     // navigation.
-    if (!this.view) {
+    if (!this.computedView) {
       return;
     }
 
@@ -1452,17 +1424,17 @@ ComputedViewTool.prototype = {
       return;
     }
 
-    this.view.setPageStyle(this.inspector.pageStyle);
+    this.computedView.setPageStyle(this.inspector.pageStyle);
 
     if (!this.inspector.selection.isConnected() ||
         !this.inspector.selection.isElementNode()) {
-      this.view.selectElement(null);
+      this.computedView.selectElement(null);
       return;
     }
 
     if (!event || event == "new-node-front") {
       let done = this.inspector.updating("computed-view");
-      this.view.selectElement(this.inspector.selection.nodeFront).then(() => {
+      this.computedView.selectElement(this.inspector.selection.nodeFront).then(() => {
         done();
       });
     }
@@ -1470,12 +1442,12 @@ ComputedViewTool.prototype = {
 
   refresh: function () {
     if (this.isSidebarActive()) {
-      this.view.refreshPanel();
+      this.computedView.refreshPanel();
     }
   },
 
   onPanelSelected: function () {
-    if (this.inspector.selection.nodeFront === this.view._viewedElement) {
+    if (this.inspector.selection.nodeFront === this.computedView._viewedElement) {
       this.refresh();
     } else {
       this.onSelected();
@@ -1510,15 +1482,16 @@ ComputedViewTool.prototype = {
     this.inspector.sidebar.off("computedview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);
-    this.inspector.selection.off("detached", this.onSelected);
+    this.inspector.selection.off("detached-front", this.onSelected);
     this.inspector.sidebar.off("computedview-selected", this.onPanelSelected);
     if (this.inspector.pageStyle) {
       this.inspector.pageStyle.off("stylesheet-updated", this.refresh);
     }
 
-    this.view.destroy();
+    this.computedView.destroy();
+    this.boxModelView.destroy();
 
-    this.view = this.document = this.inspector = null;
+    this.computedView = this.boxModelView = this.document = this.inspector = null;
   }
 };
 

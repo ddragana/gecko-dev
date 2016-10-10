@@ -30,8 +30,9 @@ TextTrackList::TextTrackList(nsPIDOMWindowInner* aOwnerWindow)
 
 TextTrackList::TextTrackList(nsPIDOMWindowInner* aOwnerWindow,
                              TextTrackManager* aTextTrackManager)
- : DOMEventTargetHelper(aOwnerWindow)
- , mTextTrackManager(aTextTrackManager)
+  : DOMEventTargetHelper(aOwnerWindow)
+  , mPendingTextTrackChange(false)
+  , mTextTrackManager(aTextTrackManager)
 {
 }
 
@@ -40,19 +41,11 @@ TextTrackList::~TextTrackList()
 }
 
 void
-TextTrackList::UpdateAndGetShowingCues(nsTArray<RefPtr<TextTrackCue> >& aCues)
+TextTrackList::GetShowingCues(nsTArray<RefPtr<TextTrackCue> >& aCues)
 {
   nsTArray< RefPtr<TextTrackCue> > cues;
   for (uint32_t i = 0; i < Length(); i++) {
-    TextTrackMode mode = mTextTracks[i]->Mode();
-    // If the mode is hidden then we just need to update the active cue list,
-    // we don't need to show it on the video.
-    if (mode == TextTrackMode::Hidden) {
-      mTextTracks[i]->UpdateActiveCueList();
-    } else if (mode == TextTrackMode::Showing) {
-      // If the mode is showing then we need to update the cue list and show it
-      // on the video. GetActiveCueArray() calls UpdateActiveCueList() so we
-      // don't need to call it explicitly.
+    if (mTextTracks[i]->Mode() == TextTrackMode::Showing) {
       mTextTracks[i]->GetActiveCueArray(cues);
       aCues.AppendElements(cues);
     }
@@ -139,7 +132,7 @@ TextTrackList::DidSeek()
   }
 }
 
-class TrackEventRunner final: public Runnable
+class TrackEventRunner : public Runnable
 {
 public:
   TrackEventRunner(TextTrackList* aList, nsIDOMEvent* aEvent)
@@ -152,9 +145,23 @@ public:
     return mList->DispatchTrackEvent(mEvent);
   }
 
-private:
   RefPtr<TextTrackList> mList;
+private:
   RefPtr<nsIDOMEvent> mEvent;
+};
+
+class ChangeEventRunner final : public TrackEventRunner
+{
+public:
+  ChangeEventRunner(TextTrackList* aList, nsIDOMEvent* aEvent)
+    : TrackEventRunner(aList, aEvent)
+  {}
+
+  NS_IMETHOD Run() override
+  {
+    mList->mPendingTextTrackChange = false;
+    return TrackEventRunner::Run();
+  }
 };
 
 nsresult
@@ -166,13 +173,17 @@ TextTrackList::DispatchTrackEvent(nsIDOMEvent* aEvent)
 void
 TextTrackList::CreateAndDispatchChangeEvent()
 {
-  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!mPendingTextTrackChange) {
+    mPendingTextTrackChange = true;
+    RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
 
-  event->InitEvent(NS_LITERAL_STRING("change"), false, false);
-  event->SetTrusted(true);
+    event->InitEvent(NS_LITERAL_STRING("change"), false, false);
+    event->SetTrusted(true);
 
-  nsCOMPtr<nsIRunnable> eventRunner = new TrackEventRunner(this, event);
-  NS_DispatchToMainThread(eventRunner);
+    nsCOMPtr<nsIRunnable> eventRunner = new ChangeEventRunner(this, event);
+    NS_DispatchToMainThread(eventRunner);
+  }
 }
 
 void
@@ -196,7 +207,7 @@ TextTrackList::CreateAndDispatchTrackEventRunner(TextTrack* aTrack,
                         NS_DISPATCH_NORMAL);
 
   // If we are shutting down this can file but it's still ok.
-  NS_WARN_IF(NS_FAILED(rv));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Dispatch failed");
 }
 
 HTMLMediaElement*

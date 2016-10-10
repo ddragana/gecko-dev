@@ -8,7 +8,7 @@ import unittest
 
 from ..generator import TaskGraphGenerator, Kind
 from .. import graph
-from ..kind import base
+from ..task import base
 from mozunit import main
 
 
@@ -34,7 +34,7 @@ class FakeTask(base.Task):
         else:
             return []
 
-    def optimize(self):
+    def optimize(self, params):
         return False, None
 
 

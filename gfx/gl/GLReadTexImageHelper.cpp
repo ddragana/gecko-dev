@@ -393,22 +393,18 @@ ReadPixelsIntoDataSurface(GLContext* gl, DataSourceSurface* dest)
     MOZ_ASSERT(readAlignment);
     MOZ_ASSERT(reinterpret_cast<uintptr_t>(readSurf->GetData()) % readAlignment == 0);
 
-    GLint currentPackAlignment = 0;
-    gl->fGetIntegerv(LOCAL_GL_PACK_ALIGNMENT, &currentPackAlignment);
-
-    if (currentPackAlignment != readAlignment)
-        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, readAlignment);
-
     GLsizei width = dest->GetSize().width;
     GLsizei height = dest->GetSize().height;
 
-    gl->fReadPixels(0, 0,
-                    width, height,
-                    readFormat, readType,
-                    readSurf->GetData());
+    {
+        ScopedPackState safePackState(gl);
+        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, readAlignment);
 
-    if (currentPackAlignment != readAlignment)
-        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, currentPackAlignment);
+        gl->fReadPixels(0, 0,
+                        width, height,
+                        readFormat, readType,
+                        readSurf->GetData());
+    }
 
     if (readSurf != dest) {
         MOZ_ASSERT(readFormat == LOCAL_GL_RGBA);
@@ -421,6 +417,7 @@ ReadPixelsIntoDataSurface(GLContext* gl, DataSourceSurface* dest)
 #ifdef XP_MACOSX
     if (gl->WorkAroundDriverBugs() &&
         gl->Vendor() == gl::GLVendor::NVIDIA &&
+        !gl->IsCoreProfile() &&
         hasAlpha &&
         width && height)
     {
@@ -496,7 +493,7 @@ ReadBackSurface(GLContext* gl, GLuint aTexture, bool aYInvert, SurfaceFormat aFo
 
     RefPtr<DataSourceSurface> surf =
       Factory::CreateDataSourceSurfaceWithStride(size, SurfaceFormat::B8G8R8A8,
-                                                 GetAlignedStride<4>(size.width * BytesPerPixel(SurfaceFormat::B8G8R8A8)));
+                                                 GetAlignedStride<4>(size.width, BytesPerPixel(SurfaceFormat::B8G8R8A8)));
 
     if (NS_WARN_IF(!surf)) {
         return nullptr;

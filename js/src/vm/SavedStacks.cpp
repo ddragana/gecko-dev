@@ -52,7 +52,7 @@ namespace js {
 /**
  * Maximum number of saved frames returned for an async stack.
  */
-const unsigned ASYNC_STACK_MAX_FRAME_COUNT = 60;
+const uint32_t ASYNC_STACK_MAX_FRAME_COUNT = 60;
 
 /* static */ Maybe<LiveSavedFrameCache::FramePtr>
 LiveSavedFrameCache::getFramePtr(FrameIter& iter)
@@ -227,6 +227,18 @@ class MOZ_STACK_CLASS SavedFrame::AutoLookupVector : public JS::CustomAutoRooter
     }
 };
 
+/* static */ bool
+SavedFrame::HashPolicy::hasHash(const Lookup& l)
+{
+    return SavedFramePtrHasher::hasHash(l.parent);
+}
+
+/* static */ bool
+SavedFrame::HashPolicy::ensureHash(const Lookup& l)
+{
+    return SavedFramePtrHasher::ensureHash(l.parent);
+}
+
 /* static */ HashNumber
 SavedFrame::HashPolicy::hash(const Lookup& lookup)
 {
@@ -322,7 +334,8 @@ const ClassSpec SavedFrame::classSpec_ = {
     JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(SavedFrame::JSSLOT_COUNT) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_SavedFrame) |
-    JSCLASS_IS_ANONYMOUS,
+    JSCLASS_IS_ANONYMOUS |
+    JSCLASS_FOREGROUND_FINALIZE,
     &SavedFrameClassOps,
     &SavedFrame::classSpec_
 };
@@ -354,6 +367,7 @@ SavedFrame::protoAccessors[] = {
 /* static */ void
 SavedFrame::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     JSPrincipals* p = obj->as<SavedFrame>().getPrincipals();
     if (p) {
         JSRuntime* rt = obj->runtimeFromMainThread();
@@ -520,8 +534,8 @@ SavedFrame::isSelfHosted(JSContext* cx)
 /* static */ bool
 SavedFrame::construct(JSContext* cx, unsigned argc, Value* vp)
 {
-    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
-                         "SavedFrame");
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NO_CONSTRUCTOR,
+                              "SavedFrame");
     return false;
 }
 
@@ -587,31 +601,32 @@ GetFirstSubsumedSavedFrame(JSContext* cx, HandleObject savedFrame,
     return GetFirstSubsumedFrame(cx, frame, selfHosted, skippedAsync);
 }
 
-/* static */ bool
-SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName,
-                      MutableHandleObject frame)
+static MOZ_MUST_USE bool
+SavedFrame_checkThis(JSContext* cx, CallArgs& args, const char* fnName,
+                     MutableHandleObject frame)
 {
     const Value& thisValue = args.thisv();
 
     if (!thisValue.isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, InformalValueTypeName(thisValue));
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT,
+                                  InformalValueTypeName(thisValue));
         return false;
     }
 
     JSObject* thisObject = CheckedUnwrap(&thisValue.toObject());
     if (!thisObject || !thisObject->is<SavedFrame>()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SavedFrame::class_.name, fnName,
-                             thisObject ? thisObject->getClass()->name : "object");
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  SavedFrame::class_.name, fnName,
+                                  thisObject ? thisObject->getClass()->name : "object");
         return false;
     }
 
     // Check for SavedFrame.prototype, which has the same class as SavedFrame
     // instances, however doesn't actually represent a captured stack frame. It
     // is the only object that is<SavedFrame>() but doesn't have a source.
-    if (thisObject->as<SavedFrame>().getReservedSlot(JSSLOT_SOURCE).isNull()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
-                             SavedFrame::class_.name, fnName, "prototype object");
+    if (!SavedFrame::isSavedFrameAndNotProto(*thisObject)) {
+        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INCOMPATIBLE_PROTO,
+                                  SavedFrame::class_.name, fnName, "prototype object");
         return false;
     }
 
@@ -636,7 +651,7 @@ SavedFrame::checkThis(JSContext* cx, CallArgs& args, const char* fnName,
 #define THIS_SAVEDFRAME(cx, argc, vp, fnName, args, frame)             \
     CallArgs args = CallArgsFromVp(argc, vp);                          \
     RootedObject frame(cx);                                            \
-    if (!checkThis(cx, args, fnName, &frame))                          \
+    if (!SavedFrame_checkThis(cx, args, fnName, &frame))               \
         return false;
 
 } /* namespace js */
@@ -877,14 +892,62 @@ GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject 
     return SavedFrameResult::Ok;
 }
 
+static bool
+FormatSpiderMonkeyStackFrame(JSContext* cx, js::StringBuffer& sb,
+                             js::HandleSavedFrame frame, size_t indent,
+                             bool skippedAsync)
+{
+    RootedString asyncCause(cx, frame->getAsyncCause());
+    if (!asyncCause && skippedAsync)
+        asyncCause.set(cx->names().Async);
+
+    js::RootedAtom name(cx, frame->getFunctionDisplayName());
+    return (!indent || sb.appendN(' ', indent))
+        && (!asyncCause || (sb.append(asyncCause) && sb.append('*')))
+        && (!name || sb.append(name))
+        && sb.append('@')
+        && sb.append(frame->getSource())
+        && sb.append(':')
+        && NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
+        && sb.append(':')
+        && NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
+        && sb.append('\n');
+}
+
+static bool
+FormatV8StackFrame(JSContext* cx, js::StringBuffer& sb,
+                   js::HandleSavedFrame frame, size_t indent, bool lastFrame)
+{
+    js::RootedAtom name(cx, frame->getFunctionDisplayName());
+    return sb.appendN(' ', indent + 4)
+        && sb.append('a')
+        && sb.append('t')
+        && sb.append(' ')
+        && (!name || (sb.append(name) &&
+                      sb.append(' ') &&
+                      sb.append('(')))
+        && sb.append(frame->getSource())
+        && sb.append(':')
+        && NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
+        && sb.append(':')
+        && NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
+        && (!name || sb.append(')'))
+        && (lastFrame || sb.append('\n'));
+}
+
 JS_PUBLIC_API(bool)
-BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp, size_t indent)
+BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
+                 size_t indent, js::StackFormat format)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     MOZ_RELEASE_ASSERT(cx->compartment());
 
     js::StringBuffer sb(cx);
+
+    if (format == js::StackFormat::Default)
+        format = cx->stackFormat();
+    MOZ_ASSERT(format != js::StackFormat::Default);
 
     // Enter a new block to constrain the scope of possibly entering the stack's
     // compartment. This ensures that when we finish the StringBuffer, we are
@@ -905,27 +968,27 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
             MOZ_ASSERT(SavedFrameSubsumedByCaller(cx, frame));
             MOZ_ASSERT(!frame->isSelfHosted(cx));
 
-            RootedString asyncCause(cx, frame->getAsyncCause());
-            if (!asyncCause && skippedAsync)
-                asyncCause.set(cx->names().Async);
+            parent = frame->getParent();
+            bool skippedNextAsync;
+            js::RootedSavedFrame nextFrame(cx, js::GetFirstSubsumedFrame(cx, parent,
+                                                                         SavedFrameSelfHosted::Exclude, skippedNextAsync));
 
-            js::RootedAtom name(cx, frame->getFunctionDisplayName());
-            if ((indent && !sb.appendN(' ', indent))
-                || (asyncCause && (!sb.append(asyncCause) || !sb.append('*')))
-                || (name && !sb.append(name))
-                || !sb.append('@')
-                || !sb.append(frame->getSource())
-                || !sb.append(':')
-                || !NumberValueToStringBuffer(cx, NumberValue(frame->getLine()), sb)
-                || !sb.append(':')
-                || !NumberValueToStringBuffer(cx, NumberValue(frame->getColumn()), sb)
-                || !sb.append('\n'))
-            {
-                return false;
+            switch (format) {
+                case js::StackFormat::SpiderMonkey:
+                    if (!FormatSpiderMonkeyStackFrame(cx, sb, frame, indent, skippedAsync))
+                        return false;
+                    break;
+                case js::StackFormat::V8:
+                    if (!FormatV8StackFrame(cx, sb, frame, indent, !nextFrame))
+                        return false;
+                    break;
+                case js::StackFormat::Default:
+                    MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("Unexpected value");
+                    break;
             }
 
-            parent = frame->getParent();
-            frame = js::GetFirstSubsumedFrame(cx, parent, SavedFrameSelfHosted::Exclude, skippedAsync);
+            frame = nextFrame;
+            skippedAsync = skippedNextAsync;
         } while (frame);
     }
 
@@ -1068,7 +1131,8 @@ SavedStacks::init()
 }
 
 bool
-SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsigned maxFrameCount)
+SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame,
+                              JS::StackCapture&& capture /* = JS::StackCapture(JS::AllFrames()) */)
 {
     MOZ_ASSERT(initialized());
     MOZ_RELEASE_ASSERT(cx->compartment());
@@ -1085,12 +1149,12 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsi
 
     AutoSPSEntry psuedoFrame(cx->runtime(), "js::SavedStacks::saveCurrentStack");
     FrameIter iter(cx);
-    return insertFrames(cx, iter, frame, maxFrameCount);
+    return insertFrames(cx, iter, frame, mozilla::Move(capture));
 }
 
 bool
 SavedStacks::copyAsyncStack(JSContext* cx, HandleObject asyncStack, HandleString asyncCause,
-                            MutableHandleSavedFrame adoptedStack, unsigned maxFrameCount)
+                            MutableHandleSavedFrame adoptedStack, uint32_t maxFrameCount)
 {
     MOZ_ASSERT(initialized());
     MOZ_RELEASE_ASSERT(cx->compartment());
@@ -1137,9 +1201,49 @@ SavedStacks::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
            pcLocationMap.sizeOfExcludingThis(mallocSizeOf);
 }
 
+// Given that we have captured a stqck frame with the given principals and
+// source, return true if the requested `StackCapture` has been satisfied and
+// stack walking can halt. Return false otherwise (and stack walking and frame
+// capturing should continue).
+static inline bool
+captureIsSatisfied(JSContext* cx, JSPrincipals* principals, const JSAtom* source,
+                   JS::StackCapture& capture)
+{
+    class Matcher
+    {
+        JSContext* cx_;
+        JSPrincipals* framePrincipals_;
+        const JSAtom* frameSource_;
+
+      public:
+        Matcher(JSContext* cx, JSPrincipals* principals, const JSAtom* source)
+          : cx_(cx)
+          , framePrincipals_(principals)
+          , frameSource_(source)
+        { }
+
+        bool match(JS::FirstSubsumedFrame& target) {
+            auto subsumes = cx_->runtime()->securityCallbacks->subsumes;
+            return (!subsumes || subsumes(target.principals, framePrincipals_)) &&
+                   (!target.ignoreSelfHosted || frameSource_ != cx_->names().selfHosted);
+        }
+
+        bool match(JS::MaxFrames& target) {
+            return target.maxFrames == 1;
+        }
+
+        bool match(JS::AllFrames&) {
+            return false;
+        }
+    };
+
+    Matcher m(cx, principals, source);
+    return capture.match(m);
+}
+
 bool
 SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFrame frame,
-                          unsigned maxFrameCount)
+                          JS::StackCapture&& capture)
 {
     // In order to lookup a cached SavedFrame object, we need to have its parent
     // SavedFrame, which means we need to walk the stack from oldest frame to
@@ -1216,9 +1320,10 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
 
         // The bit set means that the next older parent (frame, pc) pair *must*
         // be in the cache.
-        if (maxFrameCount == 0)
+        if (capture.is<JS::AllFrames>())
             parentIsInCache = iter.hasCachedSavedFrame();
 
+        auto principals = iter.compartment()->principals();
         auto displayAtom = iter.isFunctionFrame() ? iter.functionDisplayAtom() : nullptr;
         if (!stackChain->emplaceBack(location.source(),
                                      location.line(),
@@ -1226,7 +1331,7 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
                                      displayAtom,
                                      nullptr,
                                      nullptr,
-                                     iter.compartment()->principals(),
+                                     principals,
                                      LiveSavedFrameCache::getFramePtr(iter),
                                      iter.pc(),
                                      &activation))
@@ -1235,14 +1340,14 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
             return false;
         }
 
-        ++iter;
-
-        if (maxFrameCount == 1) {
+        if (captureIsSatisfied(cx, principals, location.source(), capture)) {
             // The frame we just saved was the last one we were asked to save.
             // If we had an async stack, ensure we don't use any of its frames.
             asyncStack.set(nullptr);
             break;
         }
+
+        ++iter;
 
         if (parentIsInCache &&
             !iter.done() &&
@@ -1256,19 +1361,21 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
                 break;
         }
 
-        // If maxFrameCount is zero there's no limit on the number of frames.
-        if (maxFrameCount == 0)
-            continue;
-
-        maxFrameCount--;
+        if (capture.is<JS::MaxFrames>())
+            capture.as<JS::MaxFrames>().maxFrames--;
     }
 
     // Limit the depth of the async stack, if any, and ensure that the
     // SavedFrame instances we use are stored in the same compartment as the
     // rest of the synchronous stack chain.
     RootedSavedFrame parentFrame(cx, cachedFrame);
-    if (asyncStack && !adoptAsyncStack(cx, asyncStack, asyncCause, &parentFrame, maxFrameCount))
-        return false;
+    if (asyncStack && !capture.is<JS::FirstSubsumedFrame>()) {
+        uint32_t maxAsyncFrames = capture.is<JS::MaxFrames>()
+            ? capture.as<JS::MaxFrames>().maxFrames
+            : ASYNC_STACK_MAX_FRAME_COUNT;
+        if (!adoptAsyncStack(cx, asyncStack, asyncCause, &parentFrame, maxAsyncFrames))
+            return false;
+    }
 
     // Iterate through |stackChain| in reverse order and get or create the
     // actual SavedFrame instances.
@@ -1279,7 +1386,7 @@ SavedStacks::insertFrames(JSContext* cx, FrameIter& iter, MutableHandleSavedFram
         if (!parentFrame)
             return false;
 
-        if (maxFrameCount == 0 && lookup->framePtr && parentFrame != cachedFrame) {
+        if (capture.is<JS::AllFrames>() && lookup->framePtr && parentFrame != cachedFrame) {
             auto* cache = lookup->activation->getLiveSavedFrameCache(cx);
             if (!cache || !cache->insert(cx, *lookup->framePtr, lookup->pc, parentFrame))
                 return false;
@@ -1294,7 +1401,7 @@ bool
 SavedStacks::adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
                              HandleString asyncCause,
                              MutableHandleSavedFrame adoptedStack,
-                             unsigned maxFrameCount)
+                             uint32_t maxFrameCount)
 {
     RootedAtom asyncCauseAtom(cx, AtomizeString(cx, asyncCause));
     if (!asyncCauseAtom)
@@ -1304,13 +1411,13 @@ SavedStacks::adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
     // stack frames, but async stacks are not limited by the available stack
     // memory, so we need to set an arbitrary limit when collecting them. We
     // still don't enforce an upper limit if the caller requested more frames.
-    unsigned maxFrames = maxFrameCount > 0 ? maxFrameCount : ASYNC_STACK_MAX_FRAME_COUNT;
+    uint32_t maxFrames = maxFrameCount > 0 ? maxFrameCount : ASYNC_STACK_MAX_FRAME_COUNT;
 
     // Accumulate the vector of Lookup objects in |stackChain|.
     SavedFrame::AutoLookupVector stackChain(cx);
     SavedFrame* currentSavedFrame = asyncStack;
     SavedFrame* firstSavedFrameParent = nullptr;
-    for (unsigned i = 0; i < maxFrames && currentSavedFrame; i++) {
+    for (uint32_t i = 0; i < maxFrames && currentSavedFrame; i++) {
         if (!stackChain->emplaceBack(*currentSavedFrame)) {
             ReportOutOfMemory(cx);
             return false;
@@ -1535,6 +1642,17 @@ CompartmentChecker::check(SavedStacks* stacks)
 /* static */ ReconstructedSavedFramePrincipals ReconstructedSavedFramePrincipals::IsSystem;
 /* static */ ReconstructedSavedFramePrincipals ReconstructedSavedFramePrincipals::IsNotSystem;
 
+UTF8CharsZ
+BuildUTF8StackString(JSContext* cx, HandleObject stack)
+{
+    RootedString stackStr(cx);
+    if (!JS::BuildStackString(cx, stack, &stackStr))
+        return UTF8CharsZ();
+
+    char* chars = JS_EncodeStringToUTF8(cx, stackStr);
+    return UTF8CharsZ(chars, strlen(chars));
+}
+
 } /* namespace js */
 
 namespace JS {
@@ -1565,8 +1683,6 @@ ConcreteStackFrame<SavedFrame>::constructSavedFrameStack(JSContext* cx,
 // `JS::ubi::AtomOrTwoByteChars` string to a `JSAtom*`.
 struct MOZ_STACK_CLASS AtomizingMatcher
 {
-    using ReturnType = JSAtom*;
-
     JSContext* cx;
     size_t     length;
 

@@ -31,6 +31,9 @@ window.onload = Task.async(function* () {
     // Test that properties are rendered as expected by PropRep
     yield testNestedObject();
     yield testNestedArray();
+
+    // Test that 'more' property doesn't clobber the caption.
+    yield testMoreProp();
   } catch(e) {
     ok(false, "Got an error: " + DevToolsUtils.safeErrorString(e));
   } finally {
@@ -75,7 +78,7 @@ window.onload = Task.async(function* () {
     // Test object: `{a: "a", b: "b", c: "c"}`;
     const testName = "testMaxProps";
 
-    const defaultOutput = `Object {a: "a", b: "b", c: "c"}`;
+    const defaultOutput = `Object { a: "a", b: "b", c: "c" }`;
 
     const modeTests = [
       {
@@ -100,10 +103,10 @@ window.onload = Task.async(function* () {
   }
 
   function testMoreThanMaxProps() {
-    // Test object = `{p0: "0", p1: "1", p2: "2", ..., p101: "101"}`
+    // Test object = `{p0: "0", p1: "1", p2: "2", …, p100: "100"}`
     const testName = "testMoreThanMaxProps";
 
-    const defaultOutput = `Object {p0: "0", p1: "1", p2: "2", more...}`;
+    const defaultOutput = `Object { p0: "0", p1: "1", p2: "2", 98 more… }`;
 
     // Generate string with 100 properties, which is the max limit
     // for 'long' mode.
@@ -112,7 +115,7 @@ window.onload = Task.async(function* () {
       props += "p" + i + ": \"" + i + "\", ";
     }
 
-    const longOutput = `Object {${props}more...}`;
+    const longOutput = `Object { ${props}1 more… }`;
 
     const modeTests = [
       {
@@ -140,14 +143,14 @@ window.onload = Task.async(function* () {
     // Test object: `{a: undefined, b: undefined, c: "c", d: 1}`
     // @TODO This is not how we actually want the preview to be output.
     // See https://bugzilla.mozilla.org/show_bug.cgi?id=1276376
-    const expectedOutput = `Object {a: undefined, b: undefined, c: "c", more...}`;
+    const expectedOutput = `Object { a: undefined, b: undefined, c: "c", 1 more… }`;
   }
 
   function testNestedObject() {
     // Test object: `{objProp: {id: 1}, strProp: "test string"}`
     const testName = "testNestedObject";
 
-    const defaultOutput = `Object {objProp: Object, strProp: "test string"}`;
+    const defaultOutput = `Object { objProp: Object, strProp: "test string" }`;
 
     const modeTests = [
       {
@@ -175,7 +178,7 @@ window.onload = Task.async(function* () {
     // Test object: `{arrProp: ["foo", "bar", "baz"]}`
     const testName = "testNestedArray";
 
-    const defaultOutput = `Object {arrProp: [3]}`;
+    const defaultOutput = `Object { arrProp: [3] }`;
 
     const modeTests = [
       {
@@ -193,6 +196,35 @@ window.onload = Task.async(function* () {
       {
         mode: "long",
         expectedOutput: defaultOutput,
+      }
+    ];
+
+    testRepRenderModes(modeTests, testName, componentUnderTest, getGripStub(testName));
+  }
+
+  function testMoreProp() {
+    // Test object: `{a: undefined, b: 1, more: 2, d: 3}`;
+    const testName = "testMoreProp";
+
+    const defaultOutput = `Object { b: 1, more: 2, d: 3, 1 more… }`;
+    const longOutput = `Object { a: undefined, b: 1, more: 2, d: 3 }`;
+
+    const modeTests = [
+      {
+        mode: undefined,
+        expectedOutput: defaultOutput,
+      },
+      {
+        mode: "tiny",
+        expectedOutput: `Object`,
+      },
+      {
+        mode: "short",
+        expectedOutput: defaultOutput,
+      },
+      {
+        mode: "long",
+        expectedOutput: longOutput,
       }
     ];
 
@@ -403,6 +435,50 @@ window.onload = Task.async(function* () {
             "ownPropertiesLength": 1,
             "safeGetterValues": {}
           },
+        };
+
+      case "testMoreProp":
+        return {
+          "type": "object",
+          "class": "Object",
+          "actor": "server1.conn0.obj342",
+          "extensible": true,
+          "frozen": false,
+          "sealed": false,
+          "ownPropertyLength": 4,
+          "preview": {
+            "kind": "Object",
+            "ownProperties": {
+              "a": {
+                "configurable": true,
+                "enumerable": true,
+                "writable": true,
+                "value": {
+                  "type": "undefined"
+                }
+              },
+              "b": {
+                "configurable": true,
+                "enumerable": true,
+                "writable": true,
+                "value": 1
+              },
+              "more": {
+                "configurable": true,
+                "enumerable": true,
+                "writable": true,
+                "value": 2
+              },
+              "d": {
+                "configurable": true,
+                "enumerable": true,
+                "writable": true,
+                "value": 3
+              }
+            },
+            "ownPropertiesLength": 4,
+            "safeGetterValues": {}
+          }
         };
 
     }

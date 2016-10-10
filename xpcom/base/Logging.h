@@ -31,7 +31,7 @@
 // devices, we've chosen to leave logging enabled on desktop, but disabled on
 // Android.  Given that logging can still be useful for development purposes,
 // however, we leave logging enabled on Android developer builds.
-#if !defined(ANDROID) || !defined(RELEASE_BUILD)
+#if !defined(ANDROID) || !defined(RELEASE_OR_BETA)
 #define MOZ_LOGGING_ENABLED 1
 #else
 #define MOZ_LOGGING_ENABLED 0
@@ -84,6 +84,29 @@ public:
   static LogModule* Get(const char* aName);
 
   static void Init();
+
+  /**
+   * Sets the log file to the given filename.
+   */
+  static void SetLogFile(const char* aFilename);
+
+  /**
+   * @param aBuffer - pointer to a buffer
+   * @param aLength - the length of the buffer
+   *
+   * @return the actual length of the filepath.
+   */
+  static uint32_t GetLogFile(char *aBuffer, size_t aLength);
+
+  /**
+   * @param aAddTimestamp If we should log a time stamp with every message.
+   */
+  static void SetAddTimestamp(bool aAddTimestamp);
+
+  /**
+   * @param aIsSync If we should flush the file after every logged message.
+   */
+  static void SetIsSync(bool aIsSync);
 
   /**
    * Indicates whether or not the given log level is enabled.
@@ -224,17 +247,6 @@ void log_print(const LogModule* aModule,
 
 #undef PR_LOG
 #undef PR_LOG_TEST
-
-/*
- * __func__ was standardized in C++11 and is supported by clang, gcc, and MSVC
- * 2015. Here we polyfill __func__ for earlier versions of MSVC.
- * http://blogs.msdn.com/b/vcblog/archive/2015/06/19/c-11-14-17-features-in-vs-2015-rtm.aspx
- */
-#ifdef _MSC_VER
-#  if _MSC_VER < 1900
-#    define __func__ __FUNCTION__
-#  endif
-#endif
 
 // This #define is a Logging.h-only knob!  Don't encourage people to get fancy
 // with their log definitions by exporting it outside of Logging.h.

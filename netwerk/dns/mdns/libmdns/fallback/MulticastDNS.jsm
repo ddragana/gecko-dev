@@ -19,6 +19,13 @@ Cu.import('resource://gre/modules/DNSRecord.jsm');
 Cu.import('resource://gre/modules/DNSResourceRecord.jsm');
 Cu.import('resource://gre/modules/DNSTypes.jsm');
 
+const NS_NETWORK_LINK_TOPIC = 'network:link-status-changed';
+
+let observerService     = Cc["@mozilla.org/observer-service;1"]
+                            .getService(Components.interfaces.nsIObserverService);
+let networkInfoService  = Cc['@mozilla.org/network-info-service;1']
+                            .createInstance(Ci.nsINetworkInfoService);
+
 const DEBUG = true;
 
 const MDNS_MULTICAST_GROUP = '224.0.0.251';
@@ -100,17 +107,53 @@ class PublishedService {
 class MulticastDNS {
   constructor() {
     this._listeners       = new Map();
-    this._broadcastSocket = undefined;
-    this._broadcastTimer  = undefined;
     this._sockets         = new Map();
     this._services        = new Map();
     this._discovered      = new Map();
+    this._querySocket     = undefined;
+    this._broadcastReceiverSocket = undefined;
+    this._broadcastTimer  = undefined;
+
+    this._networkLinkObserver = {
+      observe: (subject, topic, data) => {
+        DEBUG && debug(NS_NETWORK_LINK_TOPIC + '(' + data + '); Clearing list of previously discovered services');
+        this._discovered.clear();
+      }
+    };
+  }
+
+  _attachNetworkLinkObserver() {
+    if (this._networkLinkObserverTimeout) {
+      clearTimeout(this._networkLinkObserverTimeout);
+    }
+
+    if (!this._isNetworkLinkObserverAttached) {
+      DEBUG && debug('Attaching observer ' + NS_NETWORK_LINK_TOPIC);
+      observerService.addObserver(this._networkLinkObserver, NS_NETWORK_LINK_TOPIC, false);
+      this._isNetworkLinkObserverAttached = true;
+    }
+  }
+
+  _detachNetworkLinkObserver() {
+    if (this._isNetworkLinkObserverAttached) {
+      if (this._networkLinkObserverTimeout) {
+        clearTimeout(this._networkLinkObserverTimeout);
+      }
+
+      this._networkLinkObserverTimeout = setTimeout(() => {
+        DEBUG && debug('Detaching observer ' + NS_NETWORK_LINK_TOPIC);
+        observerService.removeObserver(this._networkLinkObserver, NS_NETWORK_LINK_TOPIC);
+        this._isNetworkLinkObserverAttached = false;
+        this._networkLinkObserverTimeout = null;
+      }, 5000);
+    }
   }
 
   startDiscovery(aServiceType, aListener) {
     DEBUG && debug('startDiscovery("' + aServiceType + '")');
     let { serviceType } = _parseServiceDomainName(aServiceType);
 
+    this._attachNetworkLinkObserver();
     this._addServiceListener(serviceType, aListener);
 
     try {
@@ -127,7 +170,9 @@ class MulticastDNS {
     DEBUG && debug('stopDiscovery("' + aServiceType + '")');
     let { serviceType } = _parseServiceDomainName(aServiceType);
 
+    this._detachNetworkLinkObserver();
     this._removeServiceListener(serviceType, aListener);
+
     aListener.onDiscoveryStopped(serviceType);
 
     this._checkCloseSockets();
@@ -142,6 +187,11 @@ class MulticastDNS {
 
   registerService(aServiceInfo, aListener) {
     DEBUG && debug('registerService(): ' + aServiceInfo.serviceName);
+
+    // Initialize the broadcast receiver socket in case it
+    // hasn't already been started so we can listen for
+    // multicast queries/announcements on all interfaces.
+    this._getBroadcastReceiverSocket();
 
     for (let name of ['port', 'serviceName', 'serviceType']) {
       if (!TryGet(aServiceInfo, name)) {
@@ -220,6 +270,22 @@ class MulticastDNS {
     aListener.onServiceUnregistered(aServiceInfo);
   }
 
+  _respondToQuery(serviceKey, message) {
+    let address = message.fromAddr.address;
+    let port = message.fromAddr.port;
+    DEBUG && debug('_respondToQuery(): key=' + serviceKey + ', fromAddr='
+                        + address + ":" + port);
+
+    let publishedService = this._services.get(serviceKey);
+    if (!publishedService) {
+      debug("_respondToQuery Could not find service (key=" + serviceKey + ")");
+      return;
+    }
+
+    DEBUG && debug('_respondToQuery(): key=' + serviceKey + ': SENDING RESPONSE');
+    this._advertiseServiceHelper(publishedService, {address,port});
+  }
+
   _advertiseService(serviceKey, firstAdv) {
     DEBUG && debug('_advertiseService(): key=' + serviceKey);
     let publishedService = this._services.get(serviceKey);
@@ -230,31 +296,7 @@ class MulticastDNS {
 
     publishedService.advertiseTimer = undefined;
 
-    this._getSockets().then((sockets) => {
-      if (publishedService.address == "0.0.0.0") {
-        let addressList = [];
-
-        sockets.forEach((socket, address) => {
-          if (address != "127.0.0.1") {
-            addressList.push(address);
-          }
-        });
-
-        this._getBroadcastSocket().then(socket => {
-          let packet = this._makeServicePacket(publishedService, addressList);
-          let data = packet.serialize();
-          socket.send(MDNS_MULTICAST_GROUP, MDNS_PORT, data, data.length);
-        });
-      } else {
-        sockets.forEach((socket, address) => {
-          if (address == publishedService.address) {
-            let packet = this._makeServicePacket(publishedService, [address]);
-            let data = packet.serialize();
-            socket.send(MDNS_MULTICAST_GROUP, MDNS_PORT, data, data.length);
-          }
-        });
-      }
-
+    this._advertiseServiceHelper(publishedService, null).then(() => {
       // If first advertisement, re-advertise in 1 second.
       // Otherwise, set the lastAdvertised time.
       if (firstAdv) {
@@ -265,6 +307,28 @@ class MulticastDNS {
         publishedService.lastAdvertised = Date.now();
         this._checkStartBroadcastTimer();
       }
+    });
+  }
+
+  _advertiseServiceHelper(svc, target) {
+    if (!target) {
+      target = {address:MDNS_MULTICAST_GROUP, port:MDNS_PORT};
+    }
+
+    return this._getSockets().then((sockets) => {
+      sockets.forEach((socket, address) => {
+        if (svc.address == "0.0.0.0" || address == svc.address)
+        {
+          let packet = this._makeServicePacket(svc, [address]);
+          let data = packet.serialize();
+          try {
+            socket.send(target.address, target.port, data, data.length);
+          } catch (err) {
+            DEBUG && debug("Failed to send packet to "
+                            + target.address + ":" + target.port);
+          }
+        }
+      });
     });
   }
 
@@ -323,6 +387,7 @@ class MulticastDNS {
   }
 
   _query(name) {
+    DEBUG && debug('query("' + name + '")');
     let packet = new DNSPacket();
     packet.setFlag('QR', DNS_QUERY_RESPONSE_CODES.QUERY);
 
@@ -336,15 +401,20 @@ class MulticastDNS {
 
     let data = packet.serialize();
 
-    this._getSockets().then((sockets) => {
-      sockets.forEach((socket) => {
-        socket.send(MDNS_MULTICAST_GROUP, MDNS_PORT, data, data.length);
-      });
+    // Initialize the broadcast receiver socket in case it
+    // hasn't already been started so we can listen for
+    // multicast queries/announcements on all interfaces.
+    this._getBroadcastReceiverSocket();
+
+    this._getQuerySocket().then((querySocket) => {
+      DEBUG && debug('sending query on query socket ("' + name + '")');
+      querySocket.send(MDNS_MULTICAST_GROUP, MDNS_PORT, data, data.length);
     });
 
     // Automatically announce previously-discovered
     // services that match and haven't expired yet.
     setTimeout(() => {
+      DEBUG && debug('announcing previously discovered services ("' + name + '")');
       let { serviceType } = _parseServiceDomainName(name);
 
       this._clearExpiredDiscoveries();
@@ -386,8 +456,9 @@ class MulticastDNS {
       }
 
       for (let [serviceKey, publishedService] of this._services) {
+        DEBUG && debug("_handleQueryPacket: " + packet.toJSON());
         if (publishedService.ptrMatch(record.name)) {
-          this._advertiseService(serviceKey);
+          this._respondToQuery(serviceKey, message);
         }
       }
     });
@@ -542,6 +613,55 @@ class MulticastDNS {
     DEBUG && debug('_onServiceFound()' + serviceInfo.serviceName);
   }
 
+  /**
+   * Gets a non-exclusive socket on 0.0.0.0:{random} to send
+   * multicast queries on all interfaces. This socket does
+   * not need to join a multicast group since it is still
+   * able to *send* multicast queries, but it does not need
+   * to *listen* for multicast queries/announcements since
+   * the `_broadcastReceiverSocket` is already handling them.
+   */
+  _getQuerySocket() {
+    return new Promise((resolve, reject) => {
+      if (!this._querySocket) {
+        this._querySocket = _openSocket('0.0.0.0', 0, {
+          onPacketReceived: this._onPacketReceived.bind(this),
+          onStopListening: this._onStopListening.bind(this)
+        });
+      }
+      resolve(this._querySocket);
+    });
+  }
+
+  /**
+   * Gets a non-exclusive socket on 0.0.0.0:5353 to listen
+   * for multicast queries/announcements on all interfaces.
+   * Since this socket needs to listen for multicast queries
+   * and announcements, this socket joins the multicast
+   * group on *all* interfaces (0.0.0.0).
+   */
+  _getBroadcastReceiverSocket() {
+    return new Promise((resolve, reject) => {
+      if (!this._broadcastReceiverSocket) {
+        this._broadcastReceiverSocket = _openSocket('0.0.0.0', MDNS_PORT, {
+          onPacketReceived: this._onPacketReceived.bind(this),
+          onStopListening: this._onStopListening.bind(this)
+        }, /* multicastInterface = */ '0.0.0.0');
+      }
+      resolve(this._broadcastReceiverSocket);
+    });
+  }
+
+  /**
+   * Gets a non-exclusive socket for each interface on
+   * {iface-ip}:5353 for sending query responses as
+   * well as for listening for unicast queries. These
+   * sockets do not need to join a multicast group
+   * since they are still able to *send* multicast
+   * query responses, but they do not need to *listen*
+   * for multicast queries since the `_querySocket` is
+   * already handling them.
+   */
   _getSockets() {
     return new Promise((resolve) => {
       if (this._sockets.size > 0) {
@@ -551,39 +671,12 @@ class MulticastDNS {
 
       Promise.all([getAddresses(), getHostname()]).then(() => {
         _addresses.forEach((address) => {
-          let socket = Cc['@mozilla.org/network/udp-socket;1']
-                        .createInstance(Ci.nsIUDPSocket);
-
-          socket.init(MDNS_PORT, false,
-                      Services.scriptSecurityManager.getSystemPrincipal());
-          socket.asyncListen({
-            onPacketReceived: this._onPacketReceived.bind(this),
-            onStopListening: this._onStopListening.bind(this)
-          });
-          socket.joinMulticast(MDNS_MULTICAST_GROUP, address);
-
+          let socket = _openSocket(address, MDNS_PORT, null);
           this._sockets.set(address, socket);
         });
 
         resolve(this._sockets);
       });
-    });
-  }
-
-  _getBroadcastSocket() {
-    return new Promise((resolve) => {
-      if (this._broadcastSocket !== undefined) {
-        resolve(this._broadcastSocket);
-        return;
-      }
-
-      let socket = Cc['@mozilla.org/network/udp-socket;1']
-                    .createInstance(Ci.nsIUDPSocket);
-
-      socket.init(MDNS_PORT, false,
-                  Services.scriptSecurityManager.getSystemPrincipal());
-      this._broadcastSocket = socket;
-      resolve(this._broadcastSocket);
     });
   }
 
@@ -657,9 +750,6 @@ class MulticastDNS {
   }
 }
 
-let _networkInfo = Cc['@mozilla.org/network-info-service;1']
-                    .createInstance(Ci.nsINetworkInfoService);
-
 let _addresses;
 
 /**
@@ -672,7 +762,7 @@ function getAddresses() {
       return;
     }
 
-    _networkInfo.listNetworkAddresses({
+    networkInfoService.listNetworkAddresses({
       onListedNetworkAddresses(aAddressArray) {
         _addresses = aAddressArray.filter((address) => {
           return address.indexOf('%p2p') === -1 &&  // No WiFi Direct interfaces
@@ -704,7 +794,7 @@ function getHostname() {
       return;
     }
 
-    _networkInfo.getHostname({
+    networkInfoService.getHostname({
       onGotHostname(aHostname) {
         _hostname = aHostname.replace(/\s/g, '-') + '.local';
 
@@ -761,4 +851,25 @@ function _propertyBagToObject(propBag) {
     }
   }
   return result;
+}
+
+/**
+ * @private
+ */
+function _openSocket(addr, port, handler, multicastInterface) {
+  let socket = Cc['@mozilla.org/network/udp-socket;1'].createInstance(Ci.nsIUDPSocket);
+  socket.init2(addr, port, Services.scriptSecurityManager.getSystemPrincipal(), true);
+
+  if (handler) {
+    socket.asyncListen({
+      onPacketReceived: handler.onPacketReceived,
+      onStopListening: handler.onStopListening
+    });
+  }
+
+  if (multicastInterface) {
+    socket.joinMulticast(MDNS_MULTICAST_GROUP, multicastInterface);
+  }
+
+  return socket;
 }

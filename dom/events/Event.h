@@ -170,6 +170,11 @@ public:
     return mEvent->mFlags.mCancelable;
   }
 
+  bool Composed() const
+  {
+    return mEvent->mFlags.mComposed;
+  }
+
   // xpidl implementation
   // void PreventDefault();
 
@@ -243,6 +248,13 @@ public:
   static nsIContent* GetShadowRelatedTarget(nsIContent* aCurrentTarget,
                                             nsIContent* aRelatedTarget);
 
+  void MarkUninitialized()
+  {
+    mEvent->mMessage = eVoidEvent;
+    mEvent->mSpecifiedEventTypeString.Truncate();
+    mEvent->mSpecifiedEventType = nullptr;
+  }
+
 protected:
 
   // Internal helper functions
@@ -266,6 +278,11 @@ protected:
    * in chrome's thread.  Otherwise, false.
    */
   bool IsChrome(JSContext* aCx) const;
+
+  void SetComposed(bool aComposed)
+  {
+    mEvent->SetComposed(aComposed);
+  }
 
   mozilla::WidgetEvent*       mEvent;
   RefPtr<nsPresContext>     mPresContext;

@@ -498,7 +498,9 @@ class tp5o_scroll(PageloaderTest):
     tpmozafterpaint = False
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = '1/FPS'
 
@@ -557,7 +559,8 @@ class basic_compositor_video(PageloaderTest):
                    'layers.acceleration.disabled': True,
                    'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'full-screen-api.warning.timeout': 500}
+                   'full-screen-api.warning.timeout': 500,
+                   'media.ruin-av-sync.enabled': True}
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     unit = 'ms/frame'
     lower_is_better = True
@@ -687,7 +690,9 @@ class tscrollx(PageloaderTest):
     """ ASAP mode """
     preferences = {'layout.frame_rate': 0,
                    'docshell.event_starvation_delay_hint': 1,
-                   'dom.send_after_paint_to_content': False}
+                   'dom.send_after_paint_to_content': False,
+                   'layout.css.scroll-behavior.spring-constant': "'10'",
+                   'toolkit.framesRecording.bufferSize': 10000}
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
 

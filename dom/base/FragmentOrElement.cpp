@@ -112,7 +112,7 @@
 
 #include "mozAutoDocUpdate.h"
 
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsDOMMutationObserver.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsCycleCollector.h"
@@ -151,10 +151,15 @@ nsIContent::FindFirstNonChromeOnlyAccessContent() const
   return nullptr;
 }
 
-nsIContent*
-nsIContent::GetFlattenedTreeParent() const
+nsINode*
+nsIContent::GetFlattenedTreeParentNodeInternal() const
 {
-  nsIContent* parent = GetParent();
+  nsINode* parentNode = GetParentNode();
+  if (!parentNode || !parentNode->IsContent()) {
+    MOZ_ASSERT(!parentNode || parentNode == OwnerDoc());
+    return parentNode;
+  }
+  nsIContent* parent = parentNode->AsContent();
 
   if (parent && nsContentUtils::HasDistributedChildren(parent) &&
       nsContentUtils::IsInSameAnonymousTree(parent, this)) {
@@ -801,50 +806,7 @@ nsIContent::PreHandleEvent(EventChainPreVisitor& aVisitor)
 
   ShadowRoot* thisShadowRoot = ShadowRoot::FromNode(this);
   if (thisShadowRoot) {
-    // The following events must always be stopped at the root node of the node tree:
-    //   abort
-    //   error
-    //   select
-    //   change
-    //   load
-    //   reset
-    //   resize
-    //   scroll
-    //   selectstart
-    bool stopEvent = false;
-    switch (aVisitor.mEvent->mMessage) {
-      case eImageAbort:
-      case eLoadError:
-      case eFormSelect:
-      case eFormChange:
-      case eLoad:
-      case eFormReset:
-      case eResize:
-      case eScroll:
-      case eSelectStart:
-        stopEvent = true;
-        break;
-      case eUnidentifiedEvent:
-        if (aVisitor.mDOMEvent) {
-          nsAutoString eventType;
-          aVisitor.mDOMEvent->GetType(eventType);
-          if (eventType.EqualsLiteral("abort") ||
-              eventType.EqualsLiteral("error") ||
-              eventType.EqualsLiteral("select") ||
-              eventType.EqualsLiteral("change") ||
-              eventType.EqualsLiteral("load") ||
-              eventType.EqualsLiteral("reset") ||
-              eventType.EqualsLiteral("resize") ||
-              eventType.EqualsLiteral("scroll")) {
-            stopEvent = true;
-          }
-        }
-        break;
-      default:
-        break;
-    }
-
-    if (stopEvent) {
+    if (!aVisitor.mEvent->mFlags.mComposed) {
       // If we do stop propagation, we still want to propagate
       // the event to chrome (nsPIDOMWindow::GetParentTarget()).
       // The load event is special in that we don't ever propagate it
@@ -902,7 +864,11 @@ nsIContent::PreHandleEvent(EventChainPreVisitor& aVisitor)
     }
   }
 
-  if (parent) {
+  if (!aVisitor.mEvent->mFlags.mComposedInNativeAnonymousContent &&
+      IsRootOfNativeAnonymousSubtree() && OwnerDoc() &&
+      OwnerDoc()->GetWindow()) {
+    aVisitor.mParentTarget = OwnerDoc()->GetWindow()->GetParentTarget();
+  } else if (parent) {
     aVisitor.mParentTarget = parent;
   } else {
     aVisitor.mParentTarget = GetComposedDoc();
@@ -1062,16 +1028,6 @@ FragmentOrElement::GetXBLInsertionParent() const
     }
   }
 
-  return nullptr;
-}
-
-ShadowRoot*
-FragmentOrElement::GetShadowRoot() const
-{
-  nsDOMSlots *slots = GetExistingDOMSlots();
-  if (slots) {
-    return slots->mShadowRoot;
-  }
   return nullptr;
 }
 
@@ -1276,7 +1232,7 @@ public:
     }
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsAutoScriptBlocker scriptBlocker;
     uint32_t len = mSubtreeRoots.Length();
@@ -1640,7 +1596,8 @@ void ClearCycleCollectorCleanupData()
 static bool
 ShouldClearPurple(nsIContent* aContent)
 {
-  if (aContent && aContent->IsPurple()) {
+  MOZ_ASSERT(aContent);
+  if (aContent->IsPurple()) {
     return true;
   }
 
@@ -1863,7 +1820,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
     nsAtomCString localName(tmp->NodeInfo()->NameAtom());
     nsAutoCString uri;
     if (tmp->OwnerDoc()->GetDocumentURI()) {
-      tmp->OwnerDoc()->GetDocumentURI()->GetSpec(uri);
+      uri = tmp->OwnerDoc()->GetDocumentURI()->GetSpecOrDefault();
     }
 
     nsAutoString id;
@@ -1894,13 +1851,13 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
     }
 
     const char* nsuri = nsid < ArrayLength(kNSURIs) ? kNSURIs[nsid] : "";
-    snprintf_literal(name, "FragmentOrElement%s %s%s%s%s %s",
-                     nsuri,
-                     localName.get(),
-                     NS_ConvertUTF16toUTF8(id).get(),
-                     NS_ConvertUTF16toUTF8(classes).get(),
-                     orphan.get(),
-                     uri.get());
+    SprintfLiteral(name, "FragmentOrElement%s %s%s%s%s %s",
+                   nsuri,
+                   localName.get(),
+                   NS_ConvertUTF16toUTF8(id).get(),
+                   NS_ConvertUTF16toUTF8(classes).get(),
+                   orphan.get(),
+                   uri.get());
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name);
   }
   else {
@@ -2390,5 +2347,53 @@ FragmentOrElement::SetIsElementInStyleScopeFlagOnShadowTree(bool aInStyleScope)
   while (shadowRoot) {
     shadowRoot->SetIsElementInStyleScopeFlagOnSubtree(aInStyleScope);
     shadowRoot = shadowRoot->GetOlderShadowRoot();
+  }
+}
+
+#ifdef DEBUG
+static void
+AssertDirtyDescendantsBitPropagated(nsINode* aNode)
+{
+  MOZ_ASSERT(aNode->HasDirtyDescendantsForServo());
+  nsINode* parent = aNode->GetFlattenedTreeParentNode();
+  if (!parent->IsContent()) {
+    MOZ_ASSERT(parent == aNode->OwnerDoc());
+    MOZ_ASSERT(parent->HasDirtyDescendantsForServo());
+  } else {
+    AssertDirtyDescendantsBitPropagated(parent);
+  }
+}
+#else
+static void AssertDirtyDescendantsBitPropagated(nsINode* aNode) {}
+#endif
+
+void
+nsIContent::MarkAncestorsAsHavingDirtyDescendantsForServo()
+{
+  MOZ_ASSERT(IsInComposedDoc());
+
+  // Get the parent in the flattened tree.
+  nsINode* parent = GetFlattenedTreeParentNode();
+
+  // Loop until we hit a base case.
+  while (true) {
+
+    // Base case: the document.
+    if (!parent->IsContent()) {
+      MOZ_ASSERT(parent == OwnerDoc());
+      parent->SetHasDirtyDescendantsForServo();
+      return;
+    }
+
+    // Base case: the parent is already marked, and therefore
+    // so are all its ancestors.
+    if (parent->HasDirtyDescendantsForServo()) {
+      AssertDirtyDescendantsBitPropagated(parent);
+      return;
+    }
+
+    // Mark the parent and iterate.
+    parent->SetHasDirtyDescendantsForServo();
+    parent = parent->GetFlattenedTreeParentNode();
   }
 }

@@ -4,7 +4,7 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
+const {Cc, Ci, Cu, CC} = require("chrome");
 const events = require("sdk/event/core");
 const protocol = require("devtools/shared/protocol");
 const {LongStringActor} = require("devtools/server/actors/string");
@@ -18,7 +18,19 @@ const { Task } = require("devtools/shared/task");
 loader.lazyImporter(this, "OS", "resource://gre/modules/osfile.jsm");
 loader.lazyImporter(this, "Sqlite", "resource://gre/modules/Sqlite.jsm");
 
-var gTrackedMessageManager = new Map();
+// We give this a funny name to avoid confusion with the global
+// indexedDB.
+loader.lazyGetter(this, "indexedDBForStorage", () => {
+  // On xpcshell, we can't instantiate indexedDB without crashing
+  try {
+    let sandbox
+      = Cu.Sandbox(CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")(),
+                   {wantGlobalProperties: ["indexedDB"]});
+    return sandbox.indexedDB;
+  } catch (e) {
+    return {};
+  }
+});
 
 // Maximum number of cookies/local storage key-value-pairs that can be sent
 // over the wire to the client in one request.
@@ -81,6 +93,10 @@ var StorageActors = {};
  *                     so that it can be transferred over wire.
  *   - populateStoresForHost : Given a host, populate the map of all store
  *                             objects for it
+ *   - getFields: Given a subType(optional), get an array of objects containing
+ *                column field info. The info includes,
+ *                "name" is name of colume key.
+ *                "editable" is 1 means editable field; 0 means uneditable.
  *
  * @param {string} typeName
  *        The typeName of the actor.
@@ -548,21 +564,17 @@ StorageActors.createActor({
     return null;
   },
 
-  /**
-   * This method marks the table as editable.
-   *
-   * @return {Array}
-   *         An array of column header ids.
-   */
-  getEditableFields: Task.async(function* () {
+  getFields: Task.async(function* () {
     return [
-      "name",
-      "path",
-      "host",
-      "expires",
-      "value",
-      "isSecure",
-      "isHttpOnly"
+      { name: "name", editable: 1},
+      { name: "path", editable: 1},
+      { name: "host", editable: 1},
+      { name: "expires", editable: 1},
+      { name: "lastAccessed", editable: 0},
+      { name: "value", editable: 1},
+      { name: "isDomain", editable: 0},
+      { name: "isSecure", editable: 1},
+      { name: "isHttpOnly", editable: 1}
     ];
   }),
 
@@ -631,11 +643,11 @@ StorageActors.createActor({
     this.removeAllCookies =
       callParentProcess.bind(null, "removeAllCookies");
 
-    addMessageListener("storage:storage-cookie-request-child",
+    addMessageListener("debug:storage-cookie-request-child",
                        cookieHelpers.handleParentRequest);
 
     function callParentProcess(methodName, ...args) {
-      let reply = sendSyncMessage("storage:storage-cookie-request-parent", {
+      let reply = sendSyncMessage("debug:storage-cookie-request-parent", {
         method: methodName,
         args: args
       });
@@ -909,38 +921,12 @@ var cookieHelpers = {
  * E10S parent/child setup helpers
  */
 
-exports.setupParentProcessForCookies = function ({mm, prefix}) {
+exports.setupParentProcessForCookies = function ({ mm, prefix }) {
   cookieHelpers.onCookieChanged =
     callChildProcess.bind(null, "onCookieChanged");
 
   // listen for director-script requests from the child process
-  mm.addMessageListener("storage:storage-cookie-request-parent",
-                        cookieHelpers.handleChildRequest);
-
-  DebuggerServer.once("disconnected-from-child:" + prefix,
-                      handleMessageManagerDisconnected);
-
-  gTrackedMessageManager.set("cookies", mm);
-
-  function handleMessageManagerDisconnected(evt, { mm: disconnectedMm }) {
-    // filter out not subscribed message managers
-    if (disconnectedMm !== mm || !gTrackedMessageManager.has("cookies")) {
-      return;
-    }
-
-    // Although "disconnected-from-child" implies that the child is already
-    // disconnected this is not the case. The disconnection takes place after
-    // this method has finished. This gives us chance to clean up items within
-    // the parent process e.g. observers.
-    cookieHelpers.removeCookieObservers();
-
-    gTrackedMessageManager.delete("cookies");
-
-    // unregister for director-script requests handlers from the parent process
-    // (if any)
-    mm.removeMessageListener("storage:storage-cookie-request-parent",
-                             cookieHelpers.handleChildRequest);
-  }
+  setMessageManager(mm);
 
   function callChildProcess(methodName, ...args) {
     if (methodName === "onCookieChanged") {
@@ -948,7 +934,7 @@ exports.setupParentProcessForCookies = function ({mm, prefix}) {
     }
 
     try {
-      mm.sendAsyncMessage("storage:storage-cookie-request-child", {
+      mm.sendAsyncMessage("debug:storage-cookie-request-child", {
         method: methodName,
         args: args
       });
@@ -957,6 +943,30 @@ exports.setupParentProcessForCookies = function ({mm, prefix}) {
       // been closed. This can legitimately happen in between test runs.
     }
   }
+
+  function setMessageManager(newMM) {
+    if (mm) {
+      mm.removeMessageListener("debug:storage-cookie-request-parent",
+                               cookieHelpers.handleChildRequest);
+    }
+    mm = newMM;
+    if (mm) {
+      mm.addMessageListener("debug:storage-cookie-request-parent",
+                            cookieHelpers.handleChildRequest);
+    }
+  }
+
+  return {
+    onBrowserSwap: setMessageManager,
+    onDisconnected: () => {
+      // Although "disconnected-from-child" implies that the child is already
+      // disconnected this is not the case. The disconnection takes place after
+      // this method has finished. This gives us chance to clean up items within
+      // the parent process e.g. observers.
+      cookieHelpers.removeCookieObservers();
+      setMessageManager(null);
+    }
+  };
 };
 
 /**
@@ -1012,16 +1022,10 @@ function getObjectForLocalOrSessionStorage(type) {
       }
     },
 
-    /**
-     * This method marks the fields as editable.
-     *
-     * @return {Array}
-     *         An array of field ids.
-     */
-    getEditableFields: Task.async(function* () {
+    getFields: Task.async(function* () {
       return [
-        "name",
-        "value"
+        { name: "name", editable: 1},
+        { name: "value", editable: 1}
       ];
     }),
 
@@ -1199,6 +1203,13 @@ StorageActors.createActor({
     };
   }),
 
+  getFields: Task.async(function* () {
+    return [
+      { name: "url", editable: 0 },
+      { name: "status", editable: 0 }
+    ];
+  }),
+
   getHostName(location) {
     if (!location.host) {
       return location.href;
@@ -1238,6 +1249,61 @@ StorageActors.createActor({
 
   toStoreObject(item) {
     return item;
+  },
+
+  removeItem: Task.async(function* (host, name) {
+    const cacheMap = this.hostVsStores.get(host);
+    if (!cacheMap) {
+      return;
+    }
+
+    const parsedName = JSON.parse(name);
+
+    if (parsedName.length == 1) {
+      // Delete the whole Cache object
+      const [ cacheName ] = parsedName;
+      cacheMap.delete(cacheName);
+      const cacheStorage = yield this.getCachesForHost(host);
+      yield cacheStorage.delete(cacheName);
+      this.onItemUpdated("deleted", host, [ cacheName ]);
+    } else if (parsedName.length == 2) {
+      // Delete one cached request
+      const [ cacheName, url ] = parsedName;
+      const cache = cacheMap.get(cacheName);
+      if (cache) {
+        yield cache.delete(url);
+        this.onItemUpdated("deleted", host, [ cacheName, url ]);
+      }
+    }
+  }),
+
+  removeAll: Task.async(function* (host, name) {
+    const cacheMap = this.hostVsStores.get(host);
+    if (!cacheMap) {
+      return;
+    }
+
+    const parsedName = JSON.parse(name);
+
+    // Only a Cache object is a valid object to clear
+    if (parsedName.length == 1) {
+      const [ cacheName ] = parsedName;
+      const cache = cacheMap.get(cacheName);
+      if (cache) {
+        let keys = yield cache.keys();
+        yield promise.all(keys.map(key => cache.delete(key)));
+        this.onItemUpdated("cleared", host, [ cacheName ]);
+      }
+    }
+  }),
+
+  /**
+   * CacheStorage API doesn't support any notifications, we must fake them
+   */
+  onItemUpdated(action, host, path) {
+    this.storageActor.update(action, "Cache", {
+      [host]: [ JSON.stringify(path) ]
+    });
   },
 });
 
@@ -1621,7 +1687,7 @@ StorageActors.createActor({
     this.removeDBRecord = callParentProcessAsync.bind(null, "removeDBRecord");
     this.clearDBStore = callParentProcessAsync.bind(null, "clearDBStore");
 
-    addMessageListener("storage:storage-indexedDB-request-child", msg => {
+    addMessageListener("debug:storage-indexedDB-request-child", msg => {
       switch (msg.json.method) {
         case "backToChild": {
           let [func, rv] = msg.json.args;
@@ -1645,7 +1711,7 @@ StorageActors.createActor({
 
       unresolvedPromises.set(methodName, deferred);
 
-      sendAsyncMessage("storage:storage-indexedDB-request-parent", {
+      sendAsyncMessage("debug:storage-indexedDB-request-parent", {
         method: methodName,
         args: args
       });
@@ -1653,6 +1719,35 @@ StorageActors.createActor({
       return deferred.promise;
     }
   },
+
+  getFields: Task.async(function* (subType) {
+    switch (subType) {
+      // Detail of database
+      case "database":
+        return [
+          { name: "objectStore", editable: 0 },
+          { name: "keyPath", editable: 0 },
+          { name: "autoIncrement", editable: 0 },
+          { name: "indexes", editable: 0 },
+        ];
+
+      // Detail of object store
+      case "object store":
+        return [
+          { name: "name", editable: 0 },
+          { name: "value", editable: 0 }
+        ];
+
+      // Detail of indexedDB for one origin
+      default:
+        return [
+          { name: "db", editable: 0 },
+          { name: "origin", editable: 0 },
+          { name: "version", editable: 0 },
+          { name: "objectStores", editable: 0 },
+        ];
+    }
+  })
 });
 
 var indexedDBHelpers = {
@@ -1660,7 +1755,7 @@ var indexedDBHelpers = {
     let mm = Cc["@mozilla.org/globalmessagemanager;1"]
                .getService(Ci.nsIMessageListenerManager);
 
-    mm.broadcastAsyncMessage("storage:storage-indexedDB-request-child", {
+    mm.broadcastAsyncMessage("debug:storage-indexedDB-request-child", {
       method: "backToChild",
       args: args
     });
@@ -1670,7 +1765,7 @@ var indexedDBHelpers = {
     let mm = Cc["@mozilla.org/globalmessagemanager;1"]
                .getService(Ci.nsIMessageListenerManager);
 
-    mm.broadcastAsyncMessage("storage:storage-indexedDB-request-child", {
+    mm.broadcastAsyncMessage("debug:storage-indexedDB-request-child", {
       method: "onItemUpdated",
       args: [ action, host, path ]
     });
@@ -1706,12 +1801,12 @@ var indexedDBHelpers = {
    * database `name`.
    */
   openWithPrincipal(principal, name) {
-    return require("indexedDB").openForPrincipal(principal, name);
+    return indexedDBForStorage.openForPrincipal(principal, name);
   },
 
   removeDB: Task.async(function* (host, principal, name) {
     let result = new promise(resolve => {
-      let request = require("indexedDB").deleteForPrincipal(principal, name);
+      let request = indexedDBForStorage.deleteForPrincipal(principal, name);
 
       request.onsuccess = () => {
         resolve({});
@@ -2097,29 +2192,26 @@ var indexedDBHelpers = {
  * E10S parent/child setup helpers
  */
 
-exports.setupParentProcessForIndexedDB = function ({mm, prefix}) {
+exports.setupParentProcessForIndexedDB = function ({ mm, prefix }) {
   // listen for director-script requests from the child process
-  mm.addMessageListener("storage:storage-indexedDB-request-parent",
-                        indexedDBHelpers.handleChildRequest);
+  setMessageManager(mm);
 
-  DebuggerServer.once("disconnected-from-child:" + prefix,
-                      handleMessageManagerDisconnected);
-
-  gTrackedMessageManager.set("indexedDB", mm);
-
-  function handleMessageManagerDisconnected(evt, { mm: disconnectedMm }) {
-    // filter out not subscribed message managers
-    if (disconnectedMm !== mm || !gTrackedMessageManager.has("indexedDB")) {
-      return;
+  function setMessageManager(newMM) {
+    if (mm) {
+      mm.removeMessageListener("debug:storage-indexedDB-request-parent",
+                               indexedDBHelpers.handleChildRequest);
     }
-
-    gTrackedMessageManager.delete("indexedDB");
-
-    // unregister for director-script requests handlers from the parent process
-    // (if any)
-    mm.removeMessageListener("storage:storage-indexedDB-request-parent",
-                             indexedDBHelpers.handleChildRequest);
+    mm = newMM;
+    if (mm) {
+      mm.addMessageListener("debug:storage-indexedDB-request-parent",
+                            indexedDBHelpers.handleChildRequest);
+    }
   }
+
+  return {
+    onBrowserSwap: setMessageManager,
+    onDisconnected: () => setMessageManager(null),
+  };
 };
 
 /**

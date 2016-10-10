@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_mediakeys_h__
 #define mozilla_dom_mediakeys_h__
 
-#include "nsIDOMMediaError.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
 #include "mozilla/Attributes.h"
@@ -50,7 +49,10 @@ public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(MediaKeys)
 
   MediaKeys(nsPIDOMWindowInner* aParentWindow,
-            const nsAString& aKeySystem, const nsAString& aCDMVersion);
+            const nsAString& aKeySystem,
+            const nsAString& aCDMVersion,
+            bool aDistinctiveIdentifierRequired,
+            bool aPersistentStateRequired);
 
   already_AddRefed<DetailedPromise> Init(ErrorResult& aRv);
 
@@ -66,7 +68,7 @@ public:
 
   // JavaScript: MediaKeys.createSession()
   already_AddRefed<MediaKeySession> CreateSession(JSContext* aCx,
-                                                  SessionType aSessionType,
+                                                  MediaKeySessionType aSessionType,
                                                   ErrorResult& aRv);
 
   // JavaScript: MediaKeys.SetServerCertificate()
@@ -147,6 +149,8 @@ private:
   RefPtr<nsIPrincipal> mPrincipal;
   RefPtr<nsIPrincipal> mTopLevelPrincipal;
 
+  const bool mDistinctiveIdentifierRequired;
+  const bool mPersistentStateRequired;
 };
 
 } // namespace dom

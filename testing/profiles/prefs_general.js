@@ -39,17 +39,23 @@ user_pref("dom.min_background_timeout_value", 1000);
 user_pref("test.mousescroll", true);
 user_pref("security.default_personal_cert", "Select Automatically"); // Need to client auth test be w/o any dialogs
 user_pref("network.http.prompt-temp-redirect", false);
+user_pref("media.preload.default", 2); // default = metadata
+user_pref("media.preload.auto", 3); // auto = enough
 user_pref("media.cache_size", 1000);
 user_pref("media.volume_scale", "0.01");
+user_pref("media.test.dumpDebugInfo", true);
 user_pref("security.warn_viewing_mixed", false);
 user_pref("app.update.enabled", false);
 user_pref("app.update.staging.enabled", false);
 user_pref("app.update.url.android", "");
 // Make sure GMPInstallManager won't hit the network.
 user_pref("media.gmp-manager.url.override", "http://%(server)s/dummy-gmp-manager.xml");
+user_pref("media.gmp-manager.updateEnabled", false);
 user_pref("dom.w3c_touch_events.enabled", 1);
+user_pref("layout.accessiblecaret.enabled_on_touch", false);
 user_pref("dom.undo_manager.enabled", true);
 user_pref("dom.webcomponents.enabled", true);
+user_pref("dom.webcomponents.customelements.enabled", true);
 user_pref("dom.htmlimports.enabled", true);
 // Existing tests assume there is no font size inflation.
 user_pref("font.size.inflation.emPerLine", 0);
@@ -162,6 +168,9 @@ user_pref("layout.css.grid-template-subgrid-value.enabled", true);
 // Enable CSS 'contain' for testing
 user_pref("layout.css.contain.enabled", true);
 
+// Enable CSS initial-letter for testing
+user_pref("layout.css.initial-letter.enabled", true);
+
 // Enable CSS object-fit & object-position for testing
 user_pref("layout.css.object-fit-and-position.enabled", true);
 
@@ -170,6 +179,9 @@ user_pref("layout.css.prefixes.webkit", true);
 
 // Enable -webkit-{min|max}-device-pixel-ratio media queries for testing
 user_pref("layout.css.prefixes.device-pixel-ratio-webkit", true);
+
+// Enable CSS shape-outside for testing
+user_pref("layout.css.shape-outside.enabled", true);
 
 // Disable spammy layout warnings because they pollute test logs
 user_pref("layout.spammy_warnings.enabled", false);
@@ -223,6 +235,8 @@ user_pref("browser.webapps.checkForUpdates", 0);
 
 // Enable debug logging in the tcp presentation server.
 user_pref("dom.presentation.tcp_server.debug", true);
+// Enable debug logging in the presentation core service.
+user_pref("logging.Presentation", "debug");
 
 // Don't connect to Yahoo! for RSS feed tests.
 // en-US only uses .types.0.uri, but set all of them just to be sure.
@@ -283,13 +297,6 @@ user_pref("dom.apps.customization.enabled", true);
 user_pref("browser.newtabpage.directory.source", 'data:application/json,{"testing":1}');
 user_pref("browser.newtabpage.directory.ping", "");
 
-// Enable Loop
-user_pref("loop.debug.loglevel", "All");
-user_pref("loop.enabled", true);
-user_pref("loop.throttled", false);
-user_pref("loop.server", "http://%(server)s/browser/browser/extensions/loop/chrome/test/mochitest/loop_fxa.sjs?");
-user_pref("loop.CSP","default-src 'self' about: file: chrome: data: wss://* http://* https://*");
-
 // Ensure UITour won't hit the network
 user_pref("browser.uitour.pinnedTabUrl", "http://%(server)s/uitour-dummy/pinnedTab");
 user_pref("browser.uitour.url", "http://%(server)s/uitour-dummy/tour");
@@ -349,3 +356,7 @@ user_pref("webextensions.tests", true);
 user_pref("startup.homepage_welcome_url", "about:blank");
 user_pref("startup.homepage_welcome_url.additional", "");
 user_pref("browser.usedOnWindows10.introURL", "");
+
+// For Firefox 52 only, ESR will support non-Flash plugins while release will
+// not, so we keep testing the non-Flash pathways
+user_pref("plugin.load_flash_only", false);

@@ -218,11 +218,10 @@ public:
 
   void GetURL(nsString& aURL);
 
-  void ActivateUpdateHitRegion();
-  void DeactivateUpdateHitRegion();
-
   // Properly retrieves documentSize of any subdocument type.
   nsresult GetWindowDimensions(nsIntRect& aRect);
+
+  virtual nsIMessageSender* GetProcessMessageManager() const override;
 
   // public because a callback needs these.
   RefPtr<nsFrameMessageManager> mMessageManager;
@@ -331,6 +330,7 @@ private:
   void ResetPermissionManagerStatus();
 
   void InitializeBrowserAPI();
+  void DestroyBrowserFrameScripts();
 
   nsresult GetNewTabContext(mozilla::dom::MutableTabContext* aTabContext,
                             nsIURI* aURI = nullptr,

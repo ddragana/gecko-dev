@@ -10,15 +10,9 @@
 #if defined(XP_WIN)
 #include <windows.h>
 #include <stdlib.h>
-#include <io.h>
-#include <fcntl.h>
 #elif defined(XP_UNIX)
 #include <sys/resource.h>
 #include <unistd.h>
-#endif
-
-#ifdef XP_MACOSX
-#include "MacQuirks.h"
 #endif
 
 #include <stdio.h>
@@ -45,6 +39,7 @@
 
 #include "nsXPCOMPrivate.h" // for MAXPATHLEN and XPCOM_DLL
 
+#include "mozilla/Sprintf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/WindowsDllBlocklist.h"
 
@@ -133,6 +128,10 @@ XRE_GetProcessTypeType XRE_GetProcessType;
 XRE_SetProcessTypeType XRE_SetProcessType;
 XRE_InitChildProcessType XRE_InitChildProcess;
 XRE_EnableSameExecutableForContentProcType XRE_EnableSameExecutableForContentProc;
+#ifdef LIBFUZZER
+XRE_LibFuzzerSetMainType XRE_LibFuzzerSetMain;
+XRE_LibFuzzerGetFuncsType XRE_LibFuzzerGetFuncs;
+#endif
 
 static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_GetFileFromPath", (NSFuncPtr*) &XRE_GetFileFromPath },
@@ -147,8 +146,23 @@ static const nsDynamicFunctionLoad kXULFuncs[] = {
     { "XRE_SetProcessType", (NSFuncPtr*) &XRE_SetProcessType },
     { "XRE_InitChildProcess", (NSFuncPtr*) &XRE_InitChildProcess },
     { "XRE_EnableSameExecutableForContentProc", (NSFuncPtr*) &XRE_EnableSameExecutableForContentProc },
+#ifdef LIBFUZZER
+    { "XRE_LibFuzzerSetMain", (NSFuncPtr*) &XRE_LibFuzzerSetMain },
+    { "XRE_LibFuzzerGetFuncs", (NSFuncPtr*) &XRE_LibFuzzerGetFuncs },
+#endif
     { nullptr, nullptr }
 };
+
+#ifdef LIBFUZZER
+int libfuzzer_main(int argc, char **argv);
+
+/* This wrapper is used by the libFuzzer main to call into libxul */
+
+void libFuzzerGetFuncs(const char* moduleName, LibFuzzerInitFunc* initFunc,
+                       LibFuzzerTestingFunc* testingFunc) {
+  return XRE_LibFuzzerGetFuncs(moduleName, initFunc, testingFunc);
+}
+#endif
 
 static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory)
 {
@@ -179,7 +193,7 @@ static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory)
     }
 
     char appEnv[MAXPATHLEN];
-    snprintf(appEnv, MAXPATHLEN, "XUL_APP_FILE=%s", argv[2]);
+    SprintfLiteral(appEnv, "XUL_APP_FILE=%s", argv[2]);
     if (putenv(strdup(appEnv))) {
       Output("Couldn't set %s.\n", appEnv);
       return 255;
@@ -208,6 +222,13 @@ static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory)
       Output("Couldn't read application.ini");
       return 255;
     }
+#if defined(HAS_DLL_BLOCKLIST)
+    // The dll blocklist operates in the exe vs. xullib. Pass a flag to
+    // xullib so automated tests can check the result once the browser
+    // is up and running.
+    appData->flags |=
+      DllBlocklist_CheckStatus() ? NS_XRE_DLL_BLOCKLIST_ENABLED : 0;
+#endif
     // xreDirectory already has a refcount from NS_NewLocalFile
     appData->xreDirectory = xreDirectory;
     int result = XRE_main(argc, argv, appData, mainFlags);
@@ -236,6 +257,11 @@ static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory)
   // xreDirectory already has a refcount from NS_NewLocalFile
   appData.xreDirectory = xreDirectory;
 
+#if defined(HAS_DLL_BLOCKLIST)
+  appData.flags |=
+    DllBlocklist_CheckStatus() ? NS_XRE_DLL_BLOCKLIST_ENABLED : 0;
+#endif
+
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
   sandbox::BrokerServices* brokerServices =
     sandboxing::GetInitializedBrokerServices();
@@ -246,6 +272,11 @@ static int do_main(int argc, char* argv[], char* envp[], nsIFile *xreDirectory)
   }
 #endif
   appData.sandboxBrokerServices = brokerServices;
+#endif
+
+#ifdef LIBFUZZER
+  if (getenv("LIBFUZZER"))
+    XRE_LibFuzzerSetMain(argc, argv, libfuzzer_main);
 #endif
 
   return XRE_main(argc, argv, &appData, mainFlags);
@@ -276,8 +307,8 @@ InitXPCOMGlue(const char *argv0, nsIFile **xreDirectory)
   }
 
   char *lastSlash = strrchr(exePath, XPCOM_FILE_PATH_SEPARATOR[0]);
-  if (!lastSlash || (size_t(lastSlash - exePath) > MAXPATHLEN -
-sizeof(XPCOM_DLL) - 1))
+  if (!lastSlash ||
+      (size_t(lastSlash - exePath) > MAXPATHLEN - sizeof(XPCOM_DLL) - 1))
     return NS_ERROR_FAILURE;
 
   strcpy(lastSlash + 1, XPCOM_DLL);
@@ -326,6 +357,20 @@ sizeof(XPCOM_DLL) - 1))
 
 int main(int argc, char* argv[], char* envp[])
 {
+  mozilla::TimeStamp start = mozilla::TimeStamp::Now();
+
+#ifdef HAS_DLL_BLOCKLIST
+  DllBlocklist_Initialize();
+
+#ifdef DEBUG
+  // In order to be effective against AppInit DLLs, the blocklist must be
+  // initialized before user32.dll is loaded into the process (bug 932100).
+  if (GetModuleHandleA("user32.dll")) {
+    fprintf(stderr, "DLL blocklist was unable to intercept AppInit DLLs.\n");
+  }
+#endif
+#endif
+
 #ifdef MOZ_BROWSER_CAN_BE_CONTENTPROC
   // We are launching as a content process, delegate to the appropriate
   // main
@@ -353,25 +398,8 @@ int main(int argc, char* argv[], char* envp[])
   }
 #endif
 
-  mozilla::TimeStamp start = mozilla::TimeStamp::Now();
-
-#ifdef XP_MACOSX
-  TriggerQuirks();
-#endif
 
   nsIFile *xreDirectory;
-
-#ifdef HAS_DLL_BLOCKLIST
-  DllBlocklist_Initialize();
-
-#ifdef DEBUG
-  // In order to be effective against AppInit DLLs, the blocklist must be
-  // initialized before user32.dll is loaded into the process (bug 932100).
-  if (GetModuleHandleA("user32.dll")) {
-    fprintf(stderr, "DLL blocklist was unable to intercept AppInit DLLs.\n");
-  }
-#endif
-#endif
 
   nsresult rv = InitXPCOMGlue(argv[0], &xreDirectory);
   if (NS_FAILED(rv)) {

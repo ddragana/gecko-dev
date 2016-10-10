@@ -306,7 +306,7 @@ namespace mozilla {
  */
 template<typename T>
 static MOZ_ALWAYS_INLINE void
-PodSet(T* aDst, T aSrc, size_t aNElem)
+PodSet(T* aDst, const T& aSrc, size_t aNElem)
 {
     for (const T* dstend = aDst + aNElem; aDst < dstend; ++aDst)
         *aDst = aSrc;
@@ -328,6 +328,7 @@ PodSet(T* aDst, T aSrc, size_t aNElem)
 #define JS_MOVED_TENURED_PATTERN 0x49
 #define JS_SWEPT_TENURED_PATTERN 0x4B
 #define JS_ALLOCATED_TENURED_PATTERN 0x4D
+#define JS_FREED_HEAP_PTR_PATTERN 0x6B
 
 /*
  * Ensure JS_SWEPT_CODE_PATTERN is a byte pattern that will crash immediately

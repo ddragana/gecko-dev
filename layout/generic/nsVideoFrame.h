@@ -52,8 +52,7 @@ public:
                                     nsIAtom* aAttribute,
                                     int32_t aModType) override;
 
-  void OnVisibilityChange(Visibility aOldVisibility,
-                          Visibility aNewVisibility,
+  void OnVisibilityChange(Visibility aNewVisibility,
                           Maybe<OnNonvisible> aNonvisibleAction = Nothing()) override;
 
   /* get the size of the video's display */
@@ -74,8 +73,8 @@ public:
   virtual bool IsLeaf() const override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
 #ifdef ACCESSIBILITY

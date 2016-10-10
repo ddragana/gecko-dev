@@ -6,6 +6,7 @@
 #include "WebGLContext.h"
 
 #include "GLContext.h"
+#include "GLScreenBuffer.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/Preferences.h"
 #include "nsString.h"
@@ -266,7 +267,11 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
     if (IsWebGL2() || IsExtensionEnabled(WebGLExtensionID::EXT_disjoint_timer_query)) {
         if (pname == LOCAL_GL_TIMESTAMP_EXT) {
             GLuint64 iv = 0;
-            gl->fGetInteger64v(pname, (GLint64*) &iv);
+            if (HasTimestampBits()) {
+                gl->fGetInteger64v(pname, (GLint64*)&iv);
+            } else {
+                GenerateWarning("QUERY_COUNTER_BITS_EXT for TIMESTAMP_EXT is 0.");
+            }
             // TODO: JS doesn't support 64-bit integers. Be lossy and
             // cast to double (53 bits)
             return JS::NumberValue(static_cast<double>(iv));
@@ -382,8 +387,7 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
         case LOCAL_GL_IMPLEMENTATION_COLOR_READ_TYPE: {
             const webgl::FormatUsageInfo* usage;
             uint32_t width, height;
-            GLenum mode;
-            if (!ValidateCurFBForRead(funcName, &usage, &width, &height, &mode))
+            if (!ValidateCurFBForRead(funcName, &usage, &width, &height))
                 return JS::NullValue();
 
             GLint i = 0;
@@ -398,8 +402,7 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
         case LOCAL_GL_IMPLEMENTATION_COLOR_READ_FORMAT: {
             const webgl::FormatUsageInfo* usage;
             uint32_t width, height;
-            GLenum mode;
-            if (!ValidateCurFBForRead(funcName, &usage, &width, &height, &mode))
+            if (!ValidateCurFBForRead(funcName, &usage, &width, &height))
                 return JS::NullValue();
 
             GLint i = 0;
@@ -506,8 +509,10 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
             return JS::DoubleValue(mStencilWriteMaskFront);
 
         // float
-        case LOCAL_GL_DEPTH_CLEAR_VALUE:
         case LOCAL_GL_LINE_WIDTH:
+            return JS::DoubleValue(mLineWidth);
+
+        case LOCAL_GL_DEPTH_CLEAR_VALUE:
         case LOCAL_GL_POLYGON_OFFSET_FACTOR:
         case LOCAL_GL_POLYGON_OFFSET_UNITS:
         case LOCAL_GL_SAMPLE_COVERAGE_VALUE: {

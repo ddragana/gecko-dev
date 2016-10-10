@@ -182,7 +182,7 @@ class GCMarker : public JSTracer
 
     // Calls traverse on target after making additional assertions.
     template <typename S, typename T> void traverseEdge(S source, T* target);
-    template <typename S, typename T> void traverseEdge(S source, T target);
+    template <typename S, typename T> void traverseEdge(S source, const T& target);
 
     // Notes a weak graph edge for later sweeping.
     template <typename T> void noteWeakEdge(T* edge);
@@ -280,6 +280,7 @@ class GCMarker : public JSTracer
     void eagerlyMarkChildren(JSString* str);
     void eagerlyMarkChildren(LazyScript *thing);
     void eagerlyMarkChildren(Shape* shape);
+    void eagerlyMarkChildren(Scope* scope);
     void lazilyMarkChildren(ObjectGroup* group);
 
     // We may not have concrete types yet, so this has to be outside the header.

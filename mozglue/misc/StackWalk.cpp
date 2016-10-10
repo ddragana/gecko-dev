@@ -34,14 +34,20 @@ static CriticalAddress gCriticalAddress;
 #include <dlfcn.h>
 #endif
 
-#define MOZ_STACKWALK_SUPPORTS_MACOSX \
-  (defined(XP_DARWIN) && \
-   (defined(__i386) || defined(__ppc__) || defined(HAVE__UNWIND_BACKTRACE)))
+#if (defined(XP_DARWIN) && \
+     (defined(__i386) || defined(__ppc__) || defined(HAVE__UNWIND_BACKTRACE)))
+#define MOZ_STACKWALK_SUPPORTS_MACOSX 1
+#else
+#define MOZ_STACKWALK_SUPPORTS_MACOSX 0
+#endif
 
-#define MOZ_STACKWALK_SUPPORTS_LINUX \
-  (defined(linux) && \
-   ((defined(__GNUC__) && (defined(__i386) || defined(PPC))) || \
-    defined(HAVE__UNWIND_BACKTRACE)))
+#if (defined(linux) && \
+     ((defined(__GNUC__) && (defined(__i386) || defined(PPC))) || \
+      defined(HAVE__UNWIND_BACKTRACE)))
+#define MOZ_STACKWALK_SUPPORTS_LINUX 1
+#else
+#define MOZ_STACKWALK_SUPPORTS_LINUX 0
+#endif
 
 #if __GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 1)
 #define HAVE___LIBC_STACK_END 1
@@ -88,25 +94,6 @@ stack_callback(uint32_t aFrameNumber, void* aPc, void* aSp, void* aClosure)
   }
   gCriticalAddress.mAddr = aPc;
 }
-
-#if defined(MOZ_WIDGET_COCOA) && defined(DEBUG)
-#define MAC_OS_X_VERSION_10_7_HEX 0x00001070
-
-static int32_t OSXVersion()
-{
-  static int32_t gOSXVersion = 0x0;
-  if (gOSXVersion == 0x0) {
-    OSErr err = ::Gestalt(gestaltSystemVersion, (SInt32*)&gOSXVersion);
-    MOZ_ASSERT(err == noErr);
-  }
-  return gOSXVersion;
-}
-
-static bool OnLionOrLater()
-{
-  return (OSXVersion() >= MAC_OS_X_VERSION_10_7_HEX);
-}
-#endif
 
 static void
 my_malloc_logger(uint32_t aType,
@@ -164,12 +151,6 @@ StackWalkInitCriticalAddress()
   // restore the previous malloc logger
   malloc_logger = old_malloc_logger;
 
-  // On Lion, malloc is no longer called from pthread_cond_*wait*. This prevents
-  // us from finding the address, but that is fine, since with no call to malloc
-  // there is no critical address.
-#ifdef MOZ_WIDGET_COCOA
-  MOZ_ASSERT(OnLionOrLater() || gCriticalAddress.mAddr != nullptr);
-#endif
   MOZ_ASSERT(r == ETIMEDOUT);
   r = pthread_mutex_unlock(&mutex);
   MOZ_ASSERT(r == 0);
@@ -207,6 +188,7 @@ StackWalkInitCriticalAddress()
 #include <stdio.h>
 #include <malloc.h>
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/StackWalk_windows.h"
 
 #include <imagehlp.h>
 // We need a way to know if we are building for WXP (or later), as if we are, we
@@ -458,6 +440,49 @@ WalkStackMain64(struct WalkStackData* aData)
     }
 #endif
   }
+}
+
+// The JIT needs to allocate executable memory. Because of the inanity of
+// the win64 APIs, this requires locks that stalk walkers also need. Provide
+// another lock to allow synchronization around these resources.
+#ifdef _M_AMD64
+
+struct CriticalSectionAutoInitializer {
+    CRITICAL_SECTION lock;
+
+    CriticalSectionAutoInitializer() {
+      InitializeCriticalSection(&lock);
+    }
+};
+
+static CriticalSectionAutoInitializer gWorkaroundLock;
+
+#endif // _M_AMD64
+
+MFBT_API void
+AcquireStackWalkWorkaroundLock()
+{
+#ifdef _M_AMD64
+  EnterCriticalSection(&gWorkaroundLock.lock);
+#endif
+}
+
+MFBT_API bool
+TryAcquireStackWalkWorkaroundLock()
+{
+#ifdef _M_AMD64
+  return TryEnterCriticalSection(&gWorkaroundLock.lock);
+#else
+  return true;
+#endif
+}
+
+MFBT_API void
+ReleaseStackWalkWorkaroundLock()
+{
+#ifdef _M_AMD64
+  LeaveCriticalSection(&gWorkaroundLock.lock);
+#endif
 }
 
 static unsigned int WINAPI
@@ -885,8 +910,9 @@ void DemangleSymbol(const char* aSymbol,
 #endif // MOZ_DEMANGLE_SYMBOLS
 }
 
-#define X86_OR_PPC (defined(__i386) || defined(PPC) || defined(__ppc__))
-#if X86_OR_PPC && (MOZ_STACKWALK_SUPPORTS_MACOSX || MOZ_STACKWALK_SUPPORTS_LINUX) // i386 or PPC Linux or Mac stackwalking code
+// {x86, ppc} x {Linux, Mac} stackwalking code.
+#if ((defined(__i386) || defined(PPC) || defined(__ppc__)) && \
+     (MOZ_STACKWALK_SUPPORTS_MACOSX || MOZ_STACKWALK_SUPPORTS_LINUX))
 
 MFBT_API bool
 MozStackWalk(MozWalkStackCallback aCallback, uint32_t aSkipFrames,

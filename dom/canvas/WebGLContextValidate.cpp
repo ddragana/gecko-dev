@@ -15,6 +15,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
+#include "nsPrintfCString.h"
 #include "WebGLActiveInfo.h"
 #include "WebGLBuffer.h"
 #include "WebGLContextUtils.h"
@@ -121,36 +122,11 @@ WebGLContext::ValidateBlendFuncEnumsCompatibility(GLenum sfactor,
     return true;
 }
 
-bool
-WebGLContext::ValidateDataOffsetSize(WebGLintptr offset, WebGLsizeiptr size, WebGLsizeiptr bufferSize, const char* info)
-{
-    if (offset < 0) {
-        ErrorInvalidValue("%s: offset must be positive", info);
-        return false;
-    }
-
-    if (size < 0) {
-        ErrorInvalidValue("%s: size must be positive", info);
-        return false;
-    }
-
-    // *** Careful *** WebGLsizeiptr is always 64-bits but GLsizeiptr
-    // is like intptr_t. On some platforms it is 32-bits.
-    CheckedInt<GLsizeiptr> neededBytes = CheckedInt<GLsizeiptr>(offset) + size;
-    if (!neededBytes.isValid() || neededBytes.value() > bufferSize) {
-        ErrorInvalidValue("%s: invalid range", info);
-        return false;
-    }
-
-    return true;
-}
-
 /**
  * Check data ranges [readOffset, readOffset + size] and [writeOffset,
  * writeOffset + size] for overlap.
  *
- * It is assumed that offset and size have already been validated with
- * ValidateDataOffsetSize().
+ * It is assumed that offset and size have already been validated.
  */
 bool
 WebGLContext::ValidateDataRanges(WebGLintptr readOffset, WebGLintptr writeOffset, WebGLsizeiptr size, const char* info)
@@ -437,7 +413,7 @@ WebGLContext::ValidateUniformLocation(WebGLUniformLocation* loc, const char* fun
         return false;
     }
 
-    return loc->ValidateForProgram(mCurrentProgram, this, funcName);
+    return loc->ValidateForProgram(mCurrentProgram, funcName);
 }
 
 bool
@@ -459,7 +435,7 @@ WebGLContext::ValidateAttribArraySetter(const char* name, uint32_t setterElemSiz
 bool
 WebGLContext::ValidateUniformSetter(WebGLUniformLocation* loc,
                                     uint8_t setterElemSize, GLenum setterType,
-                                    const char* funcName, GLuint* out_rawLoc)
+                                    const char* funcName)
 {
     if (IsContextLost())
         return false;
@@ -467,10 +443,9 @@ WebGLContext::ValidateUniformSetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    *out_rawLoc = loc->mLoc;
     return true;
 }
 
@@ -478,10 +453,9 @@ bool
 WebGLContext::ValidateUniformArraySetter(WebGLUniformLocation* loc,
                                          uint8_t setterElemSize,
                                          GLenum setterType,
-                                         size_t setterArraySize,
+                                         uint32_t setterArraySize,
                                          const char* funcName,
-                                         GLuint* const out_rawLoc,
-                                         GLsizei* const out_numElementsToUpload)
+                                         uint32_t* const out_numElementsToUpload)
 {
     if (IsContextLost())
         return false;
@@ -489,16 +463,18 @@ WebGLContext::ValidateUniformArraySetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, this, funcName))
+    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, funcName))
         return false;
 
-    MOZ_ASSERT((size_t)loc->mActiveInfo->mElemCount > loc->mArrayIndex);
-    size_t uniformElemCount = loc->mActiveInfo->mElemCount - loc->mArrayIndex;
-    *out_rawLoc = loc->mLoc;
-    *out_numElementsToUpload = std::min(uniformElemCount, setterArraySize / setterElemSize);
+    const auto& elemCount = loc->mInfo->mActiveInfo->mElemCount;
+    MOZ_ASSERT(elemCount > loc->mArrayIndex);
+    const uint32_t uniformElemCount = elemCount - loc->mArrayIndex;
+
+    *out_numElementsToUpload = std::min(uniformElemCount,
+                                        setterArraySize / setterElemSize);
     return true;
 }
 
@@ -507,13 +483,12 @@ WebGLContext::ValidateUniformMatrixArraySetter(WebGLUniformLocation* loc,
                                                uint8_t setterCols,
                                                uint8_t setterRows,
                                                GLenum setterType,
-                                               size_t setterArraySize,
+                                               uint32_t setterArraySize,
                                                bool setterTranspose,
                                                const char* funcName,
-                                               GLuint* const out_rawLoc,
-                                               GLsizei* const out_numElementsToUpload)
+                                               uint32_t* const out_numElementsToUpload)
 {
-    uint8_t setterElemSize = setterCols * setterRows;
+    const uint8_t setterElemSize = setterCols * setterRows;
 
     if (IsContextLost())
         return false;
@@ -521,20 +496,21 @@ WebGLContext::ValidateUniformMatrixArraySetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, this, funcName))
+    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, funcName))
         return false;
 
     if (!ValidateUniformMatrixTranspose(setterTranspose, funcName))
         return false;
 
-    MOZ_ASSERT((size_t)loc->mActiveInfo->mElemCount > loc->mArrayIndex);
-    size_t uniformElemCount = loc->mActiveInfo->mElemCount - loc->mArrayIndex;
-    *out_rawLoc = loc->mLoc;
-    *out_numElementsToUpload = std::min(uniformElemCount, setterArraySize / setterElemSize);
+    const auto& elemCount = loc->mInfo->mActiveInfo->mElemCount;
+    MOZ_ASSERT(elemCount > loc->mArrayIndex);
+    const uint32_t uniformElemCount = elemCount - loc->mArrayIndex;
 
+    *out_numElementsToUpload = std::min(uniformElemCount,
+                                        setterArraySize / setterElemSize);
     return true;
 }
 
@@ -571,7 +547,7 @@ WebGLContext::ValidateAttribPointer(bool integerMode, GLuint index, GLint size, 
         return false;
     }
 
-    GLsizei requiredAlignment = 0;
+    uint32_t requiredAlignment = 0;
     if (!ValidateAttribPointerType(integerMode, type, &requiredAlignment, info))
         return false;
 
@@ -696,6 +672,8 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mStencilRefFront = 0;
     mStencilRefBack = 0;
 
+    mLineWidth = 1.0;
+
     /*
     // Technically, we should be setting mStencil[...] values to
     // `allOnes`, but either ANGLE breaks or the SGX540s on Try break.
@@ -737,7 +715,6 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mBoundSamplers.Clear();
 
     mBoundArrayBuffer = nullptr;
-    mBoundTransformFeedbackBuffer = nullptr;
     mCurrentProgram = nullptr;
 
     mBoundDrawFramebuffer = nullptr;
@@ -893,19 +870,11 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     }
 
     if (gl->IsCompatibilityProfile()) {
-        // gl_PointSize is always available in ES2 GLSL, but has to be
-        // specifically enabled on desktop GLSL.
-        gl->fEnable(LOCAL_GL_VERTEX_PROGRAM_POINT_SIZE);
-
-        /* gl_PointCoord is always available in ES2 GLSL and in newer desktop
-         * GLSL versions, but apparently not in OpenGL 2 and apparently not (due
-         * to a driver bug) on certain NVIDIA setups. See:
-         *   http://www.opengl.org/discussion_boards/ubbthreads.php?ubb=showflat&Number=261472
-         *
-         * Note that this used to cause crashes on old ATI drivers... Hopefully
-         * not a significant anymore. See bug 602183.
-         */
         gl->fEnable(LOCAL_GL_POINT_SPRITE);
+    }
+
+    if (!gl->IsGLES()) {
+        gl->fEnable(LOCAL_GL_PROGRAM_POINT_SIZE);
     }
 
 #ifdef XP_MACOSX
@@ -979,7 +948,6 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     // vertex array object (the name zero) is also deprecated. [...]"
 
     if (gl->IsCoreProfile()) {
-        MakeContextCurrent();
         mDefaultVertexArray->GenVertexArray();
         mDefaultVertexArray->BindVertexArray();
     }
@@ -999,6 +967,8 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mPixelStore_PackSkipRows = 0;
     mPixelStore_PackSkipPixels = 0;
     mPixelStore_PackAlignment = 4;
+
+    mPrimRestartTypeBytes = 0;
 
     return true;
 }

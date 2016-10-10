@@ -6,8 +6,9 @@
 #define MOZILLA_MEDIAMANAGER_H
 
 #include "MediaEngine.h"
+#include "mozilla/media/DeviceChangeCallback.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
 #include "nsIMediaManager.h"
 
@@ -63,15 +64,29 @@ extern LogModule* GetMediaManagerLog();
 class MediaDevice : public nsIMediaDevice
 {
 public:
+  typedef MediaEngineSource Source;
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIMEDIADEVICE
 
   void SetId(const nsAString& aID);
+  void SetRawId(const nsAString& aID);
   virtual uint32_t GetBestFitnessDistance(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets);
+      const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
+      bool aIsChrome);
+  virtual Source* GetSource() = 0;
+  nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
+                    const MediaEnginePrefs &aPrefs,
+                    const nsACString& aOrigin,
+                    const char** aOutBadConstraint);
+  nsresult Restart(const dom::MediaTrackConstraints &aConstraints,
+                   const MediaEnginePrefs &aPrefs,
+                   const char** aOutBadConstraint);
+  nsresult Deallocate();
 protected:
   virtual ~MediaDevice() {}
   explicit MediaDevice(MediaEngineSource* aSource, bool aIsVideo);
+
   static uint32_t FitnessDistance(nsString aN,
     const dom::OwningStringOrStringSequenceOrConstrainDOMStringParameters& aConstraint);
 private:
@@ -82,8 +97,10 @@ private:
 protected:
   nsString mName;
   nsString mID;
+  nsString mRawID;
   dom::MediaSourceEnum mMediaSource;
   RefPtr<MediaEngineSource> mSource;
+  RefPtr<MediaEngineSource::AllocationHandle> mAllocationHandle;
 public:
   dom::MediaSourceEnum GetMediaSource() {
     return mMediaSource;
@@ -97,13 +114,8 @@ public:
   typedef MediaEngineVideoSource Source;
 
   explicit VideoDevice(Source* aSource);
-  NS_IMETHOD GetType(nsAString& aType);
-  Source* GetSource();
-  nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
-                    const MediaEnginePrefs &aPrefs,
-                    const nsACString& aOrigin);
-  nsresult Restart(const dom::MediaTrackConstraints &aConstraints,
-                   const MediaEnginePrefs &aPrefs);
+  NS_IMETHOD GetType(nsAString& aType) override;
+  Source* GetSource() override;
 };
 
 class AudioDevice : public MediaDevice
@@ -112,13 +124,8 @@ public:
   typedef MediaEngineAudioSource Source;
 
   explicit AudioDevice(Source* aSource);
-  NS_IMETHOD GetType(nsAString& aType);
-  Source* GetSource();
-  nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
-                    const MediaEnginePrefs &aPrefs,
-                    const nsACString& aOrigin);
-  nsresult Restart(const dom::MediaTrackConstraints &aConstraints,
-                   const MediaEnginePrefs &aPrefs);
+  NS_IMETHOD GetType(nsAString& aType) override;
+  Source* GetSource() override;
 };
 
 class GetUserMediaNotificationEvent: public Runnable
@@ -184,6 +191,7 @@ typedef void (*WindowListenerCallback)(MediaManager *aThis,
 
 class MediaManager final : public nsIMediaManagerService,
                            public nsIObserver
+                          ,public DeviceChangeCallback
 {
   friend GetUserMediaCallbackMediaStreamListener;
 public:
@@ -253,12 +261,14 @@ public:
 
   typedef nsTArray<RefPtr<MediaDevice>> SourceSet;
   static bool IsPrivateBrowsing(nsPIDOMWindowInner* window);
+
+  virtual int AddDeviceChangeCallback(DeviceChangeCallback* aCallback) override;
+  virtual void OnDeviceChange() override;
 private:
   typedef media::Pledge<SourceSet*, dom::MediaStreamError*> PledgeSourceSet;
   typedef media::Pledge<const char*, dom::MediaStreamError*> PledgeChar;
+  typedef media::Pledge<bool, dom::MediaStreamError*> PledgeVoid;
 
-  static bool IsPrivileged();
-  static bool IsLoop(nsIURI* aDocURI);
   static nsresult GenerateUUID(nsAString& aResult);
   static nsresult AnonymizeId(nsAString& aId, const nsACString& aOriginKey);
 public: // TODO: make private once we upgrade to GCC 4.8+ on linux.
@@ -269,15 +279,16 @@ private:
   EnumerateRawDevices(uint64_t aWindowId,
                       dom::MediaSourceEnum aVideoType,
                       dom::MediaSourceEnum aAudioType,
-                      bool aFake, bool aFakeTracks);
+                      bool aFake);
   already_AddRefed<PledgeSourceSet>
   EnumerateDevicesImpl(uint64_t aWindowId,
                        dom::MediaSourceEnum aVideoSrcType,
                        dom::MediaSourceEnum aAudioSrcType,
-                       bool aFake = false, bool aFakeTracks = false);
+                       bool aFake = false);
   already_AddRefed<PledgeChar>
   SelectSettings(
       dom::MediaStreamConstraints& aConstraints,
+      bool aIsChrome,
       RefPtr<media::Refcountable<UniquePtr<SourceSet>>>& aSources);
 
   StreamListeners* AddWindowID(uint64_t aWindowId);
@@ -304,6 +315,7 @@ private:
                               void *aData);
 
   void StopMediaStreams();
+  void RemoveMediaDevicesCallback(uint64_t aWindowID);
 
   // ONLY access from MainThread so we don't need to lock
   WindowTable mActiveWindows;
@@ -321,7 +333,7 @@ private:
 
   media::CoatCheck<PledgeSourceSet> mOutstandingPledges;
   media::CoatCheck<PledgeChar> mOutstandingCharPledges;
-  media::CoatCheck<media::Pledge<bool, dom::MediaStreamError*>> mOutstandingVoidPledges;
+  media::CoatCheck<PledgeVoid> mOutstandingVoidPledges;
 #if defined(MOZ_B2G_CAMERA) && defined(MOZ_WIDGET_GONK)
   RefPtr<nsDOMCameraManager> mCameraManager;
 #endif

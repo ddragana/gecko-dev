@@ -30,6 +30,7 @@ include URIParams;
 include InputStreamParams;
 include NeckoChannelParams;
 include PBrowserOrId;
+include protocol PAltDataOutputStream;
 
 using class IPC::SerializedLoadContext from "SerializedLoadContext.h";
 using mozilla::dom::TabId from "mozilla/dom/ipc/IdType.h";
@@ -39,7 +40,7 @@ namespace mozilla {
 namespace net {
 
 //-------------------------------------------------------------------
-prio(normal upto urgent) sync protocol PNecko
+nested(upto inside_cpow) sync protocol PNecko
 {
   manager PContent;
   manages PHttpChannel;
@@ -58,11 +59,12 @@ prio(normal upto urgent) sync protocol PNecko
   manages PRtspChannel;
   manages PChannelDiverter;
   manages PTransportProvider;
+  manages PAltDataOutputStream;
 
 parent:
   async __delete__();
 
-  prio(urgent) async PCookieService();
+  nested(inside_cpow) async PCookieService();
   async PHttpChannel(PBrowserOrId browser,
                      SerializedLoadContext loadContext,
                      HttpChannelCreationArgs args);
@@ -116,6 +118,8 @@ parent:
 
   async RemoveRequestContext(nsCString rcid);
 
+  async PAltDataOutputStream(nsCString type, PHttpChannel channel);
+
 child:
   /*
    * Bring up the http auth prompt for a nested remote mozbrowser.
@@ -132,7 +136,7 @@ child:
   async PredOnPredictPreconnect(URIParams uri);
   async PredOnPredictDNS(URIParams uri);
 
-  async SpeculativeConnectRequest(nsCString notificationData);
+  async SpeculativeConnectRequest();
 
   async PTransportProvider();
 

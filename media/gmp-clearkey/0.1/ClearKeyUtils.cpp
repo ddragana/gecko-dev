@@ -30,15 +30,6 @@
 
 using namespace std;
 
-#define FOURCC(a,b,c,d) ((a << 24) + (b << 16) + (c << 8) + d)
-
-// System ID identifying the cenc v2 pssh box format; specified at:
-// https://dvcs.w3.org/hg/html-media/raw-file/tip/encrypted-media/cenc-format.html
-const uint8_t kSystemID[] = {
-  0x10, 0x77, 0xef, 0xec, 0xc0, 0xb2, 0x4d, 0x02,
-  0xac, 0xe3, 0x3c, 0x1e, 0x52, 0xe2, 0xfb, 0x4b
-};
-
 void
 CK_Log(const char* aFmt, ...)
 {
@@ -129,64 +120,6 @@ EncodeBase64Web(vector<uint8_t> aBinary, string& aEncoded)
   }
 
   return true;
-}
-
-/* static */ void
-ClearKeyUtils::ParseCENCInitData(const uint8_t* aInitData,
-                                 uint32_t aInitDataSize,
-                                 vector<KeyId>& aOutKeyIds)
-{
-  using mozilla::BigEndian;
-
-  uint32_t size = 0;
-  for (uint32_t offset = 0; offset + sizeof(uint32_t) < aInitDataSize; offset += size) {
-    const uint8_t* data = aInitData + offset;
-    size = BigEndian::readUint32(data); data += sizeof(uint32_t);
-
-    CK_LOGD("Looking for pssh at offset %u", offset);
-
-    if (size + offset > aInitDataSize) {
-      CK_LOGE("Box size %u overflows init data buffer", size);
-      return;
-    }
-
-    if (size < 36) {
-      // Too small to be a cenc2 pssh box
-      continue;
-    }
-
-    uint32_t box = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    if (box != FOURCC('p','s','s','h')) {
-      CK_LOGE("ClearKey CDM passed non-pssh initData");
-      return;
-    }
-
-    uint32_t head = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    CK_LOGD("Got version %u pssh box, length %u", head & 0xff, size);
-
-    if ((head >> 24) != 1) {
-      // Ignore pssh boxes with wrong version
-      CK_LOGD("Ignoring pssh box with wrong version");
-      continue;
-    }
-
-    if (memcmp(kSystemID, data, sizeof(kSystemID))) {
-      // Ignore pssh boxes with wrong system ID
-      continue;
-    }
-    data += sizeof(kSystemID);
-
-    uint32_t kidCount = BigEndian::readUint32(data); data += sizeof(uint32_t);
-    if (data + kidCount * CLEARKEY_KEY_LEN > aInitData + aInitDataSize) {
-      CK_LOGE("pssh key IDs overflow init data buffer");
-      return;
-    }
-
-    for (uint32_t i = 0; i < kidCount; i++) {
-      aOutKeyIds.push_back(KeyId(data, data + CLEARKEY_KEY_LEN));
-      data += CLEARKEY_KEY_LEN;
-    }
-  }
 }
 
 /* static */ void
@@ -377,15 +310,6 @@ GetNextLabel(ParserContext& aCtx, string& aOutLabel)
 }
 
 static bool
-DecodeKey(string& aEncoded, Key& aOutDecoded)
-{
-  return
-    DecodeBase64KeyOrId(aEncoded, aOutDecoded) &&
-    // Key should be 128 bits long.
-    aOutDecoded.size() == CLEARKEY_KEY_LEN;
-}
-
-static bool
 ParseKeyObject(ParserContext& aCtx, KeyIdPair& aOutKey)
 {
   EXPECT_SYMBOL(aCtx, '{');
@@ -430,8 +354,8 @@ ParseKeyObject(ParserContext& aCtx, KeyIdPair& aOutKey)
 
   return !key.empty() &&
          !keyId.empty() &&
-         DecodeBase64KeyOrId(keyId, aOutKey.mKeyId) &&
-         DecodeKey(key, aOutKey.mKey) &&
+         DecodeBase64(keyId, aOutKey.mKeyId) &&
+         DecodeBase64(key, aOutKey.mKey) &&
          GetNextSymbol(aCtx) == '}';
 }
 
@@ -518,12 +442,12 @@ ParseKeyIds(ParserContext& aCtx, vector<KeyId>& aOutKeyIds)
   while (true) {
     string label;
     vector<uint8_t> keyId;
-    if (!GetNextLabel(aCtx, label) ||
-        !DecodeBase64KeyOrId(label, keyId)) {
+    if (!GetNextLabel(aCtx, label) || !DecodeBase64(label, keyId)) {
       return false;
     }
-    assert(!keyId.empty());
-    aOutKeyIds.push_back(keyId);
+    if (!keyId.empty() && keyId.size() <= kMaxKeyIdsLength) {
+      aOutKeyIds.push_back(keyId);
+    }
 
     uint8_t sym = PeekSymbol(aCtx);
     if (!sym || sym == ']') {
@@ -560,7 +484,10 @@ ClearKeyUtils::ParseKeyIdsInitData(const uint8_t* aInitData,
 
     if (label == "kids") {
       // Parse "kids" array.
-      if (!ParseKeyIds(ctx, aOutKeyIds)) return false;
+      if (!ParseKeyIds(ctx, aOutKeyIds) ||
+          aOutKeyIds.empty()) {
+        return false;
+      }
     } else if (label == "type") {
       // Consume type string.
       if (!GetNextLabel(ctx, aOutSessionType)) return false;
@@ -588,7 +515,7 @@ ClearKeyUtils::SessionTypeToString(GMPSessionType aSessionType)
 {
   switch (aSessionType) {
     case kGMPTemporySession: return "temporary";
-    case kGMPPersistentSession: return "persistent";
+    case kGMPPersistentSession: return "persistent-license";
     default: {
       assert(false); // Should not reach here.
       return "invalid";

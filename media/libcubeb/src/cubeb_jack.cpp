@@ -46,7 +46,9 @@
   X(jack_port_get_latency_range)                \
   X(jack_set_process_callback)                  \
   X(jack_set_xrun_callback)                     \
-  X(jack_set_graph_order_callback)
+  X(jack_set_graph_order_callback)              \
+  X(jack_set_error_function)                    \
+  X(jack_set_info_function)
 
 #define IMPORT_FUNC(x) static decltype(x) * api_##x;
 JACK_API_VISIT(IMPORT_FUNC);
@@ -85,8 +87,8 @@ extern "C"
 }
 static char const * cbjack_get_backend_id(cubeb * context);
 static int cbjack_get_max_channel_count(cubeb * ctx, uint32_t * max_channels);
-static int cbjack_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms);
-static int cbjack_get_latency(cubeb_stream * stm, unsigned int * latency_ms);
+static int cbjack_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_frames);
+static int cbjack_get_latency(cubeb_stream * stm, unsigned int * latency_frames);
 static int cbjack_get_preferred_sample_rate(cubeb * ctx, uint32_t * rate);
 static void cbjack_destroy(cubeb * context);
 static void cbjack_interleave_capture(cubeb_stream * stream, float **in, jack_nframes_t nframes, bool format_mismatch);
@@ -102,7 +104,7 @@ static int cbjack_stream_init(cubeb * context, cubeb_stream ** stream, char cons
                               cubeb_stream_params * input_stream_params,
                               cubeb_devid output_device,
                               cubeb_stream_params * output_stream_params,
-                              unsigned int latency,
+                              unsigned int latency_frames,
                               cubeb_data_callback data_callback,
                               cubeb_state_callback state_callback,
                               void * user_ptr);
@@ -283,8 +285,6 @@ cbjack_graph_order_callback(void * arg)
 {
   cubeb * ctx = (cubeb *)arg;
   int i;
-  uint32_t rate;
-
   jack_latency_range_t latency_range;
   jack_nframes_t port_latency, max_latency = 0;
 
@@ -307,10 +307,8 @@ cbjack_graph_order_callback(void * arg)
       max_latency = 128;
   }
 
-  if (cbjack_get_preferred_sample_rate(ctx, &rate) == CUBEB_ERROR)
-    ctx->jack_latency = (max_latency * 1000) / 48000;
-  else
-    ctx->jack_latency = (max_latency * 1000) / rate;
+  ctx->jack_latency = max_latency;
+
   return 0;
 }
 
@@ -566,6 +564,11 @@ cbjack_interleave_capture(cubeb_stream * stream, float **in, jack_nframes_t nfra
   }
 }
 
+static void
+silent_jack_error_callback(char const * /*msg*/)
+{
+}
+
 /*static*/ int
 jack_init (cubeb ** context, char const * context_name)
 {
@@ -583,6 +586,9 @@ jack_init (cubeb ** context, char const * context_name)
     cbjack_destroy(ctx);
     return CUBEB_ERROR;
   }
+
+  api_jack_set_error_function(silent_jack_error_callback);
+  api_jack_set_info_function(silent_jack_error_callback);
 
   ctx->ops = &cbjack_ops;
 
@@ -625,13 +631,13 @@ jack_init (cubeb ** context, char const * context_name)
 }
 
 static char const *
-cbjack_get_backend_id(cubeb * context)
+cbjack_get_backend_id(cubeb * /*context*/)
 {
   return "jack";
 }
 
 static int
-cbjack_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
+cbjack_get_max_channel_count(cubeb * /*ctx*/, uint32_t * max_channels)
 {
   *max_channels = MAX_CHANNELS;
   return CUBEB_OK;
@@ -645,7 +651,7 @@ cbjack_get_latency(cubeb_stream * stm, unsigned int * latency_ms)
 }
 
 static int
-cbjack_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms)
+cbjack_get_min_latency(cubeb * ctx, cubeb_stream_params /*params*/, uint32_t * latency_ms)
 {
   *latency_ms = ctx->jack_latency;
   return CUBEB_OK;
@@ -705,7 +711,7 @@ cbjack_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_
                    cubeb_stream_params * input_stream_params,
                    cubeb_devid output_device,
                    cubeb_stream_params * output_stream_params,
-                   unsigned int latency,
+                   unsigned int /*latency_frames*/,
                    cubeb_data_callback data_callback,
                    cubeb_state_callback state_callback,
                    void * user_ptr)
@@ -726,6 +732,9 @@ cbjack_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_
      ) {
     return CUBEB_ERROR_INVALID_FORMAT;
   }
+
+  if (input_device || output_device)
+    return CUBEB_ERROR_NOT_SUPPORTED;
 
   *stream = NULL;
 
@@ -958,7 +967,7 @@ cbjack_stream_get_current_device(cubeb_stream * stm, cubeb_device ** const devic
 }
 
 static int
-cbjack_stream_device_destroy(cubeb_stream * stream,
+cbjack_stream_device_destroy(cubeb_stream * /*stream*/,
                              cubeb_device * device)
 {
   if (device->input_name)
@@ -999,8 +1008,8 @@ cbjack_enumerate_devices(cubeb * context, cubeb_device_type type,
     context->devinfo[i]->min_rate = rate;
     context->devinfo[i]->max_rate = rate;
     context->devinfo[i]->default_rate = rate;
-    context->devinfo[i]->latency_lo_ms = 1;
-    context->devinfo[i]->latency_hi_ms = 10;
+    context->devinfo[i]->latency_lo = 0;
+    context->devinfo[i]->latency_hi = 0;
     i++;
   }
 
@@ -1020,8 +1029,8 @@ cbjack_enumerate_devices(cubeb * context, cubeb_device_type type,
     context->devinfo[i]->min_rate = rate;
     context->devinfo[i]->max_rate = rate;
     context->devinfo[i]->default_rate = rate;
-    context->devinfo[i]->latency_lo_ms = 1;
-    context->devinfo[i]->latency_hi_ms = 10;
+    context->devinfo[i]->latency_lo = 0;
+    context->devinfo[i]->latency_hi = 0;
     i++;
   }
 

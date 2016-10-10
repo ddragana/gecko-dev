@@ -9,6 +9,7 @@
 
 #include "mozilla/AbstractThread.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/Variant.h"
 #include "nsISupportsImpl.h"
 
 #include "MediaDecoderReader.h"
@@ -20,8 +21,8 @@ class StartTimeRendezvous;
 
 typedef MozPromise<bool, bool, /* isExclusive = */ false> HaveStartTimePromise;
 
-typedef Variant<MediaData*, MediaDecoderReader::NotDecodedReason> AudioCallbackData;
-typedef Variant<Tuple<MediaData*, TimeStamp>, MediaDecoderReader::NotDecodedReason> VideoCallbackData;
+typedef Variant<MediaData*, MediaResult> AudioCallbackData;
+typedef Variant<Tuple<MediaData*, TimeStamp>, MediaResult> VideoCallbackData;
 typedef Variant<MediaData::Type, WaitForDataRejectValue> WaitCallbackData;
 
 /**
@@ -46,8 +47,7 @@ private:
   MediaCallbackExc<WaitCallbackData> mVideoWaitCallback;
 
 public:
-  MediaDecoderReaderWrapper(bool aIsRealTime,
-                            AbstractThread* aOwnerThread,
+  MediaDecoderReaderWrapper(AbstractThread* aOwnerThread,
                             MediaDecoderReader* aReader);
 
   media::TimeUnit StartTime() const;
@@ -75,7 +75,7 @@ public:
   RefPtr<BufferedUpdatePromise> UpdateBufferedWithPromise();
   RefPtr<ShutdownPromise> Shutdown();
 
-  void ReleaseMediaResources();
+  void ReleaseResources();
   void SetIdle();
   void ResetDecode(TrackSet aTracks);
 
@@ -116,9 +116,9 @@ public:
     return mReader->CanonicalIsSuspended();
   }
 
-#ifdef MOZ_EME
   void SetCDMProxy(CDMProxy* aProxy) { mReader->SetCDMProxy(aProxy); }
-#endif
+
+  void SetVideoBlankDecode(bool aIsBlankDecode);
 
 private:
   ~MediaDecoderReaderWrapper();

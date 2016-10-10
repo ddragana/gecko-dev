@@ -1,29 +1,33 @@
 var AddonManager = Cu.import("resource://gre/modules/AddonManager.jsm", {}).AddonManager;
-var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
+var SocialService = Cu.import("resource:///modules/SocialService.jsm", {}).SocialService;
 
 var manifest = {
   name: "provider 1",
   origin: "https://example.com",
-  sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar_empty.html",
+  shareURL: "https://example.com/browser/browser/base/content/test/social/social_share.html",
   iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
 };
 var manifest2 = { // used for testing install
   name: "provider 2",
   origin: "https://test1.example.com",
-  sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar_empty.html",
+  shareURL: "https://test1.example.com/browser/browser/base/content/test/social/social_share.html",
   iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png",
   version: "1.0"
 };
 var manifestUpgrade = { // used for testing install
   name: "provider 3",
   origin: "https://test2.example.com",
-  sidebarURL: "https://test2.example.com/browser/browser/base/content/test/social/social_sidebar.html",
+  shareURL: "https://test2.example.com/browser/browser/base/content/test/social/social_share.html",
   iconURL: "https://test2.example.com/browser/browser/base/content/test/general/moz.png",
   version: "1.0"
 };
 
 function test() {
   waitForExplicitFinish();
+  PopupNotifications.panel.setAttribute("animate", "false");
+  registerCleanupFunction(function () {
+    PopupNotifications.panel.removeAttribute("animate");
+  });
 
   let prefname = getManifestPrefname(manifest);
   // ensure that manifest2 is NOT showing as builtin
@@ -189,7 +193,7 @@ var tests = {
   testDirectoryInstall: function(next) {
     AddonManager.addAddonListener(installListener(next, manifest2));
 
-    ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
+    BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
       let panel = document.getElementById("servicesInstall-notification");
       info("servicesInstall-notification panel opened");
       panel.button.click();

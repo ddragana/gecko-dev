@@ -41,9 +41,12 @@
 #include "nsIPermissionManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIDOMMutationEvent.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using mozilla::layout::RenderFrameParent;
+
+static bool sShowPreviousPage = true;
 
 static nsIDocument*
 GetDocumentFromView(nsView* aView)
@@ -80,7 +83,7 @@ class AsyncFrameInit : public Runnable
 {
 public:
   explicit AsyncFrameInit(nsIFrame* aFrame) : mFrame(aFrame) {}
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     PROFILER_LABEL("mozilla", "AsyncFrameInit::Run", js::ProfileEntry::Category::OTHER);
     if (mFrame.IsAlive()) {
@@ -106,6 +109,12 @@ nsSubDocumentFrame::Init(nsIContent*       aContent,
   // determine if we are a <frame> or <iframe>
   nsCOMPtr<nsIDOMHTMLFrameElement> frameElem = do_QueryInterface(aContent);
   mIsInline = frameElem ? false : true;
+
+  static bool addedShowPreviousPage = false;
+  if (!addedShowPreviousPage) {
+    Preferences::AddBoolVarCache(&sShowPreviousPage, "layout.show_previous_page", true);
+    addedShowPreviousPage = true;
+  }
 
   nsAtomicContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -227,7 +236,7 @@ nsSubDocumentFrame::GetSubdocumentPresShellForPainting(uint32_t aFlags)
     }
     if (frame) {
       nsIPresShell* ps = frame->PresContext()->PresShell();
-      if (!presShell || (ps && !ps->IsPaintingSuppressed())) {
+      if (!presShell || (ps && !ps->IsPaintingSuppressed() && sShowPreviousPage)) {
         subdocView = nextView;
         subdocRootFrame = frame;
         presShell = ps;
@@ -298,31 +307,6 @@ nsSubDocumentFrame::GetSubdocumentSize()
   }
 }
 
-bool
-nsSubDocumentFrame::PassPointerEventsToChildren()
-{
-  // Limit use of mozpasspointerevents to documents with embedded:apps/chrome
-  // permission, because this could be used by the parent document to discover
-  // which parts of the subdocument are transparent to events (if subdocument
-  // uses pointer-events:none on its root element, which is admittedly
-  // unlikely)
-  if (mContent->HasAttr(kNameSpaceID_None, nsGkAtoms::mozpasspointerevents)) {
-      if (PresContext()->IsChrome()) {
-        return true;
-      }
-
-      nsCOMPtr<nsIPermissionManager> permMgr =
-        services::GetPermissionManager();
-      if (permMgr) {
-        uint32_t permission = nsIPermissionManager::DENY_ACTION;
-        permMgr->TestPermissionFromPrincipal(GetContent()->NodePrincipal(),
-                                             "embed-apps", &permission);
-        return permission == nsIPermissionManager::ALLOW_ACTION;
-      }
-  }
-  return false;
-}
-
 static void
 WrapBackgroundColorInOwnLayer(nsDisplayListBuilder* aBuilder,
                               nsIFrame* aFrame,
@@ -371,22 +355,14 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     decorations.MoveTo(aLists);
   }
 
-  // We only care about mozpasspointerevents if we're doing hit-testing
-  // related things.
-  bool passPointerEventsToChildren =
-    (aBuilder->IsForEventDelivery() || aBuilder->IsBuildingLayerEventRegions())
-    ? PassPointerEventsToChildren() : false;
-
-  // If mozpasspointerevents is set, then we should allow subdocument content
-  // to handle events even if we're pointer-events:none.
-  if (aBuilder->IsForEventDelivery() && pointerEventsNone && !passPointerEventsToChildren) {
+  if (aBuilder->IsForEventDelivery() && pointerEventsNone) {
     return;
   }
 
   // If we're passing pointer events to children then we have to descend into
   // subdocuments no matter what, to determine which parts are transparent for
   // hit-testing or event regions.
-  bool needToDescend = aBuilder->GetDescendIntoSubdocuments() || passPointerEventsToChildren;
+  bool needToDescend = aBuilder->GetDescendIntoSubdocuments();
   if (!mInnerView || !needToDescend) {
     return;
   }
@@ -439,8 +415,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       }
     }
 
-    aBuilder->EnterPresShell(subdocRootFrame,
-                             pointerEventsNone && !passPointerEventsToChildren);
+    aBuilder->EnterPresShell(subdocRootFrame, pointerEventsNone);
   } else {
     dirty = aDirtyRect;
   }
@@ -759,21 +734,21 @@ nsSubDocumentFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 
 void
 nsSubDocumentFrame::Reflow(nsPresContext*           aPresContext,
-                           nsHTMLReflowMetrics&     aDesiredSize,
-                           const nsHTMLReflowState& aReflowState,
+                           ReflowOutput&     aDesiredSize,
+                           const ReflowInput& aReflowInput,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsSubDocumentFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
      ("enter nsSubDocumentFrame::Reflow: maxSize=%d,%d",
-      aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+      aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
-  NS_ASSERTION(aReflowState.ComputedWidth() != NS_UNCONSTRAINEDSIZE,
+  NS_ASSERTION(aReflowInput.ComputedWidth() != NS_UNCONSTRAINEDSIZE,
                "Shouldn't have unconstrained stuff here "
                "thanks to the rules of reflow");
-  NS_ASSERTION(NS_INTRINSICSIZE != aReflowState.ComputedHeight(),
+  NS_ASSERTION(NS_INTRINSICSIZE != aReflowInput.ComputedHeight(),
                "Shouldn't have unconstrained stuff here "
                "thanks to ComputeAutoSize");
 
@@ -783,16 +758,16 @@ nsSubDocumentFrame::Reflow(nsPresContext*           aPresContext,
                "Shouldn't happen");
 
   // XUL <iframe> or <browser>, or HTML <iframe>, <object> or <embed>
-  aDesiredSize.SetSize(aReflowState.GetWritingMode(),
-                       aReflowState.ComputedSizeWithBorderPadding());
+  aDesiredSize.SetSize(aReflowInput.GetWritingMode(),
+                       aReflowInput.ComputedSizeWithBorderPadding());
 
   // "offset" is the offset of our content area from our frame's
   // top-left corner.
-  nsPoint offset = nsPoint(aReflowState.ComputedPhysicalBorderPadding().left,
-                           aReflowState.ComputedPhysicalBorderPadding().top);
+  nsPoint offset = nsPoint(aReflowInput.ComputedPhysicalBorderPadding().left,
+                           aReflowInput.ComputedPhysicalBorderPadding().top);
 
   if (mInnerView) {
-    const nsMargin& bp = aReflowState.ComputedPhysicalBorderPadding();
+    const nsMargin& bp = aReflowInput.ComputedPhysicalBorderPadding();
     nsSize innerSize(aDesiredSize.Width() - bp.LeftRight(),
                      aDesiredSize.Height() - bp.TopBottom());
 
@@ -833,7 +808,7 @@ nsSubDocumentFrame::Reflow(nsPresContext*           aPresContext,
      ("exit nsSubDocumentFrame::Reflow: size=%d,%d status=%x",
       aDesiredSize.Width(), aDesiredSize.Height(), aStatus));
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
 }
 
 bool
@@ -904,16 +879,6 @@ nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
     if (frameloader)
       frameloader->MarginsChanged(margins.width, margins.height);
   }
-  else if (aAttribute == nsGkAtoms::mozpasspointerevents) {
-    RefPtr<nsFrameLoader> frameloader = FrameLoader();
-    if (frameloader) {
-      if (aModType == nsIDOMMutationEvent::ADDITION) {
-        frameloader->ActivateUpdateHitRegion();
-      } else if (aModType == nsIDOMMutationEvent::REMOVAL) {
-        frameloader->DeactivateUpdateHitRegion();
-      }
-    }
-  }
 
   return NS_OK;
 }
@@ -942,7 +907,7 @@ public:
     NS_ASSERTION(mPresShell, "Must have a presshell");
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // Flush frames, to ensure any pending display:none changes are made.
     // Note it can be unsafe to flush if we've destroyed the presentation
@@ -1038,9 +1003,7 @@ nsSubDocumentFrame::FrameLoader()
   if (!mFrameLoader) {
     nsCOMPtr<nsIFrameLoaderOwner> loaderOwner = do_QueryInterface(content);
     if (loaderOwner) {
-      nsCOMPtr<nsIFrameLoader> loader;
-      loaderOwner->GetFrameLoader(getter_AddRefs(loader));
-      mFrameLoader = static_cast<nsFrameLoader*>(loader.get());
+      mFrameLoader = loaderOwner->GetFrameLoader();
     }
   }
   return mFrameLoader;

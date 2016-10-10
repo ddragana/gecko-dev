@@ -133,13 +133,6 @@ NS_IMETHODIMP nsFileResult::GetMatchCount(uint32_t *aMatchCount)
   return NS_OK;
 }
 
-NS_IMETHODIMP nsFileResult::GetTypeAheadResult(bool *aTypeAheadResult)
-{
-  NS_ENSURE_ARG_POINTER(aTypeAheadResult);
-  *aTypeAheadResult = false;
-  return NS_OK;
-}
-
 NS_IMETHODIMP nsFileResult::GetValueAt(int32_t index, nsAString & aValue)
 {
   aValue = mValues[index];
@@ -861,7 +854,7 @@ nsFileView::FilterFiles()
       for (uint32_t j = 0; j < filterCount; ++j) {
         bool matched = false;
         if (!nsCRT::strcmp(mCurrentFilters.ElementAt(j),
-                           MOZ_UTF16("..apps")))
+                           u"..apps"))
         {
           file->IsExecutable(&matched);
         } else

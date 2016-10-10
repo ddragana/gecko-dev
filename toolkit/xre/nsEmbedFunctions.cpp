@@ -79,17 +79,16 @@
 #include "mozilla/sandboxing/loggingCallbacks.h"
 #endif
 
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+#include "mozilla/Preferences.h"
+#endif
+
 #ifdef MOZ_IPDL_TESTS
 #include "mozilla/_ipdltest/IPDLUnitTests.h"
 #include "mozilla/_ipdltest/IPDLUnitTestProcessChild.h"
 
 using mozilla::_ipdltest::IPDLUnitTestProcessChild;
 #endif  // ifdef MOZ_IPDL_TESTS
-
-#ifdef MOZ_B2G_LOADER
-#include "nsLocalFile.h"
-#include "nsXREAppData.h"
-#endif
 
 #ifdef MOZ_JPROF
 #include "jprof.h"
@@ -294,6 +293,22 @@ SetTaskbarGroupId(const nsString& aId)
 }
 #endif
 
+#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+void
+AddContentSandboxLevelAnnotation()
+{
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    int level = Preferences::GetInt("security.sandbox.content.level");
+    nsAutoCString levelString;
+    levelString.AppendInt(level);
+    CrashReporter::AnnotateCrashReport(
+      NS_LITERAL_CSTRING("ContentSandboxLevel"), levelString);
+  }
+}
+#endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
+#endif /* MOZ_CRASHREPORTER */
+
 nsresult
 XRE_InitChildProcess(int aArgc,
                      char* aArgv[],
@@ -303,10 +318,6 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_POINTER(aArgv);
   NS_ENSURE_ARG_POINTER(aArgv[0]);
   MOZ_ASSERT(aChildData);
-
-#ifdef HAS_DLL_BLOCKLIST
-  DllBlocklist_Initialize();
-#endif
 
 #ifdef MOZ_JPROF
   // Call the code to install our handler
@@ -356,7 +367,7 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
   // NB: This must be called before profiler_init
-  NS_LogInit();
+  ScopedLogging logger;
 
   // This is needed by Telemetry to initialize histogram collection.
   // NB: This must be called after NS_LogInit().
@@ -369,7 +380,7 @@ XRE_InitChildProcess(int aArgc,
   mozilla::LogModule::Init();
 
   char aLocal;
-  profiler_init(&aLocal);
+  GeckoProfilerInitRAII profiler(&aLocal);
 
   PROFILER_LABEL("Startup", "XRE_InitChildProcess",
     js::ProfileEntry::Category::OTHER);
@@ -548,22 +559,18 @@ XRE_InitChildProcess(int aArgc,
 
   nsresult rv = XRE_InitCommandLine(aArgc, aArgv);
   if (NS_FAILED(rv)) {
-    profiler_shutdown();
-    NS_LogTerm();
     return NS_ERROR_FAILURE;
   }
 
   MessageLoop::Type uiLoopType;
   switch (XRE_GetProcessType()) {
   case GeckoProcessType_Content:
+  case GeckoProcessType_GPU:
       // Content processes need the XPCOM/chromium frankenventloop
       uiLoopType = MessageLoop::TYPE_MOZILLA_CHILD;
       break;
   case GeckoProcessType_GMPlugin:
       uiLoopType = MessageLoop::TYPE_DEFAULT;
-      break;
-  case GeckoProcessType_GPU:
-      uiLoopType = MessageLoop::TYPE_UI;
       break;
   default:
       uiLoopType = MessageLoop::TYPE_UI;
@@ -597,13 +604,44 @@ XRE_InitChildProcess(int aArgc,
       case GeckoProcessType_Content: {
           process = new ContentProcess(parentPID);
           // If passed in grab the application path for xpcom init
-          nsCString appDir;
+          bool foundAppdir = false;
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+          // If passed in grab the profile path for sandboxing
+          bool foundProfile = false;
+#endif
+
           for (int idx = aArgc; idx > 0; idx--) {
             if (aArgv[idx] && !strcmp(aArgv[idx], "-appdir")) {
+              MOZ_ASSERT(!foundAppdir);
+              if (foundAppdir) {
+                  continue;
+              }
+              nsCString appDir;
               appDir.Assign(nsDependentCString(aArgv[idx+1]));
               static_cast<ContentProcess*>(process.get())->SetAppDir(appDir);
+              foundAppdir = true;
+            }
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+            if (aArgv[idx] && !strcmp(aArgv[idx], "-profile")) {
+              MOZ_ASSERT(!foundProfile);
+              if (foundProfile) {
+                continue;
+              }
+              nsCString profile;
+              profile.Assign(nsDependentCString(aArgv[idx+1]));
+              static_cast<ContentProcess*>(process.get())->SetProfile(profile);
+              foundProfile = true;
+            }
+            if (foundProfile && foundAppdir) {
               break;
             }
+#else
+            if (foundAppdir) {
+              break;
+            }
+#endif /* XP_MACOSX && MOZ_CONTENT_SANDBOX */
           }
         }
         break;
@@ -629,8 +667,6 @@ XRE_InitChildProcess(int aArgc,
       }
 
       if (!process->Init()) {
-        profiler_shutdown();
-        NS_LogTerm();
         return NS_ERROR_FAILURE;
       }
 
@@ -655,6 +691,12 @@ XRE_InitChildProcess(int aArgc,
 
       OverrideDefaultLocaleIfNeeded();
 
+#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+      AddContentSandboxLevelAnnotation();
+#endif
+#endif
+
       // Run the UI event loop on the main thread.
       uiMessageLoop.MessageLoop::Run();
 
@@ -671,8 +713,6 @@ XRE_InitChildProcess(int aArgc,
   }
 
   Telemetry::DestroyStatisticsRecorder();
-  profiler_shutdown();
-  NS_LogTerm();
   return XRE_DeinitCommandLine();
 }
 
@@ -927,40 +967,3 @@ XRE_InstallX11ErrorHandler()
 #endif
 }
 #endif
-
-#ifdef MOZ_B2G_LOADER
-extern const nsXREAppData* gAppData;
-
-/**
- * Preload static data of Gecko for B2G loader.
- *
- * This function is supposed to be called before XPCOM is initialized.
- * For now, this function preloads
- *  - XPT interface Information
- */
-void
-XRE_ProcLoaderPreload(const char* aProgramDir, const nsXREAppData* aAppData)
-{
-    void PreloadXPT(nsIFile *);
-
-    nsresult rv;
-    nsCOMPtr<nsIFile> omnijarFile;
-    rv = NS_NewNativeLocalFile(nsCString(aProgramDir),
-			       true,
-			       getter_AddRefs(omnijarFile));
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-
-    rv = omnijarFile->AppendNative(NS_LITERAL_CSTRING(NS_STRINGIFY(OMNIJAR_NAME)));
-    MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-
-    /*
-     * gAppData is required by nsXULAppInfo.  The manifest parser
-     * evaluate flags with the information from nsXULAppInfo.
-     */
-    gAppData = aAppData;
-
-    PreloadXPT(omnijarFile);
-
-    gAppData = nullptr;
-}
-#endif /* MOZ_B2G_LOADER */

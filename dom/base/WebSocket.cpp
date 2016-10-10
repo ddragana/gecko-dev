@@ -15,7 +15,6 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/MessageEvent.h"
 #include "mozilla/dom/MessageEventBinding.h"
-#include "mozilla/dom/nsCSPService.h"
 #include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -271,7 +270,7 @@ public:
     aWebSocketImpl->AssertIsOnTargetThread();
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mWebSocketImpl->AssertIsOnTargetThread();
     mWebSocketImpl->DispatchConnectionCloseEvents();
@@ -550,11 +549,11 @@ WebSocketImpl::ConsoleError()
 
   if (mWebSocket->ReadyState() < WebSocket::OPEN) {
     PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
-                        MOZ_UTF16("connectionFailure"),
+                        u"connectionFailure",
                         formatStrings, ArrayLength(formatStrings));
   } else {
     PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
-                        MOZ_UTF16("netInterrupt"),
+                        u"netInterrupt",
                         formatStrings, ArrayLength(formatStrings));
   }
   /// todo some specific errors - like for message too large
@@ -990,6 +989,18 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
                                       EmptyCString(), aRv);
 }
 
+already_AddRefed<WebSocket>
+WebSocket::CreateServerWebSocket(const GlobalObject& aGlobal,
+                                 const nsAString& aUrl,
+                                 const Sequence<nsString>& aProtocols,
+                                 nsITransportProvider* aTransportProvider,
+                                 const nsAString& aNegotiatedExtensions,
+                                 ErrorResult& aRv)
+{
+  return WebSocket::ConstructorCommon(aGlobal, aUrl, aProtocols, aTransportProvider,
+                                      NS_ConvertUTF16toUTF8(aNegotiatedExtensions), aRv);
+}
+
 namespace {
 
 // This class is used to clear any exception.
@@ -1253,18 +1264,18 @@ WebSocket::ConstructorCommon(const GlobalObject& aGlobal,
   }
 
   RefPtr<WebSocket> webSocket = new WebSocket(ownerWindow);
-  RefPtr<WebSocketImpl> kungfuDeathGrip = webSocket->mImpl;
+  RefPtr<WebSocketImpl> webSocketImpl = webSocket->mImpl;
 
   bool connectionFailed = true;
 
   if (NS_IsMainThread()) {
-    webSocket->mImpl->Init(aGlobal.Context(), principal, !!aTransportProvider,
-                           aUrl, protocolArray, EmptyCString(),
-                           0, 0, aRv, &connectionFailed);
+    webSocketImpl->Init(aGlobal.Context(), principal, !!aTransportProvider,
+                        aUrl, protocolArray, EmptyCString(),
+                        0, 0, aRv, &connectionFailed);
   } else {
     // In workers we have to keep the worker alive using a workerHolder in order
     // to dispatch messages correctly.
-    if (!webSocket->mImpl->RegisterWorkerHolder()) {
+    if (!webSocketImpl->RegisterWorkerHolder()) {
       aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;
     }
@@ -1277,7 +1288,7 @@ WebSocket::ConstructorCommon(const GlobalObject& aGlobal,
     }
 
     RefPtr<InitRunnable> runnable =
-      new InitRunnable(webSocket->mImpl, !!aTransportProvider, aUrl,
+      new InitRunnable(webSocketImpl, !!aTransportProvider, aUrl,
                        protocolArray, nsDependentCString(file.get()), lineno,
                        column, aRv, &connectionFailed);
     runnable->Dispatch(aRv);
@@ -1556,27 +1567,28 @@ WebSocketImpl::Init(JSContext* aCx,
     }
 
     // The 'real' nsHttpChannel of the websocket gets opened in the parent.
-    // Since we don't serialize the CSP within child and parent we have to
-    // perform the CSP check here instead of AsyncOpen2().
+    // Since we don't serialize the CSP within child and parent and also not
+    // the context, we have to perform content policy checks here instead of
+    // AsyncOpen2().
     // Please note that websockets can't follow redirects, hence there is no
     // need to perform a CSP check after redirects.
-    nsCOMPtr<nsIContentPolicy> cspService = do_GetService(CSPSERVICE_CONTRACTID);
-    int16_t shouldLoad = nsIContentPolicy::REJECT_REQUEST;
-    aRv = cspService->ShouldLoad(nsIContentPolicy::TYPE_WEBSOCKET,
-                                 uri,
-                                 nullptr, // aRequestOrigin not used within CSP
-                                 originDoc,
-                                 EmptyCString(), // aMimeTypeGuess
-                                 nullptr, // aExtra
-                                 aPrincipal,
-                                 &shouldLoad);
+    int16_t shouldLoad = nsIContentPolicy::ACCEPT;
+    aRv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_WEBSOCKET,
+                                    uri,
+                                    aPrincipal,
+                                    originDoc,
+                                    EmptyCString(),
+                                    nullptr,
+                                    &shouldLoad,
+                                    nsContentUtils::GetContentPolicy(),
+                                    nsContentUtils::GetSecurityManager());
 
     if (NS_WARN_IF(aRv.Failed())) {
       return;
     }
 
     if (NS_CP_REJECTED(shouldLoad)) {
-      // Disallowed by CSP
+      // Disallowed by content policy
       aRv.Throw(NS_ERROR_CONTENT_BLOCKED);
       return;
     }
@@ -1599,8 +1611,8 @@ WebSocketImpl::Init(JSContext* aCx,
     }
     mSecure = true;
 
-    const char16_t* params[] = { reportSpec.get(), MOZ_UTF16("wss") };
-    CSP_LogLocalizedStr(MOZ_UTF16("upgradeInsecureRequest"),
+    const char16_t* params[] = { reportSpec.get(), u"wss" };
+    CSP_LogLocalizedStr(u"upgradeInsecureRequest",
                         params, ArrayLength(params),
                         EmptyString(), // aSourceFile
                         EmptyString(), // aScriptSample
@@ -1633,11 +1645,7 @@ WebSocketImpl::Init(JSContext* aCx,
       while (true) {
         bool isNullPrincipal = true;
         if (principal) {
-          nsresult rv = principal->GetIsNullPrincipal(&isNullPrincipal);
-          if (NS_WARN_IF(NS_FAILED(rv))) {
-            aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
-            return;
-          }
+          isNullPrincipal = principal->GetIsNullPrincipal();
         }
 
         if (!isNullPrincipal) {
@@ -2262,7 +2270,7 @@ WebSocketImpl::RegisterWorkerHolder()
   MOZ_ASSERT(!mWorkerHolder);
   mWorkerHolder = new WebSocketWorkerHolder(this);
 
-  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate))) {
+  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate, Canceling))) {
     mWorkerHolder = nullptr;
     return false;
   }
@@ -2633,14 +2641,7 @@ public:
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
-    aWorkerPrivate->ModifyBusyCountFromWorker(true);
     return !NS_FAILED(mImpl->CancelInternal());
-  }
-
-  void PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aRunResult) override
-  {
-    aWorkerPrivate->ModifyBusyCountFromWorker(false);
   }
 
 private:
@@ -2782,7 +2783,6 @@ public:
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
-    aWorkerPrivate->ModifyBusyCountFromWorker(true);
 
     // No messages when disconnected.
     if (mWebSocketImpl->mDisconnectingOrDisconnected) {
@@ -2796,7 +2796,6 @@ public:
   void PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
                bool aRunResult) override
   {
-    aWorkerPrivate->ModifyBusyCountFromWorker(false);
   }
 
   bool

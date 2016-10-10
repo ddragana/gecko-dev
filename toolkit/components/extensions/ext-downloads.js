@@ -23,6 +23,7 @@ const {
   normalizeTime,
   runSafeSync,
   SingletonEventManager,
+  PlatformInfo,
 } = ExtensionUtils;
 
 const DOWNLOAD_ITEM_FIELDS = ["id", "url", "referrer", "filename", "incognito",
@@ -245,9 +246,8 @@ function downloadQuery(query) {
   function normalizeDownloadTime(arg, before) {
     if (arg == null) {
       return before ? Number.MAX_VALUE : 0;
-    } else {
-      return normalizeTime(arg).getTime();
     }
+    return normalizeTime(arg).getTime();
   }
 
   const startedBefore = normalizeDownloadTime(query.startedBefore, true);
@@ -279,9 +279,8 @@ function downloadQuery(query) {
     value = value.toLowerCase();
     if (re.test(value)) {
       return input => (value == input);
-    } else {
-      return input => false;
     }
+    return input => false;
   }
 
   const matchFilename = makeMatch(query.filenameRegex, query.filename, "filename");
@@ -388,16 +387,23 @@ function queryHelper(query) {
   });
 }
 
-extensions.registerSchemaAPI("downloads", (extension, context) => {
+extensions.registerSchemaAPI("downloads", "addon_parent", context => {
+  let {extension} = context;
   return {
     downloads: {
       download(options) {
-        if (options.filename != null) {
-          if (options.filename.length == 0) {
+        let {filename} = options;
+        if (filename && PlatformInfo.os === "win") {
+          // cross platform javascript code uses "/"
+          filename = filename.replace(/\//g, "\\");
+        }
+
+        if (filename != null) {
+          if (filename.length == 0) {
             return Promise.reject({message: "filename must not be empty"});
           }
 
-          let path = OS.Path.split(options.filename);
+          let path = OS.Path.split(filename);
           if (path.absolute) {
             return Promise.reject({message: "filename must not be an absolute path"});
           }
@@ -413,27 +419,28 @@ extensions.registerSchemaAPI("downloads", (extension, context) => {
         }
 
         function createTarget(downloadsDir) {
-          // TODO
-          // if (options.saveAs) { }
-
           let target;
-          if (options.filename) {
-            target = OS.Path.join(downloadsDir, options.filename);
+          if (filename) {
+            target = OS.Path.join(downloadsDir, filename);
           } else {
             let uri = NetUtil.newURI(options.url);
 
-            let filename;
+            let remote = "download";
             if (uri instanceof Ci.nsIURL) {
-              filename = uri.fileName;
+              remote = uri.fileName;
             }
-            target = OS.Path.join(downloadsDir, filename || "download");
+            target = OS.Path.join(downloadsDir, remote);
           }
 
-          // This has a race, something else could come along and create
-          // the file between this test and them time the download code
-          // creates the target file.  But we can't easily fix it without
-          // modifying DownloadCore so we live with it for now.
-          return OS.File.exists(target).then(exists => {
+          // Create any needed subdirectories if required by filename.
+          const dir = OS.Path.dirname(target);
+          return OS.File.makeDir(dir, {from: downloadsDir}).then(() => {
+            return OS.File.exists(target);
+          }).then(exists => {
+            // This has a race, something else could come along and create
+            // the file between this test and them time the download code
+            // creates the target file.  But we can't easily fix it without
+            // modifying DownloadCore so we live with it for now.
             if (exists) {
               switch (options.conflictAction) {
                 case "uniquify":
@@ -445,7 +452,29 @@ extensions.registerSchemaAPI("downloads", (extension, context) => {
                   break;
               }
             }
-            return target;
+          }).then(() => {
+            if (!options.saveAs) {
+              return Promise.resolve(target);
+            }
+
+            // Setup the file picker Save As dialog.
+            const picker = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+            const window = Services.wm.getMostRecentWindow("navigator:browser");
+            picker.init(window, null, Ci.nsIFilePicker.modeSave);
+            picker.displayDirectory = new FileUtils.File(dir);
+            picker.appendFilters(Ci.nsIFilePicker.filterAll);
+            picker.defaultString = OS.Path.basename(target);
+
+            // Open the dialog and resolve/reject with the result.
+            return new Promise((resolve, reject) => {
+              picker.open(result => {
+                if (result === Ci.nsIFilePicker.returnCancel) {
+                  reject({message: "Download canceled by the user"});
+                } else {
+                  resolve(picker.file.path);
+                }
+              });
+            });
           });
         }
 
@@ -570,9 +599,8 @@ extensions.registerSchemaAPI("downloads", (extension, context) => {
           let download = DownloadMap.fromId(downloadId).download;
           if (download.succeeded) {
             return download.launch();
-          } else {
-            return Promise.reject({message: "Download has not completed."});
           }
+          return Promise.reject({message: "Download has not completed."});
         }).catch((error) => {
           return Promise.reject({message: error.message});
         });

@@ -3,8 +3,6 @@
 set -xe
 
 : ${TOOLTOOL_SERVER:=https://api.pub.build.mozilla.org/tooltool/}
-: ${TOOLTOOL_REPO:=https://github.com/mozilla/build-tooltool}
-: ${TOOLTOOL_REV:=master}
 : ${SPIDERMONKEY_VARIANT:=plain}
 : ${UPLOAD_DIR:=$HOME/artifacts/}
 : ${WORK:=$HOME/workspace}
@@ -44,18 +42,9 @@ esac
 # necessary for the JS shell, but it's less duplication to share tooltool
 # manifests.
 BROWSER_PLATFORM=$PLATFORM_OS$BITS
-TOOLTOOL_MANIFEST="$SRCDIR/browser/config/tooltool-manifests/$BROWSER_PLATFORM/releng.manifest"
+: ${TOOLTOOL_MANIFEST:=browser/config/tooltool-manifests/$BROWSER_PLATFORM/releng.manifest}
 
-tc-vcs checkout $WORK/tooltool $TOOLTOOL_REPO $TOOLTOOL_REPO $TOOLTOOL_REV
-(cd $WORK && python tooltool/tooltool.py --url $TOOLTOOL_SERVER -m $TOOLTOOL_MANIFEST fetch ${TOOLTOOL_CACHE:+ -c $TOOLTOOL_CACHE})
+: ${TOOLTOOL_CHECKOUT:=$WORK}
+export TOOLTOOL_CHECKOUT
 
-# Point to the appropriate compiler, assuming taskcluster will one day run on non-Linux OSes.
-case "$PLATFORM_OS" in
-    linux)
-        export PATH="$WORK/gcc/bin":$PATH
-        export GCCDIR="$WORK/gcc"
-        ;;
-    macosx)
-        export PATH="$WORK/clang/bin":$PATH
-        ;;
-esac
+(cd $TOOLTOOL_CHECKOUT && python ${SRCDIR}/testing/docker/recipes/tooltool.py --url $TOOLTOOL_SERVER -m $SRCDIR/$TOOLTOOL_MANIFEST fetch ${TOOLTOOL_CACHE:+ -c $TOOLTOOL_CACHE})

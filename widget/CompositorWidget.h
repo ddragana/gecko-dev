@@ -15,7 +15,7 @@ class nsIWidget;
 class nsBaseWidget;
 
 namespace mozilla {
-class CompositorVsyncDispatcher;
+class VsyncObserver;
 namespace layers {
 class Compositor;
 class LayerManagerComposite;
@@ -29,6 +29,8 @@ class SourceSurface;
 namespace widget {
 
 class WinCompositorWidget;
+class X11CompositorWidget;
+class AndroidCompositorWidget;
 class CompositorWidgetInitData;
 
 // Gecko widgets usually need to communicate with the CompositorWidget with
@@ -39,7 +41,7 @@ class CompositorWidgetInitData;
 class CompositorWidgetDelegate;
 
 // Platforms that support out-of-process widgets.
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(MOZ_X11)
 // CompositorWidgetParent should implement CompositorWidget and
 // PCompositorWidgetParent.
 class CompositorWidgetParent;
@@ -137,6 +139,16 @@ public:
   }
 
   /**
+   * Return true when it is better to defer EndRemoteDrawing().
+   *
+   * Called by BasicCompositor on the compositor thread for OMTC drawing
+   * after each composition.
+   */
+  virtual bool NeedsToDeferEndRemoteDrawing() {
+    return false;
+  }
+
+  /**
    * Called when shutting down the LayerManager to clean-up any cached resources.
    *
    * Always called from the compositing thread.
@@ -223,11 +235,22 @@ public:
   virtual already_AddRefed<gfx::SourceSurface> EndBackBufferDrawing();
 
   /**
-   * Return a compositor vsync dispatcher for this widget.
+   * Observe or unobserve vsync.
    */
-  virtual already_AddRefed<CompositorVsyncDispatcher> GetCompositorVsyncDispatcher() = 0;
+  virtual void ObserveVsync(VsyncObserver* aObserver) = 0;
+
+  /**
+   * This is only used by out-of-process compositors.
+   */
+  virtual RefPtr<VsyncObserver> GetVsyncObserver() const;
 
   virtual WinCompositorWidget* AsWindows() {
+    return nullptr;
+  }
+  virtual X11CompositorWidget* AsX11() {
+    return nullptr;
+  }
+  virtual AndroidCompositorWidget* AsAndroid() {
     return nullptr;
   }
 

@@ -20,6 +20,7 @@ from mozbuild.util import (
 
 import mozpack.path as mozpath
 import mozinfo
+import pytoml
 
 from .data import (
     AndroidAssetsDirs,
@@ -60,7 +61,7 @@ from .data import (
     PreprocessedTestWebIDLFile,
     PreprocessedWebIDLFile,
     Program,
-    RustRlibLibrary,
+    RustLibrary,
     SdkFiles,
     SharedLibrary,
     SimpleProgram,
@@ -128,6 +129,8 @@ class TreeMetadataEmitter(LoggingMixin):
         self._binaries = OrderedDict()
         self._linkage = []
         self._static_linking_shared = set()
+        self._crate_verified_local = set()
+        self._crate_directories = dict()
 
         # Keep track of external paths (third party build systems), starting
         # from what we run a subconfigure in. We'll eliminate some directories
@@ -195,7 +198,7 @@ class TreeMetadataEmitter(LoggingMixin):
     def _emit_libs_derived(self, contexts):
         # First do FINAL_LIBRARY linkage.
         for lib in (l for libs in self._libs.values() for l in libs):
-            if not isinstance(lib, (StaticLibrary, RustRlibLibrary)) or not lib.link_into:
+            if not isinstance(lib, (StaticLibrary, RustLibrary)) or not lib.link_into:
                 continue
             if lib.link_into not in self._libs:
                 raise SandboxValidationError(
@@ -373,8 +376,103 @@ class TreeMetadataEmitter(LoggingMixin):
         else:
             return ExternalSharedLibrary(context, name)
 
+    def _parse_cargo_file(self, toml_file):
+        """Parse toml_file and return a Python object representation of it."""
+        with open(toml_file, 'r') as f:
+            return pytoml.load(f)
+
+    def _verify_deps(self, context, crate_dir, crate_name, dependencies, description='Dependency'):
+        """Verify that a crate's dependencies all specify local paths."""
+        for dep_crate_name, values in dependencies.iteritems():
+            # A simple version number.
+            if isinstance(values, (str, unicode)):
+                raise SandboxValidationError(
+                    '%s %s of crate %s does not list a path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            dep_path = values.get('path', None)
+            if not dep_path:
+                raise SandboxValidationError(
+                    '%s %s of crate %s does not list a path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            # Try to catch the case where somebody listed a
+            # local path for development.
+            if os.path.isabs(dep_path):
+                raise SandboxValidationError(
+                    '%s %s of crate %s has a non-relative path' % (description, dep_crate_name, crate_name),
+                    context)
+
+            if not os.path.exists(mozpath.join(context.config.topsrcdir, crate_dir, dep_path)):
+                raise SandboxValidationError(
+                    '%s %s of crate %s refers to a non-existent path' % (description, dep_crate_name, crate_name),
+                    context)
+
+    def _rust_library(self, context, libname, static_args):
+        # We need to note any Rust library for linking purposes.
+        cargo_file = mozpath.join(context.srcdir, 'Cargo.toml')
+        if not os.path.exists(cargo_file):
+            raise SandboxValidationError(
+                'No Cargo.toml file found in %s' % cargo_file, context)
+
+        config = self._parse_cargo_file(cargo_file)
+        crate_name = config['package']['name']
+
+        if crate_name != libname:
+            raise SandboxValidationError(
+                'library %s does not match Cargo.toml-defined package %s' % (libname, crate_name),
+                context)
+
+        # Check that the [lib.crate-type] field is correct
+        lib_section = config.get('lib', None)
+        if not lib_section:
+            raise SandboxValidationError(
+                'Cargo.toml for %s has no [lib] section' % libname,
+                context)
+
+        crate_type = lib_section.get('crate-type', None)
+        if not crate_type:
+            raise SandboxValidationError(
+                'Can\'t determine a crate-type for %s from Cargo.toml' % libname,
+                context)
+
+        crate_type = crate_type[0]
+        if crate_type != 'rlib':
+            raise SandboxValidationError(
+                'crate-type %s is not permitted for %s' % (crate_type, libname),
+                context)
+
+        # Check that the [profile.{dev,release}.panic] field is "abort"
+        profile_section = config.get('profile', None)
+        if not profile_section:
+            raise SandboxValidationError(
+                'Cargo.toml for %s has no [profile] section' % libname,
+                context)
+
+        for profile_name in ['dev', 'release']:
+            profile = profile_section.get(profile_name, None)
+            if not profile:
+                raise SandboxValidationError(
+                    'Cargo.toml for %s has no [profile.%s] section' % (libname, profile_name),
+                    context)
+
+            panic = profile.get('panic', None)
+            if panic != 'abort':
+                raise SandboxValidationError(
+                    ('Cargo.toml for %s does not specify `panic = "abort"`'
+                     ' in [profile.%s] section') % (libname, profile_name),
+                    context)
+
+        return RustLibrary(context, libname, cargo_file, crate_type, **static_args)
+
     def _handle_linkables(self, context, passthru, generated_files):
-        has_linkables = False
+        linkables = []
+        host_linkables = []
+        def add_program(prog, var):
+            if var.startswith('HOST_'):
+                host_linkables.append(prog)
+            else:
+                linkables.append(prog)
 
         for kind, cls in [('PROGRAM', Program), ('HOST_PROGRAM', HostProgram)]:
             program = context.get(kind)
@@ -387,7 +485,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._binaries[program] = cls(context, program)
                 self._linkage.append((context, self._binaries[program],
                     kind.replace('PROGRAM', 'USE_LIBS')))
-                has_linkables = True
+                add_program(self._binaries[program], kind)
 
         for kind, cls in [
                 ('SIMPLE_PROGRAMS', SimpleProgram),
@@ -404,7 +502,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._linkage.append((context, self._binaries[program],
                     'HOST_USE_LIBS' if kind == 'HOST_SIMPLE_PROGRAMS'
                     else 'USE_LIBS'))
-                has_linkables = True
+                add_program(self._binaries[program], kind)
 
         host_libname = context.get('HOST_LIBRARY_NAME')
         libname = context.get('LIBRARY_NAME')
@@ -416,7 +514,7 @@ class TreeMetadataEmitter(LoggingMixin):
             lib = HostLibrary(context, host_libname)
             self._libs[host_libname].append(lib)
             self._linkage.append((context, lib, 'HOST_USE_LIBS'))
-            has_linkables = True
+            host_linkables.append(lib)
 
         final_lib = context.get('FINAL_LIBRARY')
         if not libname and final_lib:
@@ -563,7 +661,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 lib = SharedLibrary(context, libname, **shared_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-                has_linkables = True
+                linkables.append(lib)
                 generated_files.add(lib.lib_name)
                 if is_component and not context['NO_COMPONENTS_MANIFEST']:
                     yield ChromeManifestEntry(context,
@@ -580,10 +678,14 @@ class TreeMetadataEmitter(LoggingMixin):
                         'generate_symbols_file', lib.symbols_file,
                         [symbols_file], defines)
             if static_lib:
-                lib = StaticLibrary(context, libname, **static_args)
+                is_rust_library = context.get('IS_RUST_LIBRARY')
+                if is_rust_library:
+                    lib = self._rust_library(context, libname, static_args)
+                else:
+                    lib = StaticLibrary(context, libname, **static_args)
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
-                has_linkables = True
+                linkables.append(lib)
 
             if lib_defines:
                 if not libname:
@@ -594,10 +696,9 @@ class TreeMetadataEmitter(LoggingMixin):
         # Only emit sources if we have linkables defined in the same context.
         # Note the linkables are not emitted in this function, but much later,
         # after aggregation (because of e.g. USE_LIBS processing).
-        if not has_linkables:
+        if not (linkables or host_linkables):
             return
 
-        rust_sources = []
         sources = defaultdict(list)
         gen_sources = defaultdict(list)
         all_flags = {}
@@ -649,7 +750,6 @@ class TreeMetadataEmitter(LoggingMixin):
             '.m': set(),
             '.mm': set(),
             '.cpp': set(['.cc', '.cxx']),
-            '.rs': set(),
             '.S': set(),
         }
 
@@ -671,6 +771,10 @@ class TreeMetadataEmitter(LoggingMixin):
             HOST_SOURCES=(HostSources, None, ['.c', '.mm', '.cpp']),
             UNIFIED_SOURCES=(UnifiedSources, None, ['.c', '.mm', '.cpp']),
         )
+        # Track whether there are any C++ source files.
+        # Technically this won't do the right thing for SIMPLE_PROGRAMS in
+        # a directory with mixed C and C++ source, but it's not that important.
+        cxx_sources = defaultdict(bool)
 
         for variable, (klass, gen_klass, suffixes) in varmap.items():
             allowed_suffixes = set().union(*[suffix_map[s] for s in suffixes])
@@ -689,50 +793,29 @@ class TreeMetadataEmitter(LoggingMixin):
                 sorted_files = sorted(srcs, key=canonical_suffix_for_file)
                 for canonical_suffix, files in itertools.groupby(
                         sorted_files, canonical_suffix_for_file):
+                    if canonical_suffix in ('.cpp', '.mm'):
+                        cxx_sources[variable] = True
                     arglist = [context, list(files), canonical_suffix]
                     if (variable.startswith('UNIFIED_') and
                             'FILES_PER_UNIFIED_FILE' in context):
                         arglist.append(context['FILES_PER_UNIFIED_FILE'])
                     obj = cls(*arglist)
-
-                    # Rust is special.  Each Rust file that we compile
-                    # is a separate crate and gets compiled into its own
-                    # rlib file (Rust's equivalent of a .a file).  When
-                    # we go to link Rust sources into a library or
-                    # executable, we have a separate, single crate that
-                    # gets compiled as a staticlib (like a rlib, but
-                    # includes the actual Rust runtime).
-                    if canonical_suffix == '.rs':
-                        if not final_lib:
-                            raise SandboxValidationError(
-                                'Rust sources must be destined for a FINAL_LIBRARY')
-                        # If we're building a shared library, we're going to
-                        # auto-generate a module that includes all of the rlib
-                        # files.  This means we can't permit Rust files as
-                        # immediate inputs of the shared library.
-                        if libname and shared_lib:
-                            raise SandboxValidationError(
-                                'No Rust sources permitted as an immediate input of %s: %s' % (shlib, files))
-                        rust_sources.append(obj)
                     yield obj
-
-        # Rust sources get translated into rlibs, which are essentially static
-        # libraries.  We need to note all of them for linking, too.
-        if libname and static_lib:
-            for s in rust_sources:
-                for f in s.files:
-                    (base, _) = mozpath.splitext(mozpath.basename(f))
-                    crate_name = context.relsrcdir.replace('/', '_') + '_' + base
-                    rlib_filename = 'lib' + base + '.rlib'
-                    lib = RustRlibLibrary(context, libname, crate_name,
-                                          rlib_filename, final_lib)
-                    self._libs[libname].append(lib)
-                    self._linkage.append((context, lib, 'USE_LIBS'))
 
         for f, flags in all_flags.iteritems():
             if flags.flags:
                 ext = mozpath.splitext(f)[1]
                 yield PerSourceFlag(context, f, flags.flags)
+
+        # If there are any C++ sources, set all the linkables defined here
+        # to require the C++ linker.
+        for vars, linkable_items in ((('SOURCES', 'UNIFIED_SOURCES'), linkables),
+                                     (('HOST_SOURCES',), host_linkables)):
+            for var in vars:
+                if cxx_sources[var]:
+                    for l in linkable_items:
+                        l.cxx_link = True
+                    break
 
 
     def emit_from_context(self, context):

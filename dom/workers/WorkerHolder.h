@@ -72,10 +72,12 @@ enum Status
 class WorkerHolder
 {
 public:
+  NS_DECL_OWNINGTHREAD
+
   WorkerHolder();
   virtual ~WorkerHolder();
 
-  bool HoldWorker(WorkerPrivate* aWorkerPrivate);
+  bool HoldWorker(WorkerPrivate* aWorkerPrivate, Status aFailStatus);
   void ReleaseWorker();
 
   virtual bool Notify(Status aStatus) = 0;
@@ -84,6 +86,9 @@ protected:
   void ReleaseWorkerInternal();
 
   WorkerPrivate* MOZ_NON_OWNING_REF mWorkerPrivate;
+
+private:
+  void AssertIsOwningThread() const;
 };
 
 END_WORKERS_NAMESPACE

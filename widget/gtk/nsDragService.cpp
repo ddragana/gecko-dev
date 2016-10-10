@@ -237,8 +237,8 @@ OnSourceGrabEventAfter(GtkWidget *widget, GdkEvent *event, gpointer user_data)
         // the eDragEnd event.
         nsDragService *dragService = static_cast<nsDragService*>(user_data);
         gint scale = nsScreenGtk::GetGtkMonitorScaleFactor();
-        LayoutDeviceIntPoint p(floor(event->motion.x_root * scale + 0.5),
-                               floor(event->motion.y_root * scale + 0.5));
+        auto p = LayoutDeviceIntPoint::Round(event->motion.x_root * scale,
+                                             event->motion.y_root * scale);
         dragService->SetDragEndPoint(p);
     } else if (sMotionEvent && (event->type == GDK_KEY_PRESS ||
                                 event->type == GDK_KEY_RELEASE)) {
@@ -479,8 +479,8 @@ nsDragService::SetAlphaPixmap(SourceSurface *aSurface,
     if (!surf)
         return false;
 
-    RefPtr<DrawTarget> dt = gfxPlatform::GetPlatform()->
-        CreateDrawTargetForData(cairo_image_surface_get_data(surf),
+    RefPtr<DrawTarget> dt = gfxPlatform::CreateDrawTargetForData(
+                                cairo_image_surface_get_data(surf),
                                 dragRect.Size(),
                                 cairo_image_surface_get_stride(surf),
                                 SurfaceFormat::B8G8R8A8);

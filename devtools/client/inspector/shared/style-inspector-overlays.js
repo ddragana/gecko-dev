@@ -13,22 +13,21 @@
 // - etc.
 
 const {getColor} = require("devtools/client/shared/theme");
-const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/tooltip/HTMLTooltip");
 const {
   getImageDimensions,
   setImageTooltip,
   setBrokenImageTooltip,
 } = require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
-const {
-  SwatchColorPickerTooltip,
-  SwatchCubicBezierTooltip,
-  CssDocsTooltip,
-  SwatchFilterTooltip
-} = require("devtools/client/shared/widgets/Tooltip");
+const CssDocsTooltip = require("devtools/client/shared/widgets/tooltip/CssDocsTooltip");
+const SwatchColorPickerTooltip = require("devtools/client/shared/widgets/tooltip/SwatchColorPickerTooltip");
+const SwatchCubicBezierTooltip = require("devtools/client/shared/widgets/tooltip/SwatchCubicBezierTooltip");
+const SwatchFilterTooltip = require("devtools/client/shared/widgets/tooltip/SwatchFilterTooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
 const {Task} = require("devtools/shared/task");
 const Services = require("Services");
+const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
 const PREF_IMAGE_TOOLTIP_SIZE = "devtools.inspector.imagePreviewTooltipSize";
 
@@ -63,7 +62,7 @@ function HighlightersOverlay(view) {
   this.highlighterUtils = this.view.inspector.toolbox.highlighterUtils;
 
   this._onMouseMove = this._onMouseMove.bind(this);
-  this._onMouseLeave = this._onMouseLeave.bind(this);
+  this._onMouseOut = this._onMouseOut.bind(this);
 
   this.highlighters = {};
 
@@ -89,7 +88,8 @@ HighlightersOverlay.prototype = {
 
     let el = this.view.element;
     el.addEventListener("mousemove", this._onMouseMove, false);
-    el.addEventListener("mouseleave", this._onMouseLeave, false);
+    el.addEventListener("mouseout", this._onMouseOut, false);
+    el.ownerDocument.defaultView.addEventListener("mouseout", this._onMouseOut, false);
 
     this._isStarted = true;
   },
@@ -107,7 +107,7 @@ HighlightersOverlay.prototype = {
 
     let el = this.view.element;
     el.removeEventListener("mousemove", this._onMouseMove, false);
-    el.removeEventListener("mouseleave", this._onMouseLeave, false);
+    el.removeEventListener("mouseout", this._onMouseOut, false);
 
     this._isStarted = false;
   },
@@ -148,7 +148,14 @@ HighlightersOverlay.prototype = {
     }
   },
 
-  _onMouseLeave: function () {
+  _onMouseOut: function (event) {
+    // Only hide the highlighter if the mouse leaves the currently hovered node.
+    if (!this._lastHovered ||
+        (event && this._lastHovered.contains(event.relatedTarget))) {
+      return;
+    }
+
+    // Otherwise, hide the highlighter.
     this._lastHovered = null;
     this._hideCurrent();
   },
@@ -252,6 +259,7 @@ function TooltipsOverlay(view) {
 
   let {CssRuleView} = require("devtools/client/inspector/rules/rules");
   this.isRuleView = view instanceof CssRuleView;
+  this._cssProperties = getCssProperties(this.view.inspector.toolbox);
 
   this._onNewSelection = this._onNewSelection.bind(this);
   this.view.inspector.selection.on("new-node-front", this._onNewSelection);
@@ -276,10 +284,13 @@ TooltipsOverlay.prototype = {
       return;
     }
 
-    let panelDoc = this.view.inspector.panelDoc;
+    let { toolbox } = this.view.inspector;
 
-    // Image, fonts, ... preview tooltip
-    this.previewTooltip = new HTMLTooltip(this.view.inspector.toolbox, {
+    // Initializing the different tooltips that are used in the inspector.
+    // These tooltips are attached to the toolbox document if they require a popup panel.
+    // Otherwise, it is attached to the inspector panel document if it is an inline
+    // editor.
+    this.previewTooltip = new HTMLTooltip(toolbox.doc, {
       type: "arrow",
       useXulWrapper: true
     });
@@ -287,16 +298,16 @@ TooltipsOverlay.prototype = {
       this._onPreviewTooltipTargetHover.bind(this));
 
     // MDN CSS help tooltip
-    this.cssDocs = new CssDocsTooltip(panelDoc);
+    this.cssDocs = new CssDocsTooltip(toolbox.doc);
 
     if (this.isRuleView) {
       // Color picker tooltip
-      let { toolbox } = this.view.inspector;
-      this.colorPicker = new SwatchColorPickerTooltip(toolbox);
+      this.colorPicker = new SwatchColorPickerTooltip(toolbox.doc, this.view.inspector);
       // Cubic bezier tooltip
-      this.cubicBezier = new SwatchCubicBezierTooltip(toolbox);
+      this.cubicBezier = new SwatchCubicBezierTooltip(toolbox.doc);
       // Filter editor tooltip
-      this.filterEditor = new SwatchFilterTooltip(toolbox);
+      this.filterEditor = new SwatchFilterTooltip(toolbox.doc,
+        this._cssProperties.getValidityChecker(this.view.inspector.panelDoc));
     }
 
     this._isStarted = true;
@@ -393,7 +404,7 @@ TooltipsOverlay.prototype = {
       this.cubicBezier.hide();
     }
 
-    if (this.isRuleView && this.cssDocs.tooltip.isShown()) {
+    if (this.isRuleView && this.cssDocs.tooltip.isVisible()) {
       this.cssDocs.hide();
     }
 

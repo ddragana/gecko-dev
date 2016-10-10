@@ -13,6 +13,7 @@
 #include "ImageLayers.h"                // for ImageLayer
 #include "LayerSorter.h"                // for SortLayersBy3DZOrder
 #include "LayersLogging.h"              // for AppendToString
+#include "LayerUserData.h"
 #include "ReadbackLayer.h"              // for ReadbackLayer
 #include "UnitTransforms.h"             // for ViewAs
 #include "gfxEnv.h"
@@ -22,6 +23,7 @@
 #include "gfx2DGlue.h"
 #include "mozilla/DebugOnly.h"          // for DebugOnly
 #include "mozilla/Telemetry.h"          // for Accumulate
+#include "mozilla/ToString.h"
 #include "mozilla/dom/Animation.h"      // for ComputedTimingFunction
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
@@ -78,24 +80,20 @@ LayerManager::GetRootScrollableLayerId()
     return FrameMetrics::NULL_SCROLL_ID;
   }
 
-  nsTArray<LayerMetricsWrapper> queue = { LayerMetricsWrapper(mRoot) };
-  while (queue.Length()) {
-    LayerMetricsWrapper layer = queue[0];
-    queue.RemoveElementAt(0);
+  LayerMetricsWrapper layerMetricsRoot = LayerMetricsWrapper(mRoot);
 
-    const FrameMetrics& frameMetrics = layer.Metrics();
-    if (frameMetrics.IsScrollable()) {
-      return frameMetrics.GetScrollId();
-    }
+  LayerMetricsWrapper rootScrollableLayerMetrics =
+      BreadthFirstSearch<ForwardIterator>(
+          layerMetricsRoot,
+          [](LayerMetricsWrapper aLayerMetrics)
+          {
+            return aLayerMetrics.Metrics().IsScrollable();
+          }
+      );
 
-    LayerMetricsWrapper child = layer.GetFirstChild();
-    while (child) {
-      queue.AppendElement(child);
-      child = child.GetNextSibling();
-    }
-  }
-
-  return FrameMetrics::NULL_SCROLL_ID;
+  return rootScrollableLayerMetrics.IsValid() ?
+      rootScrollableLayerMetrics.Metrics().GetScrollId() :
+      FrameMetrics::NULL_SCROLL_ID;
 }
 
 void
@@ -148,6 +146,23 @@ LayerManager::GetScrollableLayers(nsTArray<Layer*>& aArray)
       queue.AppendElement(child);
     }
   }
+}
+
+LayerMetricsWrapper
+LayerManager::GetRootContentLayer()
+{
+  if (!mRoot) {
+    return LayerMetricsWrapper();
+  }
+
+  LayerMetricsWrapper root(mRoot);
+
+  return BreadthFirstSearch<ForwardIterator>(root,
+      [](LayerMetricsWrapper aLayerMetrics)
+      {
+        return aLayerMetrics.Metrics().IsRootContent();
+      }
+  );
 }
 
 already_AddRefed<DrawTarget>
@@ -631,7 +646,7 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
   if (aTransform.CanDraw2D(&matrix2D) &&
       !matrix2D.HasNonTranslation() &&
       matrix2D.HasNonIntegerTranslation()) {
-    IntPoint snappedTranslation = RoundedToInt(matrix2D.GetTranslation());
+    auto snappedTranslation = IntPoint::Round(matrix2D.GetTranslation());
     Matrix snappedMatrix = Matrix::Translation(snappedTranslation.x,
                                                snappedTranslation.y);
     result = Matrix4x4::From2D(snappedMatrix);
@@ -659,12 +674,11 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
 
   // Snap for 3D Transforms
 
-  Point3D transformedOrigin = aTransform * Point3D();
+  Point3D transformedOrigin = aTransform.TransformPoint(Point3D());
 
   // Compute the transformed snap by rounding the values of
   // transformed origin.
-  IntPoint transformedSnapXY =
-    RoundedToInt(Point(transformedOrigin.x, transformedOrigin.y));
+  auto transformedSnapXY = IntPoint::Round(transformedOrigin.x, transformedOrigin.y);
   Matrix4x4 inverse = aTransform;
   inverse.Invert();
   // see Matrix4x4::ProjectPoint()
@@ -679,7 +693,7 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
   }
 
   // Compute the snap from the transformed snap.
-  Point3D snap = inverse * transformedSnap;
+  Point3D snap = inverse.TransformPoint(transformedSnap);
   if (snap.z > 0.001 || snap.z < -0.001) {
     // Allow some level of accumulated computation error.
     MOZ_ASSERT(inverse._33 == 0.0);
@@ -722,9 +736,9 @@ Layer::SnapTransform(const Matrix4x4& aTransform,
       aTransform.Is2D(&matrix2D) &&
       gfxSize(1.0, 1.0) <= aSnapRect.Size() &&
       matrix2D.PreservesAxisAlignedRectangles()) {
-    IntPoint transformedTopLeft = RoundedToInt(matrix2D * ToPoint(aSnapRect.TopLeft()));
-    IntPoint transformedTopRight = RoundedToInt(matrix2D * ToPoint(aSnapRect.TopRight()));
-    IntPoint transformedBottomRight = RoundedToInt(matrix2D * ToPoint(aSnapRect.BottomRight()));
+    auto transformedTopLeft = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.TopLeft())));
+    auto transformedTopRight = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.TopRight())));
+    auto transformedBottomRight = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.BottomRight())));
 
     Matrix snappedMatrix = gfxUtils::TransformRectToRect(aSnapRect,
       transformedTopLeft, transformedTopRight, transformedBottomRight);
@@ -1028,7 +1042,7 @@ Layer::TransformRectToRenderTarget(const LayerIntRect& aRect)
 
 bool
 Layer::GetVisibleRegionRelativeToRootLayer(nsIntRegion& aResult,
-                                           nsIntPoint* aLayerOffset)
+                                           IntPoint* aLayerOffset)
 {
   MOZ_ASSERT(aLayerOffset, "invalid offset pointer");
 
@@ -1046,7 +1060,7 @@ Layer::GetVisibleRegionRelativeToRootLayer(nsIntRegion& aResult,
     }
 
     // The offset of |layer| to its parent.
-    IntPoint currentLayerOffset = RoundedToInt(matrix.GetTranslation());
+    auto currentLayerOffset = IntPoint::Round(matrix.GetTranslation());
 
     // Translate the accumulated visible region of |this| by the offset of
     // |layer|.
@@ -1073,7 +1087,7 @@ Layer::GetVisibleRegionRelativeToRootLayer(nsIntRegion& aResult,
 
       // Retreive the translation from sibling to |layer|. The accumulated
       // visible region is currently oriented with |layer|.
-      IntPoint siblingOffset = RoundedToInt(siblingMatrix.GetTranslation());
+      auto siblingOffset = IntPoint::Round(siblingMatrix.GetTranslation());
       nsIntRegion siblingVisibleRegion(sibling->GetLocalVisibleRegion().ToUnknownRegion());
       // Translate the siblings region to |layer|'s origin.
       siblingVisibleRegion.MoveBy(-siblingOffset.x, -siblingOffset.y);
@@ -1092,7 +1106,7 @@ Layer::GetVisibleRegionRelativeToRootLayer(nsIntRegion& aResult,
     offset += currentLayerOffset;
   }
 
-  *aLayerOffset = nsIntPoint(offset.x, offset.y);
+  *aLayerOffset = IntPoint(offset.x, offset.y);
   return true;
 }
 
@@ -1124,9 +1138,7 @@ ContainerLayer::ContainerLayer(LayerManager* aManager, void* aImplData)
     mSupportsComponentAlphaChildren(false),
     mMayHaveReadbackChild(false),
     mChildrenChanged(false),
-    mEventRegionsOverride(EventRegionsOverride::NoOverride),
-    mVRDeviceID(0),
-    mInputFrameID(0)
+    mEventRegionsOverride(EventRegionsOverride::NoOverride)
 {
   MOZ_COUNT_CTOR(ContainerLayer);
   mContentFlags = 0; // Clear NO_TEXT, NO_TEXT_OVER_TRANSPARENT
@@ -1287,9 +1299,7 @@ ContainerLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   aAttrs = ContainerLayerAttributes(mPreXScale, mPreYScale,
                                     mInheritedXScale, mInheritedYScale,
                                     mPresShellResolution, mScaleToResolution,
-                                    mEventRegionsOverride,
-                                    mVRDeviceID,
-                                    mInputFrameID);
+                                    mEventRegionsOverride);
 }
 
 bool
@@ -2191,9 +2201,6 @@ ContainerLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   if (mEventRegionsOverride & EventRegionsOverride::ForceEmptyHitRegion) {
     aStream << " [force-ehr]";
   }
-  if (mVRDeviceID) {
-    aStream << nsPrintfCString(" [hmd=%lu] [hmdframe=%l]", mVRDeviceID, mInputFrameID).get();
-  }
 }
 
 void
@@ -2523,9 +2530,7 @@ SetAntialiasingFlags(Layer* aLayer, DrawTarget* aTarget)
 IntRect
 ToOutsideIntRect(const gfxRect &aRect)
 {
-  gfxRect r = aRect;
-  r.RoundOut();
-  return IntRect(r.X(), r.Y(), r.Width(), r.Height());
+  return IntRect::RoundOut(aRect.x, aRect.y, aRect.width, aRect.height);
 }
 
 } // namespace layers

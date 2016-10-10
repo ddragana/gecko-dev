@@ -11,6 +11,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/Unused.h"
 
 #include "gc/Marking.h"
 #include "js/UbiNode.h"
@@ -82,7 +83,7 @@ JS::ubi::Concrete<JSString>::size(mozilla::MallocSizeOf mallocSizeOf) const
     return size;
 }
 
-const char16_t JS::ubi::Concrete<JSString>::concreteTypeName[] = MOZ_UTF16("JSString");
+const char16_t JS::ubi::Concrete<JSString>::concreteTypeName[] = u"JSString";
 
 #ifdef DEBUG
 
@@ -576,6 +577,17 @@ JSRope::flatten(ExclusiveContext* maybecx)
 }
 
 template <AllowGC allowGC>
+static JSLinearString*
+EnsureLinear(ExclusiveContext* cx, typename MaybeRooted<JSString*, allowGC>::HandleType string)
+{
+    JSLinearString* linear = string->ensureLinear(cx);
+    // Don't report an exception if GC is not allowed, just return nullptr.
+    if (!linear && !allowGC)
+        cx->recoverFromOutOfMemory();
+    return linear;
+}
+
+template <AllowGC allowGC>
 JSString*
 js::ConcatStrings(ExclusiveContext* cx,
                   typename MaybeRooted<JSString*, allowGC>::HandleType left,
@@ -593,8 +605,12 @@ js::ConcatStrings(ExclusiveContext* cx,
         return left;
 
     size_t wholeLength = leftLen + rightLen;
-    if (!JSString::validateLength(cx, wholeLength))
+    if (MOZ_UNLIKELY(wholeLength > JSString::MAX_LENGTH)) {
+        // Don't report an exception if GC is not allowed, just return nullptr.
+        if (allowGC)
+            js::ReportAllocationOverflow(cx);
         return nullptr;
+    }
 
     bool isLatin1 = left->hasLatin1Chars() && right->hasLatin1Chars();
     bool canUseInline = isLatin1
@@ -610,10 +626,10 @@ js::ConcatStrings(ExclusiveContext* cx,
             return nullptr;
 
         AutoCheckCannotGC nogc;
-        JSLinearString* leftLinear = left->ensureLinear(cx);
+        JSLinearString* leftLinear = EnsureLinear<allowGC>(cx, left);
         if (!leftLinear)
             return nullptr;
-        JSLinearString* rightLinear = right->ensureLinear(cx);
+        JSLinearString* rightLinear = EnsureLinear<allowGC>(cx, right);
         if (!rightLinear)
             return nullptr;
 
@@ -643,7 +659,7 @@ template JSString*
 js::ConcatStrings<CanGC>(ExclusiveContext* cx, HandleString left, HandleString right);
 
 template JSString*
-js::ConcatStrings<NoGC>(ExclusiveContext* cx, JSString* left, JSString* right);
+js::ConcatStrings<NoGC>(ExclusiveContext* cx, JSString* const& left, JSString* const& right);
 
 template <typename CharT>
 JSFlatString*
@@ -790,7 +806,7 @@ bool
 StaticStrings::init(JSContext* cx)
 {
     AutoLockForExclusiveAccess lock(cx);
-    AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock));
+    AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock), &lock);
 
     static_assert(UNIT_STATIC_LIMIT - 1 <= JSString::MAX_LATIN1_CHAR,
                   "Unit strings must fit in Latin1Char.");
@@ -1269,6 +1285,17 @@ NewStringCopyNDontDeflate<CanGC>(ExclusiveContext* cx, const Latin1Char* s, size
 template JSFlatString*
 NewStringCopyNDontDeflate<NoGC>(ExclusiveContext* cx, const Latin1Char* s, size_t n);
 
+JSFlatString*
+NewLatin1StringZ(ExclusiveContext* cx, UniqueChars chars)
+{
+    JSFlatString* str = NewString<CanGC>(cx, (Latin1Char*)chars.get(), strlen(chars.get()));
+    if (!str)
+        return nullptr;
+
+    mozilla::Unused << chars.release();
+    return str;
+}
+
 template <AllowGC allowGC, typename CharT>
 JSFlatString*
 NewStringCopyN(ExclusiveContext* cx, const CharT* s, size_t n)
@@ -1290,6 +1317,42 @@ NewStringCopyN<CanGC>(ExclusiveContext* cx, const Latin1Char* s, size_t n);
 
 template JSFlatString*
 NewStringCopyN<NoGC>(ExclusiveContext* cx, const Latin1Char* s, size_t n);
+
+
+template <js::AllowGC allowGC>
+JSFlatString*
+NewStringCopyUTF8N(JSContext* cx, const JS::UTF8Chars utf8)
+{
+    JS::SmallestEncoding encoding = JS::FindSmallestEncoding(utf8);
+    if (encoding == JS::SmallestEncoding::ASCII)
+        return NewStringCopyN<allowGC>(cx, utf8.start().get(), utf8.length());
+
+    size_t length;
+    if (encoding == JS::SmallestEncoding::Latin1) {
+        Latin1Char* latin1 = UTF8CharsToNewLatin1CharsZ(cx, utf8, &length).get();
+        if (!latin1)
+            return nullptr;
+
+        JSFlatString* result = NewString<allowGC>(cx, latin1, length);
+        if (!result)
+            js_free((void*)latin1);
+        return result;
+    }
+
+    MOZ_ASSERT(encoding == JS::SmallestEncoding::UTF16);
+
+    char16_t* utf16 = UTF8CharsToNewTwoByteCharsZ(cx, utf8, &length).get();
+    if (!utf16)
+        return nullptr;
+
+    JSFlatString* result = NewString<allowGC>(cx, utf16, length);
+    if (!result)
+        js_free((void*)utf16);
+    return result;
+}
+
+template JSFlatString*
+NewStringCopyUTF8N<CanGC>(JSContext* cx, const JS::UTF8Chars utf8);
 
 } /* namespace js */
 

@@ -75,6 +75,11 @@ public:
         m_formatter.oneByteOp(OP_NOP);
     }
 
+    void comment(const char* msg)
+    {
+        spew("; %s", msg);
+    }
+
     MOZ_MUST_USE JmpSrc
     twoByteNop()
     {
@@ -1010,10 +1015,21 @@ public:
         spew("fld        " MEM_ob, ADDR_ob(offset, base));
         m_formatter.oneByteOp(OP_FPU6_F32, offset, base, FPU6_OP_FLD);
     }
+    void faddp()
+    {
+        spew("addp       ");
+        m_formatter.oneByteOp(OP_FPU6_ADDP);
+        m_formatter.oneByteOp(OP_ADDP_ST0_ST1);
+    }
     void fisttp_m(int32_t offset, RegisterID base)
     {
         spew("fisttp     " MEM_ob, ADDR_ob(offset, base));
         m_formatter.oneByteOp(OP_FPU6, offset, base, FPU6_OP_FISTTP);
+    }
+    void fistp_m(int32_t offset, RegisterID base)
+    {
+        spew("fistp      " MEM_ob, ADDR_ob(offset, base));
+        m_formatter.oneByteOp(OP_FILD, offset, base, FPU6_OP_FISTP);
     }
     void fstp_m(int32_t offset, RegisterID base)
     {
@@ -1022,8 +1038,23 @@ public:
     }
     void fstp32_m(int32_t offset, RegisterID base)
     {
-        spew("fstp32       " MEM_ob, ADDR_ob(offset, base));
+        spew("fstp32     " MEM_ob, ADDR_ob(offset, base));
         m_formatter.oneByteOp(OP_FPU6_F32, offset, base, FPU6_OP_FSTP);
+    }
+    void fnstcw_m(int32_t offset, RegisterID base)
+    {
+        spew("fnstcw     " MEM_ob, ADDR_ob(offset, base));
+        m_formatter.oneByteOp(OP_FPU6_F32, offset, base, FPU6_OP_FISTP);
+    }
+    void fldcw_m(int32_t offset, RegisterID base)
+    {
+        spew("fldcw      " MEM_ob, ADDR_ob(offset, base));
+        m_formatter.oneByteOp(OP_FPU6_F32, offset, base, FPU6_OP_FLDCW);
+    }
+    void fnstsw_m(int32_t offset, RegisterID base)
+    {
+        spew("fnstsw     " MEM_ob, ADDR_ob(offset, base));
+        m_formatter.oneByteOp(OP_FPU6, offset, base, FPU6_OP_FISTP);
     }
 
     void negl_r(RegisterID dst)
@@ -1462,6 +1493,18 @@ public:
     {
         spew("shrl       %%cl, %s", GPReg32Name(dst));
         m_formatter.oneByteOp(OP_GROUP2_EvCL, dst, GROUP2_OP_SHR);
+    }
+
+    void shrdl_CLr(RegisterID src, RegisterID dst)
+    {
+        spew("shrdl      %%cl, %s, %s", GPReg32Name(src), GPReg32Name(dst));
+        m_formatter.twoByteOp(OP2_SHRD_GvEv, dst, src);
+    }
+
+    void shldl_CLr(RegisterID src, RegisterID dst)
+    {
+        spew("shldl      %%cl, %s, %s", GPReg32Name(src), GPReg32Name(dst));
+        m_formatter.twoByteOp(OP2_SHLD_GvEv, dst, src);
     }
 
     void shll_ir(int32_t imm, RegisterID dst)
@@ -3702,6 +3745,11 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
         m_formatter.simd128Constant(data);
     }
 
+    void int32Constant(int32_t i)
+    {
+        spew(".int %d", i);
+        m_formatter.int32Constant(i);
+    }
     void int64Constant(int64_t i)
     {
         spew(".quad %lld", (long long)i);
@@ -3802,9 +3850,6 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
     {
         return m_formatter.append(other.m_formatter.buffer(), other.size());
     }
-
-    void enableBufferProtection() { m_formatter.enableBufferProtection(); }
-    void disableBufferProtection() { m_formatter.disableBufferProtection(); }
 
     void unprotectDataRegion(size_t firstByteOffset, size_t lastByteOffset) {
         m_formatter.unprotectDataRegion(firstByteOffset, lastByteOffset);
@@ -5083,9 +5128,6 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
         {
             return m_buffer.append(values, size);
         }
-
-        void enableBufferProtection() { m_buffer.enableBufferProtection(); }
-        void disableBufferProtection() { m_buffer.disableBufferProtection(); }
 
         void unprotectDataRegion(size_t firstByteOffset, size_t lastByteOffset) {
             m_buffer.unprotectDataRegion(firstByteOffset, lastByteOffset);

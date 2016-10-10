@@ -4,23 +4,18 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
 const {angleUtils} = require("devtools/client/shared/css-angle");
-const {colorUtils} = require("devtools/client/shared/css-color");
-const {getCSSLexer} = require("devtools/shared/css-lexer");
+const {colorUtils} = require("devtools/shared/css/color");
+const {getCSSLexer} = require("devtools/shared/css/lexer");
 const EventEmitter = require("devtools/shared/event-emitter");
 const {
   ANGLE_TAKING_FUNCTIONS,
   BEZIER_KEYWORDS,
   COLOR_TAKING_FUNCTIONS,
   CSS_TYPES
-} = require("devtools/shared/css-properties-db");
+} = require("devtools/shared/css/properties-db");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
-
-loader.lazyGetter(this, "DOMUtils", function () {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-});
 
 /**
  * This module is used to process text for output by developer tools. This means
@@ -30,8 +25,6 @@ loader.lazyGetter(this, "DOMUtils", function () {
  * border radius, cubic-bezier etc.).
  *
  * Usage:
- *   const {require} =
- *      Cu.import("resource://devtools/shared/Loader.jsm", {});
  *   const {OutputParser} = require("devtools/client/shared/output-parser");
  *
  *   let parser = new OutputParser(document, supportsType);
@@ -39,15 +32,18 @@ loader.lazyGetter(this, "DOMUtils", function () {
  *   parser.parseCssProperty("color", "red"); // Returns document fragment.
  *
  * @param {Document} document Used to create DOM nodes.
- * @param {Function} supportsTypes A function that returns a boolean when asked if a css
- * property name supports a given css type.
- * The function is executed like supportsType("color", CSS_TYPES.COLOR) where CSS_TYPES is
- * defined in devtools/shared/css-properties-db.js
+ * @param {Function} supportsTypes - A function that returns a boolean when asked if a css
+ *                   property name supports a given css type.
+ *                   The function is executed like supportsType("color", CSS_TYPES.COLOR)
+ *                   where CSS_TYPES is defined in devtools/shared/css/properties-db.js
+ * @param {Function} isValidOnClient - A function that checks if a css property
+ *                   name/value combo is valid.
  */
-function OutputParser(document, supportsType) {
+function OutputParser(document, {supportsType, isValidOnClient}) {
   this.parsed = [];
   this.doc = document;
   this.supportsType = supportsType;
+  this.isValidOnClient = isValidOnClient;
   this.colorSwatches = new WeakMap();
   this.angleSwatches = new WeakMap();
   this._onColorSwatchMouseDown = this._onColorSwatchMouseDown.bind(this);
@@ -156,7 +152,7 @@ OutputParser.prototype = {
     };
 
     let angleOK = function (angle) {
-      return /^-?\d+\.?\d*(deg|rad|grad|turn)$/gi.test(angle);
+      return (new angleUtils.CssAngle(angle)).valid;
     };
 
     while (true) {
@@ -343,7 +339,7 @@ OutputParser.prototype = {
    *         CSS Property value to check
    */
   _cssPropertySupportsValue: function (name, value) {
-    return DOMUtils.cssPropertyIsValid(name, value);
+    return this.isValidOnClient(name, value, this.doc);
   },
 
   /**

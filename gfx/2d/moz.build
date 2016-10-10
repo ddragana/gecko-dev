@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -40,6 +40,7 @@ EXPORTS.mozilla.gfx += [
     'PathHelpers.h',
     'PatternHelpers.h',
     'Point.h',
+    'Polygon.h',
     'Quaternion.h',
     'RecordedEvent.h',
     'RecordingTypes.h',
@@ -51,6 +52,7 @@ EXPORTS.mozilla.gfx += [
     'SourceSurfaceRawData.h',
     'StackArray.h',
     'Tools.h',
+    'Triangle.h',
     'Types.h',
     'UserData.h',
 ]
@@ -63,6 +65,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('cocoa', 'uikit'):
     ]
     UNIFIED_SOURCES += [
         'DrawTargetCG.cpp',
+        'NativeFontResourceMac.cpp',
         'PathCG.cpp',
         'ScaledFontMac.cpp',
         'SourceSurfaceCG.cpp',
@@ -86,6 +89,11 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
 if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'windows':
     SOURCES += [
         'JobScheduler_posix.cpp',
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'gtk3'):
+    SOURCES += [
+        'ScaledFontFontconfig.cpp',
     ]
 
 if CONFIG['MOZ_ENABLE_SKIA']:
@@ -193,7 +201,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
 
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
     SOURCES += ['BlurNEON.cpp']
-    SOURCES['BlurNEON.cpp'].flags += ['-mfpu=neon']
+    SOURCES['BlurNEON.cpp'].flags += CONFIG['NEON_FLAGS']
 
 include('/ipc/chromium/chromium-config.mozbuild')
 

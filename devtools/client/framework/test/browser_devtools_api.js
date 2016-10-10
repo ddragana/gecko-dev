@@ -18,9 +18,7 @@ thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: this.doc is undefine
 const toolId1 = "test-tool-1";
 const toolId2 = "test-tool-2";
 
-var tempScope = {};
-Cu.import("resource://devtools/shared/event-emitter.js", tempScope);
-var EventEmitter = tempScope.EventEmitter;
+var EventEmitter = require("devtools/shared/event-emitter");
 
 function test() {
   addTab("about:blank").then(runTests1);
@@ -203,13 +201,12 @@ function destroyToolbox(toolbox) {
   toolbox.destroy().then(function () {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
     ok(gDevTools._toolboxes.get(target) == null, "gDevTools doesn't know about target");
-    ok(toolbox._target == null, "toolbox doesn't know about target.");
+    ok(toolbox.target == null, "toolbox doesn't know about target.");
     finishUp();
   });
 }
 
 function finishUp() {
-  tempScope = null;
   gBrowser.removeCurrentTab();
   finish();
 }

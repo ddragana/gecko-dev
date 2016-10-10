@@ -80,7 +80,7 @@ def build_dict(config, env=os.environ):
 
     d['debug'] = substs.get('MOZ_DEBUG') == '1'
     d['nightly_build'] = substs.get('NIGHTLY_BUILD') == '1'
-    d['release_build'] = substs.get('RELEASE_BUILD') == '1'
+    d['release_or_beta'] = substs.get('RELEASE_OR_BETA') == '1'
     d['pgo'] = substs.get('MOZ_PGO') == '1'
     d['crashreporter'] = bool(substs.get('MOZ_CRASHREPORTER'))
     d['datareporting'] = bool(substs.get('MOZ_DATA_REPORTING'))
@@ -140,6 +140,9 @@ def build_dict(config, env=os.environ):
         d['platform_guess'] = guess_platform()
         d['buildtype_guess'] = guess_buildtype()
 
+    if 'buildapp' in d and d['buildapp'] == 'mobile/android' and 'MOZ_ANDROID_MIN_SDK_VERSION' in substs:
+        d['android_min_sdk'] = substs['MOZ_ANDROID_MIN_SDK_VERSION']
+
     return d
 
 
@@ -152,7 +155,6 @@ def write_mozinfo(file, config, env=os.environ):
     """
     build_conf = build_dict(config, env)
     if isinstance(file, basestring):
-        with open(file, "w") as f:
-            json.dump(build_conf, f)
-    else:
-        json.dump(build_conf, file)
+        file = open(file, 'wb')
+
+    json.dump(build_conf, file, sort_keys=True, indent=4)

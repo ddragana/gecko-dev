@@ -18,6 +18,7 @@ import os
 import re
 
 from mercurial.i18n import _
+from mercurial.node import hex
 from mercurial import (
     commands,
     error,
@@ -29,7 +30,7 @@ from mercurial import (
     util,
 )
 
-testedwith = '3.5 3.6 3.7 3.8'
+testedwith = '3.6 3.7 3.8 3.9'
 minimumhgversion = '3.7'
 
 cmdtable = {}
@@ -141,6 +142,16 @@ def robustcheckout(ui, url, dest, upstream=None, revision=None, branch=None,
     # worker.backgroundclose only makes things faster if running anti-virus,
     # which our automation doesn't. Disable it.
     ui.setconfig('worker', 'backgroundclose', False)
+
+    # By default the progress bar starts after 3s and updates every 0.1s. We
+    # change this so it shows and updates every 1.0s.
+    # We also tell progress to assume a TTY is present so updates are printed
+    # even if there is no known TTY.
+    # We make the config change here instead of in a config file because
+    # otherwise we're at the whim of whatever configs are used in automation.
+    ui.setconfig('progress', 'delay', 1.0)
+    ui.setconfig('progress', 'refresh', 1.0)
+    ui.setconfig('progress', 'assume-tty', True)
 
     sharebase = os.path.realpath(sharebase)
 
@@ -259,17 +270,28 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase):
                               hint='must be the first 12+ characters of a '
                                    'SHA-1 fragment')
 
+        checkoutrevision = ctx.hex()
         havewantedrev = True
 
     if not havewantedrev:
         ui.write('(pulling to obtain %s)\n' % (revision or branch,))
 
+        remote = None
         try:
             remote = hg.peer(repo, {}, url)
             pullrevs = [remote.lookup(revision or branch)]
-            pullop = exchange.pull(repo, remote, heads=pullrevs)
-            if not pullop.rheads:
-                raise error.Abort('unable to pull requested revision')
+            checkoutrevision = hex(pullrevs[0])
+            if branch:
+                ui.warn('(remote resolved %s to %s; '
+                        'result is not deterministic)\n' %
+                        (branch, checkoutrevision))
+
+            if checkoutrevision in repo:
+                ui.warn('(revision already present locally; not pulling)\n')
+            else:
+                pullop = exchange.pull(repo, remote, heads=pullrevs)
+                if not pullop.rheads:
+                    raise error.Abort('unable to pull requested revision')
         except error.Abort as e:
             if e.message == _('repository is unrelated'):
                 ui.warn('(repository is unrelated; deleting)\n')
@@ -284,7 +306,8 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase):
             deletesharedstore()
             return callself()
         finally:
-            remote.close()
+            if remote:
+                remote.close()
 
     # Now we should have the wanted revision in the store. Perform
     # working directory manipulation.
@@ -303,11 +326,10 @@ def _docheckout(ui, url, dest, upstream, revision, branch, purge, sharebase):
             raise error.Abort('error purging')
 
     # Update the working directory.
-    if commands.update(ui, repo, rev=revision or branch, clean=True):
+    if commands.update(ui, repo, rev=checkoutrevision, clean=True):
         raise error.Abort('error updating')
 
-    ctx = repo[revision or branch]
-    ui.write('updated to %s\n' % ctx.hex())
+    ui.write('updated to %s\n' % checkoutrevision)
     return None
 
 

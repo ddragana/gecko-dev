@@ -13,7 +13,7 @@ dbg.onNewScript = (script) => {
   s = script;
 }
 
-g.eval(`o = Wasm.instantiateModule(wasmTextToBinary('(module (func) (export "" 0))'));`);
+g.eval(`o = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary('(module (func) (export "" 0))')));`);
 assertEq(s.format, "wasm");
 
 assertThrowsInstanceOf(() => s.displayName, Error);
@@ -26,7 +26,6 @@ assertThrowsInstanceOf(() => s.global, Error);
 assertThrowsInstanceOf(() => s.getChildScripts(), Error);
 assertThrowsInstanceOf(() => s.getAllOffsets(), Error);
 assertThrowsInstanceOf(() => s.getAllColumnOffsets(), Error);
-assertThrowsInstanceOf(() => s.getLineOffsets(0), Error);
 assertThrowsInstanceOf(() => s.setBreakpoint(0, { hit: () => {} }), Error);
 assertThrowsInstanceOf(() => s.getBreakpoint(0), Error);
 assertThrowsInstanceOf(() => s.clearBreakpoint({}), Error);

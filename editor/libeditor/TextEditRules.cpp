@@ -122,7 +122,7 @@ TextEditRules::Init(TextEditor* aTextEditor)
   // We hold a non-refcounted reference back to our editor.
   mTextEditor = aTextEditor;
   RefPtr<Selection> selection = mTextEditor->GetSelection();
-  NS_WARN_IF_FALSE(selection, "editor cannot get selection");
+  NS_WARNING_ASSERTION(selection, "editor cannot get selection");
 
   // Put in a magic br if needed. This method handles null selection,
   // which should never happen anyway
@@ -491,8 +491,8 @@ GetTextNode(Selection* selection,
     // if node is null, return it to indicate there's no text
     NS_ENSURE_TRUE(node, nullptr);
     // This should be the root node, walk the tree looking for text nodes
-    NodeFilterHolder filter;
-    RefPtr<NodeIterator> iter = new NodeIterator(node, nsIDOMNodeFilter::SHOW_TEXT, filter);
+    RefPtr<NodeIterator> iter =
+      new NodeIterator(node, nsIDOMNodeFilter::SHOW_TEXT, NodeFilterHolder());
     while (!editor->IsTextNode(selNode)) {
       if (NS_FAILED(res = iter->NextNode(getter_AddRefs(selNode))) || !selNode) {
         return nullptr;

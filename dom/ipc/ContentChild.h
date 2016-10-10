@@ -16,10 +16,14 @@
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
 #include "nsTHashtable.h"
+#include "nsRefPtrHashtable.h"
 
 #include "nsWeakPtr.h"
 #include "nsIWindowProvider.h"
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#include "nsIFile.h"
+#endif
 
 struct ChromePackage;
 class nsIObserver;
@@ -32,13 +36,8 @@ class RemoteSpellcheckEngineChild;
 
 namespace ipc {
 class OptionalURIParams;
-class PFileDescriptorSetChild;
 class URIParams;
 }// namespace ipc
-
-namespace layers {
-class PCompositorBridgeChild;
-} // namespace layers
 
 namespace dom {
 
@@ -47,12 +46,14 @@ class ConsoleListener;
 class PStorageChild;
 class ClonedMessageData;
 class TabChild;
+class GetFilesHelperChild;
 
 class ContentChild final : public PContentChild
                          , public nsIWindowProvider
                          , public nsIContentChild
 {
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
+  typedef mozilla::ipc::FileDescriptor FileDescriptor;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
   typedef mozilla::ipc::PFileDescriptorSetChild PFileDescriptorSetChild;
   typedef mozilla::ipc::URIParams URIParams;
@@ -116,7 +117,22 @@ public:
 
   void GetProcessName(nsACString& aName) const;
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  void GetProfileDir(nsIFile** aProfileDir) const
+  {
+    *aProfileDir = mProfileDir;
+    NS_IF_ADDREF(*aProfileDir);
+  }
+
+  void SetProfileDir(nsIFile* aProfileDir)
+  {
+    mProfileDir = aProfileDir;
+  }
+#endif
+
   bool IsAlive() const;
+
+  bool IsShuttingDown() const;
 
   static void AppendProcessId(nsACString& aName);
 
@@ -145,30 +161,25 @@ public:
   AllocPGMPServiceChild(mozilla::ipc::Transport* transport,
                         base::ProcessId otherProcess) override;
 
-  PAPZChild*
-  AllocPAPZChild(const TabId& aTabId) override;
   bool
-  DeallocPAPZChild(PAPZChild* aActor) override;
+  RecvInitRendering(
+    Endpoint<PCompositorBridgeChild>&& aCompositor,
+    Endpoint<PImageBridgeChild>&& aImageBridge,
+    Endpoint<PVRManagerChild>&& aVRBridge) override;
 
-  PCompositorBridgeChild*
-  AllocPCompositorBridgeChild(mozilla::ipc::Transport* aTransport,
-                              base::ProcessId aOtherProcess) override;
+  bool
+  RecvReinitRendering(
+    Endpoint<PCompositorBridgeChild>&& aCompositor,
+    Endpoint<PImageBridgeChild>&& aImageBridge,
+    Endpoint<PVRManagerChild>&& aVRBridge) override;
 
   PSharedBufferManagerChild*
   AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport,
                                   base::ProcessId aOtherProcess) override;
 
-  PImageBridgeChild*
-  AllocPImageBridgeChild(mozilla::ipc::Transport* aTransport,
-                         base::ProcessId aOtherProcess) override;
-
   PProcessHangMonitorChild*
   AllocPProcessHangMonitorChild(Transport* aTransport,
                                 ProcessId aOtherProcess) override;
-
-  PVRManagerChild*
-  AllocPVRManagerChild(Transport* aTransport,
-                       ProcessId aOtherProcess) override;
 
   virtual bool RecvSetProcessSandbox(const MaybeFileDesc& aBroker) override;
 
@@ -287,6 +298,9 @@ public:
 
   virtual bool DeallocPPrintingChild(PPrintingChild*) override;
 
+  virtual PSendStreamChild*
+  SendPSendStreamConstructor(PSendStreamChild*) override;
+
   virtual PSendStreamChild* AllocPSendStreamChild() override;
   virtual bool DeallocPSendStreamChild(PSendStreamChild*) override;
 
@@ -320,12 +334,6 @@ public:
   virtual PHandlerServiceChild* AllocPHandlerServiceChild() override;
 
   virtual bool DeallocPHandlerServiceChild(PHandlerServiceChild*) override;
-
-  virtual PCellBroadcastChild* AllocPCellBroadcastChild() override;
-
-  PCellBroadcastChild* SendPCellBroadcastConstructor(PCellBroadcastChild* aActor);
-
-  virtual bool DeallocPCellBroadcastChild(PCellBroadcastChild* aActor) override;
 
   virtual PSmsChild* AllocPSmsChild() override;
 
@@ -376,6 +384,8 @@ public:
 
   virtual bool RecvNotifyGMPsChanged() override;
 
+  virtual bool RecvNotifyEmptyHTTPCache() override;
+
   virtual PSpeechSynthesisChild* AllocPSpeechSynthesisChild() override;
 
   virtual bool DeallocPSpeechSynthesisChild(PSpeechSynthesisChild* aActor) override;
@@ -402,6 +412,8 @@ public:
 
   virtual bool RecvSetConnectivity(const bool& connectivity) override;
 
+  virtual bool RecvNotifyLayerAllocated(const dom::TabId& aTabId, const uint64_t& aLayersId) override;
+
   virtual bool RecvSpeakerManagerNotify() override;
 
   virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL,
@@ -412,10 +424,8 @@ public:
   // auto remove when alertfinished is received.
   nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
 
-  virtual bool RecvSystemMemoryAvailable(const uint64_t& aGetterId,
-                                         const uint32_t& aMemoryAvailable) override;
-
   virtual bool RecvPreferenceUpdate(const PrefSetting& aPref) override;
+  virtual bool RecvVarUpdate(const GfxVarUpdate& pref) override;
 
   virtual bool RecvDataStoragePut(const nsString& aFilename,
                                   const DataStorageItem& aItem) override;
@@ -447,6 +457,7 @@ public:
   virtual bool RecvFlushMemory(const nsString& reason) override;
 
   virtual bool RecvActivateA11y() override;
+  virtual bool RecvShutdownA11y() override;
 
   virtual bool RecvGarbageCollect() override;
   virtual bool RecvCycleCollect() override;
@@ -459,6 +470,9 @@ public:
 
   virtual bool
   RecvInitServiceWorkers(const ServiceWorkerConfiguration& aConfig) override;
+
+  virtual bool
+  RecvInitBlobURLs(nsTArray<BlobURLRegistrationData>&& aRegistations) override;
 
   virtual bool RecvLastPrivateDocShellDestroyed() override;
 
@@ -573,6 +587,9 @@ public:
                        const BlobConstructorParams& params) override;
 
   virtual PFileDescriptorSetChild*
+  SendPFileDescriptorSetConstructor(const FileDescriptor&) override;
+
+  virtual PFileDescriptorSetChild*
   AllocPFileDescriptorSetChild(const FileDescriptor&) override;
 
   virtual bool
@@ -627,6 +644,37 @@ public:
                           const nsString& aDisplayName,
                           const nsString& aIconPath) override;
 
+
+  // GetFiles for WebKit/Blink FileSystem API and Directory API must run on the
+  // parent process.
+  void
+  CreateGetFilesRequest(const nsAString& aDirectoryPath, bool aRecursiveFlag,
+                        nsID& aUUID, GetFilesHelperChild* aChild);
+
+  void
+  DeleteGetFilesRequest(nsID& aUUID, GetFilesHelperChild* aChild);
+
+  virtual bool
+  RecvGetFilesResponse(const nsID& aUUID,
+                       const GetFilesResponseResult& aResult) override;
+
+  virtual bool
+  RecvBlobURLRegistration(const nsCString& aURI, PBlobChild* aBlobChild,
+                          const IPC::Principal& aPrincipal) override;
+
+  virtual bool
+  RecvBlobURLUnregistration(const nsCString& aURI) override;
+
+  /**
+   * Helper function for protocols that use the GPU process when available.
+   * Overrides FatalError to just be a warning when communicating with the
+   * GPU process since we don't want to crash the content process when the
+   * GPU process crashes.
+   */
+  static void FatalErrorIfNotUsingGPUProcess(const char* const aProtocolName,
+                                             const char* const aErrorMsg,
+                                             base::ProcessId aOtherPid);
+
 private:
   static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
   void StartForceKillTimer();
@@ -664,11 +712,19 @@ private:
   nsCOMPtr<nsIDomainPolicy> mPolicy;
   nsCOMPtr<nsITimer> mForceKillTimer;
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  nsCOMPtr<nsIFile> mProfileDir;
+#endif
+
+  // Hashtable to keep track of the pending GetFilesHelper objects.
+  // This GetFilesHelperChild objects are removed when RecvGetFilesResponse is
+  // received.
+  nsRefPtrHashtable<nsIDHashKey, GetFilesHelperChild> mGetFilesPendingRequests;
+
+  bool mShuttingDown;
+
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };
-
-void
-InitOnContentProcessCreated();
 
 uint64_t
 NextWindowID();

@@ -34,6 +34,30 @@ namespace dom {
 
 namespace {
 
+template<typename T>
+void
+CreateObjectURLInternal(const GlobalObject& aGlobal, T aObject,
+                        nsAString& aResult, ErrorResult& aRv)
+{
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
+  if (NS_WARN_IF(!global)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
+  }
+
+  nsCOMPtr<nsIPrincipal> principal =
+    nsContentUtils::ObjectPrincipal(aGlobal.Get());
+
+  nsAutoCString url;
+  aRv = nsHostObjectProtocolHandler::AddDataEntry(aObject, principal, url);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  global->RegisterHostObjectURI(url);
+  CopyASCIItoUTF16(url, aResult);
+}
+
 // The URL implementation for the main-thread
 class URLMainThread final : public URL
 {
@@ -60,9 +84,7 @@ public:
                   ErrorResult& aRv)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    CreateObjectURLInternal(aGlobal, aBlob.Impl(),
-                            NS_LITERAL_CSTRING(BLOBURI_SCHEME), aOptions,
-                            aResult, aRv);
+    CreateObjectURLInternal(aGlobal, aBlob.Impl(), aResult, aRv);
   }
 
   static void
@@ -71,9 +93,7 @@ public:
                   ErrorResult& aRv)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    CreateObjectURLInternal(aGlobal, &aStream,
-                            NS_LITERAL_CSTRING(MEDIASTREAMURI_SCHEME), aOptions,
-                            aResult, aRv);
+    CreateObjectURLInternal(aGlobal, &aStream, aResult, aRv);
   }
 
   static void
@@ -82,14 +102,12 @@ public:
                   ErrorResult& aRv);
 
   static void
-  CreateObjectURLInternal(const GlobalObject& aGlobal, nsISupports* aObject,
-                          const nsACString& aScheme,
-                          const objectURLOptions& aOptions,
-                          nsAString& aResult, ErrorResult& aRv);
-
-  static void
   RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aURL,
                   ErrorResult& aRv);
+
+  static bool
+  IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
+             ErrorResult& aRv);
 
   URLMainThread(nsISupports* aParent, already_AddRefed<nsIURI> aURI)
     : URL(aParent)
@@ -225,7 +243,9 @@ URLMainThread::Constructor(nsISupports* aParent, const nsAString& aURL,
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), aURL, nullptr, aBase,
                           nsContentUtils::GetIOService());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  if (NS_FAILED(rv)) {
+    // No need to warn in this case. It's common to use the URL constructor
+    // to determine if a URL is valid and an exception will be propagated.
     aRv.ThrowTypeError<MSG_INVALID_URL>(aURL);
     return nullptr;
   }
@@ -246,9 +266,7 @@ URLMainThread::CreateObjectURL(const GlobalObject& aGlobal,
     nsContentUtils::ObjectPrincipal(aGlobal.Get());
 
   nsAutoCString url;
-  aRv = nsHostObjectProtocolHandler::
-    AddDataEntry(NS_LITERAL_CSTRING(MEDIASOURCEURI_SCHEME),
-                 &aSource, principal, url);
+  aRv = nsHostObjectProtocolHandler::AddDataEntry(&aSource, principal, url);
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }
@@ -260,34 +278,6 @@ URLMainThread::CreateObjectURL(const GlobalObject& aGlobal,
 
   nsContentUtils::RunInStableState(revocation.forget());
 
-  CopyASCIItoUTF16(url, aResult);
-}
-
-/* static */ void
-URLMainThread::CreateObjectURLInternal(const GlobalObject& aGlobal,
-                                       nsISupports* aObject,
-                                       const nsACString& aScheme,
-                                       const objectURLOptions& aOptions,
-                                       nsAString& aResult, ErrorResult& aRv)
-{
-  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
-  if (!global) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal =
-    nsContentUtils::ObjectPrincipal(aGlobal.Get());
-
-  nsAutoCString url;
-  nsresult rv = nsHostObjectProtocolHandler::AddDataEntry(aScheme, aObject,
-                                                          principal, url);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-    return;
-  }
-
-  global->RegisterHostObjectURI(url);
   CopyASCIItoUTF16(url, aResult);
 }
 
@@ -310,10 +300,18 @@ URLMainThread::RevokeObjectURL(const GlobalObject& aGlobal,
     nsHostObjectProtocolHandler::GetDataEntryPrincipal(asciiurl);
 
   if (urlPrincipal && principal->Subsumes(urlPrincipal)) {
-    nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
     global->UnregisterHostObjectURI(asciiurl);
     nsHostObjectProtocolHandler::RemoveDataEntry(asciiurl);
   }
+}
+
+/* static */ bool
+URLMainThread::IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
+                          ErrorResult& aRv)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  NS_LossyConvertUTF16toASCII asciiurl(aURL);
+  return nsHostObjectProtocolHandler::HasDataEntry(asciiurl);
 }
 
 void
@@ -684,6 +682,10 @@ public:
   RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aUrl,
                   ErrorResult& aRv);
 
+  static bool
+  IsValidURL(const GlobalObject& aGlobal, const nsAString& aUrl,
+             ErrorResult& aRv);
+
   URLWorker(WorkerPrivate* aWorkerPrivate, URLProxy* aURLProxy);
 
   virtual void
@@ -826,9 +828,8 @@ public:
     nsCOMPtr<nsIPrincipal> principal = mWorkerPrivate->GetPrincipal();
 
     nsAutoCString url;
-    nsresult rv = nsHostObjectProtocolHandler::AddDataEntry(
-        NS_LITERAL_CSTRING(BLOBURI_SCHEME),
-        mBlobImpl, principal, url);
+    nsresult rv =
+      nsHostObjectProtocolHandler::AddDataEntry(mBlobImpl, principal, url);
 
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to add data entry for the blob!");
@@ -914,6 +915,40 @@ public:
   }
 };
 
+// This class checks if an URL is valid on the main thread.
+class IsValidURLRunnable : public WorkerMainThreadRunnable
+{
+private:
+  const nsString mURL;
+  bool mValid;
+
+public:
+  IsValidURLRunnable(WorkerPrivate* aWorkerPrivate,
+                     const nsAString& aURL)
+  : WorkerMainThreadRunnable(aWorkerPrivate,
+                             NS_LITERAL_CSTRING("URL :: IsValidURL"))
+  , mURL(aURL)
+  , mValid(false)
+  {}
+
+  bool
+  MainThreadRun()
+  {
+    AssertIsOnMainThread();
+
+    NS_ConvertUTF16toUTF8 url(mURL);
+    mValid = nsHostObjectProtocolHandler::HasDataEntry(url);
+
+    return true;
+  }
+
+  bool
+  IsValidURL() const
+  {
+    return mValid;
+  }
+};
+
 // This class creates a URL object on the main thread.
 class ConstructorRunnable : public WorkerMainThreadRunnable
 {
@@ -922,18 +957,15 @@ private:
 
   nsString mBase; // IsVoid() if we have no base URI string.
   RefPtr<URLProxy> mBaseProxy;
-  ErrorResult& mRv;
 
   RefPtr<URLProxy> mRetval;
 
 public:
   ConstructorRunnable(WorkerPrivate* aWorkerPrivate,
-                      const nsAString& aURL, const Optional<nsAString>& aBase,
-                      ErrorResult& aRv)
+                      const nsAString& aURL, const Optional<nsAString>& aBase)
   : WorkerMainThreadRunnable(aWorkerPrivate,
                              NS_LITERAL_CSTRING("URL :: Constructor"))
   , mURL(aURL)
-  , mRv(aRv)
   {
     if (aBase.WasPassed()) {
       mBase = aBase.Value();
@@ -944,13 +976,11 @@ public:
   }
 
   ConstructorRunnable(WorkerPrivate* aWorkerPrivate,
-                      const nsAString& aURL, URLProxy* aBaseProxy,
-                      ErrorResult& aRv)
+                      const nsAString& aURL, URLProxy* aBaseProxy)
   : WorkerMainThreadRunnable(aWorkerPrivate,
                              NS_LITERAL_CSTRING("URL :: Constructor with BaseURL"))
   , mURL(aURL)
   , mBaseProxy(aBaseProxy)
-  , mRv(aRv)
   {
     mBase.SetIsVoid(true);
     mWorkerPrivate->AssertIsOnWorkerThread();
@@ -961,16 +991,18 @@ public:
   {
     AssertIsOnMainThread();
 
+    ErrorResult rv;
     RefPtr<URLMainThread> url;
     if (mBaseProxy) {
-      url = URLMainThread::Constructor(nullptr, mURL, mBaseProxy->URI(), mRv);
+      url = URLMainThread::Constructor(nullptr, mURL, mBaseProxy->URI(), rv);
     } else if (!mBase.IsVoid()) {
-      url = URLMainThread::Constructor(nullptr, mURL, mBase, mRv);
+      url = URLMainThread::Constructor(nullptr, mURL, mBase, rv);
     } else {
-      url = URLMainThread::Constructor(nullptr, mURL, nullptr, mRv);
+      url = URLMainThread::Constructor(nullptr, mURL, nullptr, rv);
     }
 
-    if (mRv.Failed()) {
+    if (rv.Failed()) {
+      rv.SuppressException();
       return true;
     }
 
@@ -979,8 +1011,15 @@ public:
   }
 
   URLProxy*
-  GetURLProxy()
+  GetURLProxy(ErrorResult& aRv) const
   {
+    MOZ_ASSERT(mWorkerPrivate);
+    mWorkerPrivate->AssertIsOnWorkerThread();
+
+    if (!mRetval) {
+      aRv.ThrowTypeError<MSG_INVALID_URL>(mURL);
+    }
+
     return mRetval;
   }
 };
@@ -1211,9 +1250,8 @@ FinishConstructor(JSContext* aCx, WorkerPrivate* aPrivate,
     return nullptr;
   }
 
-  RefPtr<URLProxy> proxy = aRunnable->GetURLProxy();
-  if (NS_WARN_IF(!proxy)) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+  RefPtr<URLProxy> proxy = aRunnable->GetURLProxy(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
@@ -1232,7 +1270,7 @@ URLWorker::Constructor(const GlobalObject& aGlobal, const nsAString& aURL,
 
   URLWorker& base = static_cast<URLWorker&>(aBase);
   RefPtr<ConstructorRunnable> runnable =
-    new ConstructorRunnable(workerPrivate, aURL, base.GetURLProxy(), aRv);
+    new ConstructorRunnable(workerPrivate, aURL, base.GetURLProxy());
 
   return FinishConstructor(cx, workerPrivate, runnable, aRv);
 }
@@ -1245,7 +1283,7 @@ URLWorker::Constructor(const GlobalObject& aGlobal, const nsAString& aURL,
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
 
   RefPtr<ConstructorRunnable> runnable =
-    new ConstructorRunnable(workerPrivate, aURL, aBase, aRv);
+    new ConstructorRunnable(workerPrivate, aURL, aBase);
 
   return FinishConstructor(cx, workerPrivate, runnable, aRv);
 }
@@ -1261,7 +1299,7 @@ URLWorker::Constructor(const GlobalObject& aGlobal, const nsAString& aURL,
   base = &aBase;
 
   RefPtr<ConstructorRunnable> runnable =
-    new ConstructorRunnable(workerPrivate, aURL, base, aRv);
+    new ConstructorRunnable(workerPrivate, aURL, base);
 
   return FinishConstructor(cx, workerPrivate, runnable, aRv);
 }
@@ -1319,6 +1357,24 @@ URLWorker::RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aUrl,
 
     scope->UnregisterHostObjectURI(NS_ConvertUTF16toUTF8(aUrl));
   }
+}
+
+/* static */ bool
+URLWorker::IsValidURL(const GlobalObject& aGlobal, const nsAString& aUrl,
+                      ErrorResult& aRv)
+{
+  JSContext* cx = aGlobal.Context();
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
+
+  RefPtr<IsValidURLRunnable> runnable =
+    new IsValidURLRunnable(workerPrivate, aUrl);
+
+  runnable->Dispatch(aRv);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return false;
+  }
+
+  return runnable->IsValidURL();
 }
 
 URLWorker::URLWorker(WorkerPrivate* aWorkerPrivate, URLProxy* aURLProxy)
@@ -1713,6 +1769,16 @@ URL::RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aURL,
   }
 }
 
+bool
+URL::IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
+                ErrorResult& aRv)
+{
+  if (NS_IsMainThread()) {
+    return URLMainThread::IsValidURL(aGlobal, aURL, aRv);
+  }
+  return URLWorker::IsValidURL(aGlobal, aURL, aRv);
+}
+
 URLSearchParams*
 URL::SearchParams()
 {
@@ -1755,7 +1821,7 @@ URL::URLSearchParamsUpdated(URLSearchParams* aSearchParams)
 
   ErrorResult rv;
   SetSearchInternal(search, rv);
-  NS_WARN_IF(rv.Failed());
+  NS_WARNING_ASSERTION(!rv.Failed(), "SetSearchInternal failed");
   rv.SuppressException();
 }
 

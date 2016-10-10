@@ -27,9 +27,12 @@ static nsCString
 GetDocumentURI(nsIDocument* aDocument)
 {
   nsCString result;
-  nsString url;
-  aDocument->GetDocumentURI(url);
-  result.Append(NS_ConvertUTF16toUTF8(url).get());
+  nsAutoString url;
+  nsresult rv = aDocument->GetDocumentURI(url);
+  if (NS_SUCCEEDED(rv)) {
+    result.Append(NS_ConvertUTF16toUTF8(url).get());
+  }
+
   return result;
 }
 
@@ -106,13 +109,11 @@ RestyleTracker::ProcessOneRestyle(Element* aElement,
 void
 RestyleTracker::DoProcessRestyles()
 {
-  nsAutoCString docURL;
+  nsAutoCString docURL("N/A");
   if (profiler_is_active()) {
     nsIURI *uri = Document()->GetDocumentURI();
     if (uri) {
-      uri->GetSpec(docURL);
-    } else {
-      docURL = "N/A";
+      docURL = uri->GetSpecOrDefault();
     }
   }
   PROFILER_LABEL_PRINTF("RestyleTracker", "ProcessRestyles",
@@ -168,7 +169,8 @@ RestyleTracker::DoProcessRestyles()
         AutoTArray<RefPtr<Element>, RESTYLE_ARRAY_STACKSIZE> laterSiblingArr;
         for (auto iter = mPendingRestyles.Iter(); !iter.Done(); iter.Next()) {
           auto element = static_cast<dom::Element*>(iter.Key());
-          MOZ_ASSERT(!element->IsStyledByServo(), "Should not have Servo-styled elements here");
+          MOZ_ASSERT(!element->IsStyledByServo(),
+                     "Should not have Servo-styled elements here");
           // Only collect the entries that actually need restyling by us (and
           // haven't, for example, already been restyled).
           // It's important to not mess with the flags on entries not in our
@@ -191,7 +193,7 @@ RestyleTracker::DoProcessRestyles()
                           FrameTagToString(sibling->AsElement()).get(),
                           FrameTagToString(element->AsElement()).get());
               if (AddPendingRestyle(sibling->AsElement(), eRestyle_Subtree,
-                                    NS_STYLE_HINT_NONE)) {
+                                    nsChangeHint(0))) {
                   // Nothing else to do here; we'll handle the following
                   // siblings when we get to |sibling| in laterSiblingArr.
                 break;
@@ -449,7 +451,7 @@ RestyleTracker::AddRestyleRootsIfAwaitingRestyle(
   // The RestyleData for a given element has stored in mDescendants
   // the list of descendants we need to end up restyling.  Since we
   // won't necessarily end up restyling them, due to the restyle
-  // process finishing early (see how eRestyleResult_Stop is handled
+  // process finishing early (see how RestyleResult::eStop is handled
   // in ElementRestyler::Restyle), we add them to the list of restyle
   // roots to handle the next time around the
   // RestyleTracker::DoProcessRestyles loop.

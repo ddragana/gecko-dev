@@ -114,8 +114,8 @@
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsLayoutStylesheetCache.h"
-#include "mozilla/StyleSheetHandle.h"
-#include "mozilla/StyleSheetHandleInlines.h"
+#include "mozilla/StyleSheet.h"
+#include "mozilla/StyleSheetInlines.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -542,7 +542,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
   }
 
   bool html = contentType.EqualsLiteral(TEXT_HTML);
-  bool xhtml = !html && contentType.EqualsLiteral(APPLICATION_XHTML_XML);
+  bool xhtml = !html && (contentType.EqualsLiteral(APPLICATION_XHTML_XML) || contentType.EqualsLiteral(APPLICATION_WAPXHTML_XML));
   bool plainText = !html && !xhtml && nsContentUtils::IsPlainTextType(contentType);
   if (!(html || xhtml || plainText || viewSource)) {
     MOZ_ASSERT(false, "Channel with bad content type.");
@@ -557,7 +557,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
       mCompatMode = eCompatibility_FullStandards;
       loadAsHtml5 = false;
   }
-  
+
   // TODO: Proper about:blank treatment is bug 543435
   if (loadAsHtml5 && view) {
     // mDocumentURI hasn't been set, yet, so get the URI from the channel
@@ -567,16 +567,14 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     // GetSpec can be expensive for some URIs, so check the scheme first.
     bool isAbout = false;
     if (uri && NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)) && isAbout) {
-      nsAutoCString str;
-      uri->GetSpec(str);
-      if (str.EqualsLiteral("about:blank")) {
-        loadAsHtml5 = false;    
+      if (uri->GetSpecOrDefault().EqualsLiteral("about:blank")) {
+        loadAsHtml5 = false;
       }
     }
   }
-  
+
   CSSLoader()->SetCompatibilityMode(mCompatMode);
-  
+
   nsresult rv = nsDocument::StartDocumentLoad(aCommand,
                                               aChannel, aLoadGroup,
                                               aContainer,
@@ -748,7 +746,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
                  "How did those end up different here?  wyciwyg channels are "
                  "not nsICachingChannel");
     rv = cachingChan->SetCacheTokenCachedCharset(charset);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "cannot SetMetaDataElement");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "cannot SetMetaDataElement");
     rv = NS_OK; // don't propagate error
   }
 
@@ -792,7 +790,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     NS_ASSERTION(NS_SUCCEEDED(rv) && bundle, "chrome://global/locale/browser.properties could not be loaded");
     nsXPIDLString title;
     if (bundle) {
-      bundle->GetStringFromName(MOZ_UTF16("plainText.wordWrap"), getter_Copies(title));
+      bundle->GetStringFromName(u"plainText.wordWrap", getter_Copies(title));
     }
     SetSelectedStyleSheetSet(title);
   }
@@ -947,7 +945,8 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
     return;
   }
 
-  rv2 = newURI->SetHostPort(NS_ConvertUTF16toUTF8(aDomain));
+  // We use SetHostAndPort because we want to reset the port number if needed.
+  rv2 = newURI->SetHostAndPort(NS_ConvertUTF16toUTF8(aDomain));
   if (NS_FAILED(rv2)) {
     rv.Throw(rv2);
     return;
@@ -1505,15 +1504,9 @@ nsHTMLDocument::Open(JSContext* cx,
 #ifdef DEBUG
     nsCOMPtr<nsIURI> callerDocURI = callerDoc->GetDocumentURI();
     nsCOMPtr<nsIURI> thisURI = nsIDocument::GetDocumentURI();
-    nsAutoCString callerSpec;
-    nsAutoCString thisSpec;
-    if (callerDocURI) {
-      callerDocURI->GetSpec(callerSpec);
-    }
-    if (thisURI) {
-      thisURI->GetSpec(thisSpec);
-    }
-    printf("nsHTMLDocument::Open callerDoc %s this %s\n", callerSpec.get(), thisSpec.get());
+    printf("nsHTMLDocument::Open callerDoc %s this %s\n",
+           callerDocURI ? callerDocURI->GetSpecOrDefault().get() : "",
+           thisURI ? thisURI->GetSpecOrDefault().get() : "");
 #endif
 
     rv.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -2235,8 +2228,6 @@ nsHTMLDocument::NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
   }
 
   JS::Rooted<JS::Value> val(cx);
-  // XXXbz Should we call the (slightly misnamed, really) WrapNativeParent
-  // here?
   if (!dom::WrapObject(cx, supp, cache, nullptr, &val)) {
     rv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;
@@ -2399,7 +2390,7 @@ nsHTMLDocument::GenerateParserKey(void)
 }
 
 NS_IMETHODIMP
-nsHTMLDocument::GetDesignMode(nsAString & aDesignMode)
+nsHTMLDocument::GetDesignMode(nsAString& aDesignMode)
 {
   if (HasFlag(NODE_IS_EDITABLE)) {
     aDesignMode.AssignLiteral("on");
@@ -2448,7 +2439,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     if (mElement && mElement->OwnerDoc() == mDoc) {
       mDoc->DeferredContentEditableCountChange(mElement);
     }
@@ -2559,7 +2550,7 @@ nsHTMLDocument::TearingDownEditor(nsIEditor *aEditor)
     if (!presShell)
       return;
 
-    nsTArray<StyleSheetHandle::RefPtr> agentSheets;
+    nsTArray<RefPtr<StyleSheet>> agentSheets;
     presShell->GetAgentStyleSheets(agentSheets);
 
     auto cache = nsLayoutStylesheetCache::For(GetStyleBackendType());
@@ -2667,8 +2658,10 @@ nsHTMLDocument::EditingStateChanged()
   if (existingEditor) {
     // We might already have an editor if it was set up for mail, let's see
     // if this is actually the case.
+#ifdef DEBUG
     nsCOMPtr<nsIHTMLEditor> htmlEditor = do_QueryInterface(existingEditor);
     MOZ_ASSERT(htmlEditor, "If we have an editor, it must be an HTML editor");
+#endif
     uint32_t flags = 0;
     existingEditor->GetFlags(&flags);
     if (flags & nsIPlaintextEditor::eEditorMailMask) {
@@ -2700,13 +2693,13 @@ nsHTMLDocument::EditingStateChanged()
     // Before making this window editable, we need to modify UA style sheet
     // because new style may change whether focused element will be focusable
     // or not.
-    nsTArray<StyleSheetHandle::RefPtr> agentSheets;
+    nsTArray<RefPtr<StyleSheet>> agentSheets;
     rv = presShell->GetAgentStyleSheets(agentSheets);
     NS_ENSURE_SUCCESS(rv, rv);
 
     auto cache = nsLayoutStylesheetCache::For(GetStyleBackendType());
 
-    StyleSheetHandle contentEditableSheet = cache->ContentEditableSheet();
+    StyleSheet* contentEditableSheet = cache->ContentEditableSheet();
 
     if (!agentSheets.Contains(contentEditableSheet)) {
       agentSheets.AppendElement(contentEditableSheet);
@@ -2717,7 +2710,7 @@ nsHTMLDocument::EditingStateChanged()
     // specific states on the elements.
     if (designMode) {
       // designMode is being turned on (overrides contentEditable).
-      StyleSheetHandle designModeSheet = cache->DesignModeSheet();
+      StyleSheet* designModeSheet = cache->DesignModeSheet();
       if (!agentSheets.Contains(designModeSheet)) {
         agentSheets.AppendElement(designModeSheet);
       }
@@ -2839,17 +2832,22 @@ nsHTMLDocument::EditingStateChanged()
 }
 
 NS_IMETHODIMP
-nsHTMLDocument::SetDesignMode(const nsAString & aDesignMode)
+nsHTMLDocument::SetDesignMode(const nsAString& aDesignMode)
 {
   ErrorResult rv;
-  SetDesignMode(aDesignMode, rv);
+  SetDesignMode(aDesignMode, nsContentUtils::GetCurrentJSContext()
+                               ? Some(nsContentUtils::SubjectPrincipal())
+                               : Nothing(), rv);
   return rv.StealNSResult();
 }
 
 void
-nsHTMLDocument::SetDesignMode(const nsAString& aDesignMode, ErrorResult& rv)
+nsHTMLDocument::SetDesignMode(const nsAString& aDesignMode,
+                              const Maybe<nsIPrincipal*>& aSubjectPrincipal,
+                              ErrorResult& rv)
 {
-  if (!nsContentUtils::LegacyIsCallerNativeCode() && !nsContentUtils::SubjectPrincipal()->Subsumes(NodePrincipal())) {
+  if (!nsContentUtils::LegacyIsCallerNativeCode() &&
+      !aSubjectPrincipal.value()->Subsumes(NodePrincipal())) {
     rv.Throw(NS_ERROR_DOM_PROP_ACCESS_DENIED);
     return;
   }
@@ -2939,7 +2937,8 @@ static const struct MidasCommand gMidasCommandTable[] = {
   { "unlink",        "cmd_removeLinks",     "", true,  false },
   { "insertorderedlist",   "cmd_ol",        "", true,  false },
   { "insertunorderedlist", "cmd_ul",        "", true,  false },
-  { "insertparagraph", "cmd_paragraphState", "p", true,  false },
+  { "insertparagraph", "cmd_insertParagraph", "", true,  false },
+  { "insertlinebreak", "cmd_insertLineBreak", "", true,  false },
   { "formatblock",   "cmd_paragraphState",  "", false, false },
   { "heading",       "cmd_paragraphState",  "", false, false },
   { "styleWithCSS",  "cmd_setDocumentUseCSS", "", false, true },

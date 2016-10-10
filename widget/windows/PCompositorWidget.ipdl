@@ -20,8 +20,11 @@ parent:
   sync LeavePresentLock();
   async UpdateTransparency(int32_t aMode);
   sync ClearTransparentWindow();
-  sync ResizeTransparentWindow(IntSize aSize);
   async __delete__();
+
+child:
+  async ObserveVsync();
+  async UnobserveVsync();
 };
 
 } // namespace widget

@@ -11,6 +11,7 @@
 #include "jit/BaselineCacheIR.h"
 #include "jit/BaselineIC.h"
 
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/ObjectGroup-inl.h"
 
 using namespace js;
@@ -651,16 +652,18 @@ BaselineInspector::getTemplateObjectForSimdCtor(jsbytecode* pc, SimdType simdTyp
     return nullptr;
 }
 
-DeclEnvObject*
-BaselineInspector::templateDeclEnvObject()
+LexicalEnvironmentObject*
+BaselineInspector::templateNamedLambdaObject()
 {
     if (!hasBaselineScript())
         return nullptr;
 
-    JSObject* res = &templateCallObject()->as<ScopeObject>().enclosingScope();
+    JSObject* res = baselineScript()->templateEnvironment();
+    if (script->bodyScope()->hasEnvironment())
+        res = res->enclosingEnvironment();
     MOZ_ASSERT(res);
 
-    return &res->as<DeclEnvObject>();
+    return &res->as<LexicalEnvironmentObject>();
 }
 
 CallObject*
@@ -669,7 +672,7 @@ BaselineInspector::templateCallObject()
     if (!hasBaselineScript())
         return nullptr;
 
-    JSObject* res = baselineScript()->templateScope();
+    JSObject* res = baselineScript()->templateEnvironment();
     MOZ_ASSERT(res);
 
     return &res->as<CallObject>();
@@ -811,9 +814,13 @@ GetCacheIRExpectedInputType(ICCacheIR_Monitored* stub)
 {
     CacheIRReader reader(stub->stubInfo());
 
-    // For now, all CacheIR stubs expect an object.
-    MOZ_ALWAYS_TRUE(reader.matchOp(CacheOp::GuardIsObject, ObjOperandId(0)));
-    return MIRType::Object;
+    if (reader.matchOp(CacheOp::GuardIsObject, ValOperandId(0)))
+        return MIRType::Object;
+    if (reader.matchOp(CacheOp::GuardType, ValOperandId(0))) {
+        JSValueType type = reader.valueType();
+        return MIRTypeFromValueType(type);
+    }
+    MOZ_CRASH("Unexpected instruction");
 }
 
 MIRType
@@ -865,10 +872,6 @@ BaselineInspector::expectedPropertyAccessInputType(jsbytecode* pc)
           case ICStub::GetElem_TypedArray:
           case ICStub::GetElem_UnboxedArray:
             stubType = MIRType::Object;
-            break;
-
-          case ICStub::GetProp_Primitive:
-            stubType = MIRTypeFromValueType(stub->toGetProp_Primitive()->primitiveType());
             break;
 
           case ICStub::GetProp_StringLength:

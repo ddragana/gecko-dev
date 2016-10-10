@@ -39,6 +39,7 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
+#include "nsPrintfCString.h"
 #include "OscillatorNode.h"
 #include "PannerNode.h"
 #include "PeriodicWave.h"
@@ -89,7 +90,6 @@ static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate)
   if (aIsOffline) {
     return aSampleRate;
   } else {
-    CubebUtils::InitPreferredSampleRate();
     return static_cast<float>(CubebUtils::PreferredSampleRate());
   }
 }
@@ -354,19 +354,18 @@ AudioContext::CreateMediaElementSource(HTMLMediaElement& aMediaElement,
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
-#ifdef MOZ_EME
+
   if (aMediaElement.ContainsRestrictedContent()) {
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;
   }
-#endif
 
   if (CheckClosed(aRv)) {
     return nullptr;
   }
 
-  RefPtr<DOMMediaStream> stream = aMediaElement.MozCaptureStream(aRv,
-                                                                   mDestination->Stream()->Graph());
+  RefPtr<DOMMediaStream> stream =
+    aMediaElement.CaptureAudio(aRv, mDestination->Stream()->Graph());
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -840,6 +839,15 @@ AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState)
     return;
   }
 
+  // This can happen if this is called in reaction to a
+  // MediaStreamGraph shutdown, and a AudioContext was being
+  // suspended at the same time, for example if a page was being
+  // closed.
+  if (mAudioContextState == AudioContextState::Closed &&
+      aNewState == AudioContextState::Suspended) {
+    return;
+  }
+
 #ifndef WIN32 // Bug 1170547
 #ifndef XP_MACOSX
 #ifdef DEBUG
@@ -870,7 +878,7 @@ AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState)
 
   if (aPromise) {
     Promise* promise = reinterpret_cast<Promise*>(aPromise);
-    promise->MaybeResolve(JS::UndefinedHandleValue);
+    promise->MaybeResolveWithUndefined();
     DebugOnly<bool> rv = mPromiseGripArray.RemoveElement(promise);
     MOZ_ASSERT(rv, "Promise wasn't in the grip array?");
   }
@@ -1137,9 +1145,23 @@ NS_IMETHODIMP
 AudioContext::CollectReports(nsIHandleReportCallback* aHandleReport,
                              nsISupports* aData, bool aAnonymize)
 {
+  const nsLiteralCString
+    nodeDescription("Memory used by AudioNode DOM objects (Web Audio).");
+  for (auto iter = mAllNodes.ConstIter(); !iter.Done(); iter.Next()) {
+    AudioNode* node = iter.Get()->GetKey();
+    int64_t amount = node->SizeOfIncludingThis(MallocSizeOf);
+    nsPrintfCString domNodePath("explicit/webaudio/audio-node/%s/dom-nodes",
+                                node->NodeType());
+    aHandleReport->Callback(EmptyCString(), domNodePath, KIND_HEAP, UNITS_BYTES,
+                            amount, nodeDescription, aData);
+  }
+
   int64_t amount = SizeOfIncludingThis(MallocSizeOf);
-  return MOZ_COLLECT_REPORT("explicit/webaudio/audiocontext", KIND_HEAP, UNITS_BYTES,
-                            amount, "Memory used by AudioContext objects (Web Audio).");
+  MOZ_COLLECT_REPORT(
+    "explicit/webaudio/audiocontext", KIND_HEAP, UNITS_BYTES, amount,
+    "Memory used by AudioContext objects (Web Audio).");
+
+  return NS_OK;
 }
 
 BasicWaveFormCache*

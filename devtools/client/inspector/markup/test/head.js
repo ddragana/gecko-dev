@@ -19,9 +19,9 @@ var {ActorRegistryFront} = require("devtools/shared/fronts/actor-registry");
 SimpleTest.requestCompleteLog();
 
 // Set the testing flag on DevToolsUtils and reset it when the test ends
-DevToolsUtils.testing = true;
+flags.testing = true;
 registerCleanupFunction(() => {
-  DevToolsUtils.testing = false;
+  flags.testing = false;
 });
 
 // Clear preferences that may be set during the course of tests.
@@ -272,18 +272,6 @@ function searchUsingSelectorSearch(selector, inspector) {
 }
 
 /**
- * This shouldn't be used in the tests, but is useful when writing new tests or
- * debugging existing tests in order to introduce delays in the test steps
- * @param {Number} ms The time to wait
- * @return A promise that resolves when the time is passed
- */
-function wait(ms) {
-  let def = defer();
-  setTimeout(def.resolve, ms);
-  return def.promise;
-}
-
-/**
  * Check to see if the inspector menu items for editing are disabled.
  * Things like Edit As HTML, Delete Node, etc.
  * @param {NodeFront} nodeFront
@@ -389,13 +377,16 @@ function collapseSelectionAndShiftTab(inspector) {
  */
 function checkFocusedAttribute(attrName, editMode) {
   let focusedAttr = Services.focus.focusedElement;
-  is(focusedAttr ? focusedAttr.parentNode.dataset.attr : undefined,
-     attrName, attrName + " attribute editor is currently focused.");
-  is(focusedAttr ? focusedAttr.tagName : undefined,
-     editMode ? "input" : "span",
-     editMode
-     ? attrName + " is in edit mode"
-     : attrName + " is not in edit mode");
+  ok(focusedAttr, "Has a focused element");
+
+  let dataAttr = focusedAttr.parentNode.dataset.attr;
+  is(dataAttr, attrName, attrName + " attribute editor is currently focused.");
+  if (editMode) {
+    // Using a multiline editor for attributes, the focused element should be a textarea.
+    is(focusedAttr.tagName, "textarea", attrName + "is in edit mode");
+  } else {
+    is(focusedAttr.tagName, "span", attrName + "is not in edit mode");
+  }
 }
 
 /**
@@ -467,8 +458,8 @@ function createTestHTTPServer() {
  *
  * - moduleUrl {String}: URL of the module that contains actor implementation.
  * - prefix {String}: prefix of the actor.
- * - actorClass {ActorClass}: Constructor object for the actor.
- * - frontClass {FrontClass}: Constructor object for the front part
+ * - actorClass {ActorClassWithSpec}: Constructor object for the actor.
+ * - frontClass {FrontClassWithSpec}: Constructor object for the front part
  * of the registered actor.
  *
  * @returns {Promise} A promise that is resolved when the actor is registered.

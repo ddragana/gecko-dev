@@ -39,7 +39,14 @@ CreateTransport(base::ProcessId aProcIdOne,
   // The Transport closes these fds when it goes out of scope, so we
   // dup them here
   fd1 = dup(fd1);
+  if (fd1 < 0) {
+    AnnotateCrashReportWithErrno("IpcCreateTransportDupErrno", errno);
+  }
   fd2 = dup(fd2);
+  if (fd2 < 0) {
+    AnnotateCrashReportWithErrno("IpcCreateTransportDupErrno", errno);
+  }
+
   if (fd1 < 0 || fd2 < 0) {
     HANDLE_EINTR(close(fd1));
     HANDLE_EINTR(close(fd2));
@@ -60,7 +67,8 @@ OpenDescriptor(const TransportDescriptor& aTd, Transport::Mode aMode)
 UniquePtr<Transport>
 OpenDescriptor(const FileDescriptor& aFd, Transport::Mode aMode)
 {
-  return MakeUnique<Transport>(aFd.PlatformHandle(), aMode, nullptr);
+  auto rawFD = aFd.ClonePlatformHandle();
+  return MakeUnique<Transport>(rawFD.release(), aMode, nullptr);
 }
 
 TransportDescriptor

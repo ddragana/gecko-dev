@@ -46,6 +46,13 @@ var WebrtcUI = {
           this.notify();
           break;
       }
+    } else if (aTopic === "VideoCapture:Paused") {
+      if (this._notificationId) {
+        Notifications.cancel(this._notificationId);
+        this._notificationId = null;
+      }
+    } else if (aTopic === "VideoCapture:Resumed") {
+      this.notify();
     }
   },
 
@@ -159,7 +166,7 @@ var WebrtcUI = {
           let perms = Services.perms;
           // Although the lifetime is "session" it will be removed upon
           // use so it's more of a one-shot.
-          perms.add(aUri, "camera", perms.ALLOW_ACTION, perms.EXPIRE_SESSION);
+          perms.add(aUri, "MediaManagerVideo", perms.ALLOW_ACTION, perms.EXPIRE_SESSION);
         }
 
         Services.obs.notifyObservers(allowedDevices, "getUserMedia:response:allow", aCallID);

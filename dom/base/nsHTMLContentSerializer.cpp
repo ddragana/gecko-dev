@@ -154,9 +154,9 @@ nsHTMLContentSerializer::SerializeHTMLAttributes(nsIContent* aContent,
     nsDependentAtomString nameStr(attrName);
     nsAutoString prefix;
     if (namespaceID == kNameSpaceID_XML) {
-      prefix.AssignLiteral(MOZ_UTF16("xml"));
+      prefix.AssignLiteral(u"xml");
     } else if (namespaceID == kNameSpaceID_XLink) {
-      prefix.AssignLiteral(MOZ_UTF16("xlink"));
+      prefix.AssignLiteral(u"xlink");
     }
 
     // Expand shorthand attribute.
@@ -531,7 +531,7 @@ nsHTMLContentSerializer::AppendAndTranslateEntities(const nsAString& aStr,
     for (aStr.BeginReading(iter);
          iter != done_reading;
          iter.advance(int32_t(advanceLength))) {
-      uint32_t fragmentLength = iter.size_forward();
+      uint32_t fragmentLength = done_reading - iter;
       uint32_t lengthReplaced = 0; // the number of UTF-16 codepoints
                                     //  replaced by a particular entity
       const char16_t* c = iter.get();

@@ -39,6 +39,18 @@ XPCOMUtils.defineLazyGetter(this, "gCertUtils", function() {
   return temp;
 });
 
+XPCOMUtils.defineLazyGetter(this, "isXPOrVista64", function () {
+  let os = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
+  if (os != "WINNT") {
+    return false;
+  }
+  let sysInfo = Cc["@mozilla.org/system-info;1"].getService(Ci.nsIPropertyBag2);
+  if (parseFloat(sysInfo.getProperty("version")) < 6) {
+    return true;
+  }
+  return Services.appinfo.is64Bit;
+});
+
 XPCOMUtils.defineLazyModuleGetter(this, "UpdateUtils",
                                   "resource://gre/modules/UpdateUtils.jsm");
 
@@ -80,7 +92,10 @@ GMPInstallManager.prototype = {
   /**
    * Performs an addon check.
    * @return a promise which will be resolved or rejected.
-   *         The promise is resolved with an array of GMPAddons
+   *         The promise is resolved with an object with properties:
+   *           gmpAddons: array of GMPAddons
+   *           usedFallback: whether the data was collected from online or
+   *                         from fallback data within the build
    *         The promise is rejected with an object with properties:
    *           target: The XHR request object
    *           status: The HTTP status code
@@ -104,12 +119,16 @@ GMPInstallManager.prototype = {
       }
     }
 
-    ProductAddonChecker.getProductAddonList(url, allowNonBuiltIn, certs).then((addons) => {
-      if (!addons) {
-        this._deferred.resolve([]);
+    let addonPromise = ProductAddonChecker
+      .getProductAddonList(url, allowNonBuiltIn, certs);
+
+    addonPromise.then(res => {
+      if (!res || !res.gmpAddons) {
+        this._deferred.resolve({gmpAddons: []});
       }
       else {
-        this._deferred.resolve(addons.map(a => new GMPAddon(a)));
+        res.gmpAddons = res.gmpAddons.map(a => new GMPAddon(a));
+        this._deferred.resolve(res);
       }
       delete this._deferred;
     }, (ex) => {
@@ -201,24 +220,18 @@ GMPInstallManager.prototype = {
     }
 
     try {
-      let gmpAddons = yield this.checkForAddons();
+      let {usedFallback, gmpAddons} = yield this.checkForAddons();
       this._updateLastCheck();
       log.info("Found " + gmpAddons.length + " addons advertised.");
       let addonsToInstall = gmpAddons.filter(function(gmpAddon) {
         log.info("Found addon: " + gmpAddon.toString());
 
         if (!gmpAddon.isValid) {
-          GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                        "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                        GMPInstallFailureReason.GMP_INVALID);
           log.info("Addon |" + gmpAddon.id + "| is invalid.");
           return false;
         }
 
         if (GMPUtils.isPluginHidden(gmpAddon)) {
-          GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                        "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                        GMPInstallFailureReason.GMP_HIDDEN);
           log.info("Addon |" + gmpAddon.id + "| has been hidden.");
           return false;
         }
@@ -228,17 +241,24 @@ GMPInstallManager.prototype = {
           return false;
         }
 
+        if (gmpAddon.isEME && isXPOrVista64) {
+          log.info("Addon |" + gmpAddon.id + "| not supported on this platform.");
+          return false;
+        }
+
+        // Do not install from fallback if already installed as it
+        // may be a downgrade
+        if (usedFallback && gmpAddon.isUpdate) {
+         log.info("Addon |" + gmpAddon.id + "| not installing updates based " +
+                  "on fallback.");
+         return false;
+        }
+
         let addonUpdateEnabled = false;
         if (GMP_PLUGIN_IDS.indexOf(gmpAddon.id) >= 0) {
           if (!this._isAddonEnabled(gmpAddon.id)) {
-            GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                          "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                          GMPInstallFailureReason.GMP_DISABLED);
             log.info("GMP |" + gmpAddon.id + "| has been disabled; skipping check.");
           } else if (!this._isAddonUpdateEnabled(gmpAddon.id)) {
-            GMPUtils.maybeReportTelemetry(gmpAddon.id,
-                                          "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON",
-                                          GMPInstallFailureReason.GMP_UPDATE_DISABLED);
             log.info("Auto-update is off for " + gmpAddon.id +
                      ", skipping check.");
           } else {
@@ -281,7 +301,7 @@ GMPInstallManager.prototype = {
       }
       return {status:  "succeeded",
               results: installResults};
-    } catch(e) {
+    } catch (e) {
       log.error("Could not check for addons", e);
       throw e;
     }
@@ -353,6 +373,14 @@ GMPAddon.prototype = {
   get isEME() {
     return this.id == "gmp-widevinecdm" || this.id.indexOf("gmp-eme-") == 0;
   },
+  /**
+   * @return true if the addon has been previously installed and this is
+   * a new version, if this is a fresh install return false
+   */
+  get isUpdate() {
+    return this.version &&
+      GMPPrefs.get(GMPPrefs.KEY_PLUGIN_VERSION, false, this.id);
+  },
 };
 /**
  * Constructs a GMPExtractor object which is used to extract a GMP zip
@@ -408,7 +436,7 @@ GMPExtractor.prototype = {
                     createInstance(Ci.nsILocalFile);
       destDir.initWithPath(this.installToDirPath);
       // Make sure the destination exists
-      if(!destDir.exists()) {
+      if (!destDir.exists()) {
         destDir.create(Ci.nsIFile.DIRECTORY_TYPE, parseInt("0755", 8));
       }
 

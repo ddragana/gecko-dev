@@ -479,6 +479,11 @@ protected:
   nsEventStatus OnDoubleTap(const TapGestureInput& aEvent);
 
   /**
+   * Helper method for double taps where the double-tap gesture is disabled.
+   */
+  nsEventStatus OnSecondTap(const TapGestureInput& aEvent);
+
+  /**
    * Helper method to cancel any gesture currently going to Gecko. Used
    * primarily when a user taps the screen over some clickable content but then
    * pans down instead of letting go (i.e. to cancel a previous touch so that a
@@ -584,7 +589,7 @@ protected:
    * from a non-main thread, it will redispatch itself to the main thread, and
    * use the latest metrics during the redispatch.
    */
-  void RequestContentRepaint();
+  void RequestContentRepaint(bool aUserAction = true);
 
   /**
    * Send the provided metrics to Gecko to trigger a repaint. This function
@@ -608,12 +613,12 @@ protected:
   APZCTreeManager* GetApzcTreeManager() const;
 
   /**
-   * Convert ScreenPoint relative to the screen to CSSPoint relative
+   * Convert ScreenPoint relative to the screen to LayoutDevicePoint relative
    * to the parent document. This excludes the transient compositor transform.
-   * NOTE: This must be converted to CSSPoint relative to the child
+   * NOTE: This must be converted to LayoutDevicePoint relative to the child
    * document before sending over IPC to a child process.
    */
-  bool ConvertToGecko(const ScreenIntPoint& aPoint, CSSPoint* aOut);
+  bool ConvertToGecko(const ScreenIntPoint& aPoint, LayoutDevicePoint* aOut);
 
   enum AxisLockMode {
     FREE,     /* No locking at all */
@@ -861,11 +866,11 @@ private:
   void CancelAnimationAndGestureState();
 
   RefPtr<InputQueue> mInputQueue;
-  CancelableBlockState* CurrentInputBlock() const;
-  TouchBlockState* CurrentTouchBlock() const;
+  CancelableBlockState* GetCurrentInputBlock() const;
+  TouchBlockState* GetCurrentTouchBlock() const;
   bool HasReadyTouchBlock() const;
 
-  PanGestureBlockState* CurrentPanGestureBlock() const;
+  PanGestureBlockState* GetCurrentPanGestureBlock() const;
 
 private:
   /* ===================================================================

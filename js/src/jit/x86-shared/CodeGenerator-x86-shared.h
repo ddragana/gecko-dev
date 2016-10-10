@@ -32,8 +32,6 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     void bailout(const T& t, LSnapshot* snapshot);
 
   protected:
-    void emitWasmSignedTruncateToInt32(OutOfLineWasmTruncateCheck* ool, Register output);
-
     // Load a NaN or zero into a register for an out of bounds AsmJS or static
     // typed array load.
     class OutOfLineLoadTypedArrayOutOfBounds : public OutOfLineCodeBase<CodeGeneratorX86Shared>
@@ -49,25 +47,6 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
         Scalar::Type viewType() const { return viewType_; }
         void accept(CodeGeneratorX86Shared* codegen) {
             codegen->visitOutOfLineLoadTypedArrayOutOfBounds(this);
-        }
-    };
-
-    // Additional bounds checking for heap accesses with constant offsets.
-    class OffsetBoundsCheck : public OutOfLineCodeBase<CodeGeneratorX86Shared>
-    {
-        Label* maybeOutOfBounds_;
-        Register ptrReg_;
-        int32_t offset_;
-      public:
-        OffsetBoundsCheck(Label* maybeOutOfBounds, Register ptrReg, int32_t offset)
-          : maybeOutOfBounds_(maybeOutOfBounds), ptrReg_(ptrReg), offset_(offset)
-        {}
-
-        Label* maybeOutOfBounds() const { return maybeOutOfBounds_; }
-        Register ptrReg() const { return ptrReg_; }
-        int32_t offset() const { return offset_; }
-        void accept(CodeGeneratorX86Shared* codegen) {
-            codegen->visitOffsetBoundsCheck(this);
         }
     };
 
@@ -93,33 +72,18 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
         }
     };
 
-  private:
-    void emitAsmJSBoundsCheckBranch(const MWasmMemoryAccess* mir, const MInstruction* ins,
-                                    Register ptr, Label* fail);
-
-  protected:
-    void maybeEmitWasmBoundsCheckBranch(const MWasmMemoryAccess* mir, Register ptr);
-
   public:
-    // For SIMD and atomic loads and stores (which throw on out-of-bounds):
-    bool maybeEmitThrowingAsmJSBoundsCheck(const MWasmMemoryAccess* mir, const MInstruction* ins,
-                                           const LAllocation* ptr);
-
-    // For asm.js plain and atomic loads that possibly require a bounds check:
-    bool maybeEmitAsmJSLoadBoundsCheck(const MAsmJSLoadHeap* mir, LAsmJSLoadHeap* ins,
-                                       OutOfLineLoadTypedArrayOutOfBounds** ool);
-
-    // For asm.js plain and atomic stores that possibly require a bounds check:
-    bool maybeEmitAsmJSStoreBoundsCheck(const MAsmJSStoreHeap* mir, LAsmJSStoreHeap* ins,
-                                        Label** rejoin);
-
-    void cleanupAfterAsmJSBoundsCheckBranch(const MWasmMemoryAccess* mir, Register ptr);
-
     NonAssertingLabel deoptLabel_;
 
     Operand ToOperand(const LAllocation& a);
     Operand ToOperand(const LAllocation* a);
     Operand ToOperand(const LDefinition* def);
+
+#ifdef JS_PUNBOX64
+    Operand ToOperandOrRegister64(const LInt64Allocation input);
+#else
+    Register64 ToOperandOrRegister64(const LInt64Allocation input);
+#endif
 
     MoveOperand toMoveOperand(LAllocation a) const;
 
@@ -227,12 +191,16 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitClzI(LClzI* ins);
     virtual void visitCtzI(LCtzI* ins);
     virtual void visitPopcntI(LPopcntI* ins);
+    virtual void visitPopcntI64(LPopcntI64* lir);
     virtual void visitSqrtD(LSqrtD* ins);
     virtual void visitSqrtF(LSqrtF* ins);
     virtual void visitPowHalfD(LPowHalfD* ins);
     virtual void visitAddI(LAddI* ins);
+    virtual void visitAddI64(LAddI64* ins);
     virtual void visitSubI(LSubI* ins);
+    virtual void visitSubI64(LSubI64* ins);
     virtual void visitMulI(LMulI* ins);
+    virtual void visitMulI64(LMulI64* ins);
     virtual void visitDivI(LDivI* ins);
     virtual void visitDivPowTwoI(LDivPowTwoI* ins);
     virtual void visitDivOrModConstantI(LDivOrModConstantI* ins);
@@ -240,7 +208,9 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitModPowTwoI(LModPowTwoI* ins);
     virtual void visitBitNotI(LBitNotI* ins);
     virtual void visitBitOpI(LBitOpI* ins);
+    virtual void visitBitOpI64(LBitOpI64* ins);
     virtual void visitShiftI(LShiftI* ins);
+    virtual void visitShiftI64(LShiftI64* ins);
     virtual void visitUrshD(LUrshD* ins);
     virtual void visitTestIAndBranch(LTestIAndBranch* test);
     virtual void visitTestDAndBranch(LTestDAndBranch* test);
@@ -270,19 +240,21 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     virtual void visitUDivOrMod(LUDivOrMod* ins);
     virtual void visitUDivOrModConstant(LUDivOrModConstant *ins);
     virtual void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
+    virtual void visitAsmJSPassStackArgI64(LAsmJSPassStackArgI64* ins);
     virtual void visitAsmSelect(LAsmSelect* ins);
     virtual void visitAsmReinterpret(LAsmReinterpret* lir);
-    virtual void visitWasmBoundsCheck(LWasmBoundsCheck* ins);
     virtual void visitMemoryBarrier(LMemoryBarrier* ins);
+    virtual void visitWasmAddOffset(LWasmAddOffset* lir);
+    virtual void visitWasmTruncateToInt32(LWasmTruncateToInt32* lir);
     virtual void visitAtomicTypedArrayElementBinop(LAtomicTypedArrayElementBinop* lir);
     virtual void visitAtomicTypedArrayElementBinopForEffect(LAtomicTypedArrayElementBinopForEffect* lir);
     virtual void visitCompareExchangeTypedArrayElement(LCompareExchangeTypedArrayElement* lir);
     virtual void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
     virtual void visitCopySignD(LCopySignD* lir);
     virtual void visitCopySignF(LCopySignF* lir);
+    virtual void visitRotateI64(LRotateI64* lir);
 
     void visitOutOfLineLoadTypedArrayOutOfBounds(OutOfLineLoadTypedArrayOutOfBounds* ool);
-    void visitOffsetBoundsCheck(OffsetBoundsCheck* oolCheck);
 
     void visitNegI(LNegI* lir);
     void visitNegD(LNegD* lir);

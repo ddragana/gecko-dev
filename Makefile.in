@@ -171,6 +171,16 @@ faster: install-dist/idl
 	$(MAKE) -C faster FASTER_RECURSIVE_MAKE=1
 endif
 
+.PHONY: tup
+tup:
+	$(call BUILDSTATUS,TIERS make tup)
+	$(call BUILDSTATUS,TIER_START make)
+	$(MAKE) install-manifests buildid.h source-repo.h
+	$(call BUILDSTATUS,TIER_FINISH make)
+	$(call BUILDSTATUS,TIER_START tup)
+	@$(TUP) $(if $(findstring s,$(filter-out --%,$(MAKEFLAGS))),,--verbose)
+	$(call BUILDSTATUS,TIER_FINISH tup)
+
 # process_install_manifest needs to be invoked with --no-remove when building
 # js as standalone because automated builds are building nspr separately and
 # that would remove the resulting files.
@@ -319,7 +329,7 @@ ifdef MOZ_CRASHREPORTER
 	grep 'sym' $(SYMBOL_INDEX_NAME) > $(SYMBOL_INDEX_NAME).tmp && \
 	  mv $(SYMBOL_INDEX_NAME).tmp $(SYMBOL_INDEX_NAME)
 	cd $(DIST)/crashreporter-symbols && \
-          zip -r5D '../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' . -i '*.sym' -i '*.txt'  -x '*test*' -x '*Test*'
+          zip -r5D '../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' . -i '*.sym' -i '*.txt'
 endif # MOZ_CRASHREPORTER
 
 uploadsymbols:

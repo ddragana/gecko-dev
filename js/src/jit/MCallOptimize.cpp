@@ -202,6 +202,8 @@ IonBuilder::inlineNativeCall(CallInfo& callInfo, JSFunction* target)
         return inlineStrCharCodeAt(callInfo);
       case InlinableNative::StringFromCharCode:
         return inlineStrFromCharCode(callInfo);
+      case InlinableNative::StringFromCodePoint:
+        return inlineStrFromCodePoint(callInfo);
       case InlinableNative::StringCharAt:
         return inlineStrCharAt(callInfo);
 
@@ -1459,7 +1461,9 @@ IonBuilder::inlineConstantStringSplitString(CallInfo& callInfo)
     for (uint32_t i = 0; i < initLength; i++) {
         Value str = GetAnyBoxedOrUnboxedDenseElement(templateObject, i);
         MOZ_ASSERT(str.toString()->isAtom());
-        MConstant* value = MConstant::New(alloc(), str, constraints());
+        MConstant* value = MConstant::New(alloc().fallible(), str, constraints());
+        if (!value)
+            return InliningStatus_Error;
         if (!TypeSetIncludes(key.maybeTypes(), value->type(), value->resultTypeSet()))
             return InliningStatus_NotInlined;
 
@@ -1492,11 +1496,14 @@ IonBuilder::inlineConstantStringSplitString(CallInfo& callInfo)
     // jsop_initelem_array is doing because we do not expect to bailout
     // because the memory is supposed to be allocated by now.
     for (uint32_t i = 0; i < initLength; i++) {
-       MConstant* value = arrayValues[i];
-       current->add(value);
+        if (!alloc().ensureBallast())
+            return InliningStatus_Error;
 
-       if (!initializeArrayElement(array, i, value, unboxedType, /* addResumePoint = */ false))
-           return InliningStatus_Error;
+        MConstant* value = arrayValues[i];
+        current->add(value);
+
+        if (!initializeArrayElement(array, i, value, unboxedType, /* addResumePoint = */ false))
+            return InliningStatus_Error;
     }
 
     MInstruction* setLength = setInitializedLength(array, unboxedType, initLength);
@@ -1698,10 +1705,28 @@ IonBuilder::inlineStrFromCharCode(CallInfo& callInfo)
 
     callInfo.setImplicitlyUsedUnchecked();
 
-    MToInt32* charCode = MToInt32::New(alloc(), callInfo.getArg(0));
-    current->add(charCode);
+    MFromCharCode* string = MFromCharCode::New(alloc(), callInfo.getArg(0));
+    current->add(string);
+    current->push(string);
+    return InliningStatus_Inlined;
+}
 
-    MFromCharCode* string = MFromCharCode::New(alloc(), charCode);
+IonBuilder::InliningStatus
+IonBuilder::inlineStrFromCodePoint(CallInfo& callInfo)
+{
+    if (callInfo.argc() != 1 || callInfo.constructing()) {
+        trackOptimizationOutcome(TrackedOutcome::CantInlineNativeBadForm);
+        return InliningStatus_NotInlined;
+    }
+
+    if (getInlineReturnType() != MIRType::String)
+        return InliningStatus_NotInlined;
+    if (callInfo.getArg(0)->type() != MIRType::Int32)
+        return InliningStatus_NotInlined;
+
+    callInfo.setImplicitlyUsedUnchecked();
+
+    MFromCodePoint* string = MFromCodePoint::New(alloc(), callInfo.getArg(0));
     current->add(string);
     current->push(string);
     return InliningStatus_Inlined;
@@ -2299,9 +2324,6 @@ IonBuilder::inlineTypedArray(CallInfo& callInfo, Native native)
     if (arg->type() != MIRType::Int32)
         return InliningStatus_NotInlined;
 
-    if (!arg->maybeConstantValue())
-        return InliningStatus_NotInlined;
-
     JSObject* templateObject = inspector->getTemplateObjectForNative(pc, native);
 
     if (!templateObject) {
@@ -2317,22 +2339,30 @@ IonBuilder::inlineTypedArray(CallInfo& callInfo, Native native)
     if (templateObject->isSingleton())
         return InliningStatus_NotInlined;
 
-    // Negative lengths must throw a RangeError.  (We don't track that this
-    // might have previously thrown, when determining whether to inline, so we
-    // have to deal with this error case when inlining.)
-    int32_t providedLen = arg->maybeConstantValue()->toInt32();
-    if (providedLen < 0)
-        return InliningStatus_NotInlined;
+    MInstruction* ins = nullptr;
 
-    uint32_t len = AssertedCast<uint32_t>(providedLen);
+    if (!arg->isConstant()) {
+        callInfo.setImplicitlyUsedUnchecked();
+        ins = MNewTypedArrayDynamicLength::New(alloc(), constraints(), templateObject,
+                                               templateObject->group()->initialHeap(constraints()),
+                                               arg);
+    } else {
+        // Negative lengths must throw a RangeError.  (We don't track that this
+        // might have previously thrown, when determining whether to inline, so we
+        // have to deal with this error case when inlining.)
+        int32_t providedLen = arg->maybeConstantValue()->toInt32();
+        if (providedLen < 0)
+            return InliningStatus_NotInlined;
 
-    if (obj->length() != len)
-        return InliningStatus_NotInlined;
+        uint32_t len = AssertedCast<uint32_t>(providedLen);
 
-    callInfo.setImplicitlyUsedUnchecked();
+        if (obj->length() != len)
+            return InliningStatus_NotInlined;
 
-    MInstruction* ins = MNewTypedArray::New(alloc(), constraints(), obj,
-                                            obj->group()->initialHeap(constraints()));
+        callInfo.setImplicitlyUsedUnchecked();
+        ins = MNewTypedArray::New(alloc(), constraints(), obj,
+                                  obj->group()->initialHeap(constraints()));
+    }
 
     current->add(ins);
     current->push(ins);

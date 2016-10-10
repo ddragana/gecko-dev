@@ -15,6 +15,15 @@ function prepareTest() {
   turnOnPointerEvents(startTest);
 }
 
+function setImplicitPointerCapture(capture, callback) {
+  console.log("SET dom.w3c_pointer_events.implicit_capture as " + capture);
+  SpecialPowers.pushPrefEnv({
+    "set": [
+      ["dom.w3c_pointer_events.implicit_capture", capture]
+    ]
+  }, callback);
+}
+
 function turnOnPointerEvents(callback) {
   console.log("SET dom.w3c_pointer_events.enabled as TRUE");
   console.log("SET layout.css.touch_action.enabled as TRUE");
@@ -42,26 +51,6 @@ function completion_function() {
   }
 }
 
-// Helper function to send PointerEvent with different parameters
-function sendPointerEvent(int_win, elemId, pointerEventType, inputSource, params) {
-  var elem = int_win.document.getElementById(elemId);
-  if(!!elem) {
-    var rect = elem.getBoundingClientRect();
-    var eventObj = {type: pointerEventType, inputSource: inputSource};
-    if(params && "button" in params)
-      eventObj.button = params.button;
-    if(params && "isPrimary" in params)
-      eventObj.isPrimary = params.isPrimary;
-    else if(MouseEvent.MOZ_SOURCE_MOUSE == inputSource)
-      eventObj.isPrimary = true;
-    console.log(elemId, eventObj);
-    var salt = ("pointermove" == pointerEventType) ? 1 : 2;
-    synthesizePointer(elem, rect.width*salt/5, rect.height/2, eventObj, int_win);
-  } else {
-    is(!!elem, true, "Document should have element with id: " + elemId);
-  }
-}
-
 // Helper function to send MouseEvent with different parameters
 function sendMouseEvent(int_win, elemId, mouseEventType, params) {
   var elem = int_win.document.getElementById(elemId);
@@ -72,6 +61,8 @@ function sendMouseEvent(int_win, elemId, mouseEventType, params) {
       eventObj.button = params.button;
     if(params && "inputSource" in params)
       eventObj.inputSource = params.inputSource;
+    if(params && "buttons" in params)
+      eventObj.buttons = params.buttons;
     console.log(elemId, eventObj);
     synthesizeMouse(elem, rect.width/4, rect.height/2, eventObj, int_win);
   } else {

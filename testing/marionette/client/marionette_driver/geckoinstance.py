@@ -17,6 +17,8 @@ class GeckoInstance(object):
     required_prefs = {
         "browser.sessionstore.resume_from_crash": False,
         "browser.shell.checkDefaultBrowser": False,
+        # Needed for branded builds to prevent opening a second tab on startup
+        "browser.startup.homepage_override.mstone": "ignore",
         "browser.startup.page": 0,
         "browser.tabs.remote.autostart.1": False,
         "browser.tabs.remote.autostart.2": False,
@@ -37,7 +39,8 @@ class GeckoInstance(object):
         "extensions.autoDisableScopes": 10,
         "focusmanager.testmode": True,
         "marionette.defaultPrefs.enabled": True,
-        "startup.homepage_welcome_url": "about:blank",
+        "startup.homepage_welcome_url": "",
+        "startup.homepage_welcome_url.additional": "",
         "toolkit.telemetry.enabled": False,
         # Until Bug 1238095 is fixed, we have to enable CPOWs in order
         # for Marionette tests to work properly.
@@ -83,7 +86,7 @@ class GeckoInstance(object):
             if path is None:
                 path = 'gecko.log'
             elif os.path.isdir(path):
-                fname = 'gecko-%d.log' % time.time()
+                fname = 'gecko-{}.log'.format(time.time())
                 path = os.path.join(path, fname)
 
             path = os.path.realpath(path)
@@ -172,7 +175,7 @@ class GeckoInstance(object):
     def restart(self, prefs=None, clean=True):
         self.close(restart=True)
 
-        if clean:
+        if clean and self.profile:
             self.profile.cleanup()
             self.profile = None
 
@@ -186,11 +189,11 @@ class GeckoInstance(object):
 class FennecInstance(GeckoInstance):
     def __init__(self, emulator_binary=None, avd_home=None, avd=None,
                  adb_path=None, serial=None, connect_to_running_emulator=False,
-                 *args, **kwargs):
+                 package_name=None, *args, **kwargs):
         super(FennecInstance, self).__init__(*args, **kwargs)
         self.runner_class = FennecEmulatorRunner
         # runner args
-        self._package_name = None
+        self._package_name = package_name
         self.emulator_binary = emulator_binary
         self.avd_home = avd_home
         self.adb_path = adb_path
@@ -220,11 +223,9 @@ class FennecInstance(GeckoInstance):
                 self.runner.device.connect()
             self.runner.start()
         except Exception as e:
-            message = 'Error possibly due to runner or device args.'
-            e.args += (message,)
-            if hasattr(e, 'strerror') and e.strerror:
-                e.strerror = ', '.join([e.strerror, message])
-            raise e
+            exc, val, tb = sys.exc_info()
+            message = 'Error possibly due to runner or device args: {}'
+            raise exc, message.format(e.message), tb
         # gecko_log comes from logcat when running with device/emulator
         logcat_args = {
             'filterspec': 'Gecko',
@@ -266,7 +267,7 @@ class FennecInstance(GeckoInstance):
         super(FennecInstance, self).close(restart)
         if self.runner and self.runner.device.connected:
             self.runner.device.dm.remove_forward(
-                'tcp:%d' % int(self.marionette_port)
+                'tcp:{}'.format(int(self.marionette_port))
             )
 
 
@@ -298,20 +299,22 @@ class DesktopInstance(GeckoInstance):
         'app.update.auto': False,
         'app.update.enabled': False,
         'browser.dom.window.dump.enabled': True,
+        'browser.firstrun-content.dismissed': True,
         # Bug 1145668 - Has to be reverted to about:blank once Marionette
         # can correctly handle error pages
         'browser.newtab.url': 'about:newtab',
         'browser.newtabpage.enabled': False,
         'browser.reader.detectedFirstArticle': True,
-        'browser.safebrowsing.phishing.enabled': False,
+        'browser.safebrowsing.blockedURIs.enabled': False,
         'browser.safebrowsing.forbiddenURIs.enabled': False,
         'browser.safebrowsing.malware.enabled': False,
-        'browser.safebrowsing.blockedURIs.enabled': False,
+        'browser.safebrowsing.phishing.enabled': False,
         'browser.search.update': False,
         'browser.tabs.animate': False,
         'browser.tabs.warnOnClose': False,
         'browser.tabs.warnOnOpen': False,
         'browser.uitour.enabled': False,
+        'browser.usedOnWindows10.introURL': '',
         'extensions.getAddons.cache.enabled': False,
         'extensions.installDistroAddons': False,
         'extensions.showMismatchUI': False,

@@ -159,6 +159,7 @@ var AboutHomeListener = {
     addEventListener("click", this, true);
     addEventListener("pagehide", this, true);
 
+    sendAsyncMessage("AboutHome:MaybeShowAutoMigrationUndoNotification");
     sendAsyncMessage("AboutHome:RequestUpdate");
   },
 
@@ -541,7 +542,7 @@ var PageStyleHandler = {
             currentStyleSheet.ownerNode.nodeName.toLowerCase() != "style") {
           URI = Services.io.newURI(currentStyleSheet.href, null, null);
         }
-      } catch(e) {
+      } catch (e) {
         if (e.result != Cr.NS_ERROR_MALFORMED_URI) {
           throw e;
         }
@@ -652,7 +653,7 @@ var DOMFullscreenHandler = {
 
   receiveMessage: function(aMessage) {
     let windowUtils = this._windowUtils;
-    switch(aMessage.name) {
+    switch (aMessage.name) {
       case "DOMFullscreen:Entered": {
         this._lastTransactionId = windowUtils.lastTransactionId;
         if (!windowUtils.handleFullscreenRequests() &&
@@ -927,6 +928,12 @@ ExtensionContent.init(this);
 addEventListener("unload", () => {
   ExtensionContent.uninit(this);
   RefreshBlocker.uninit();
+});
+
+addMessageListener("AllowScriptsToClose", () => {
+  content.QueryInterface(Ci.nsIInterfaceRequestor)
+         .getInterface(Ci.nsIDOMWindowUtils)
+         .allowScriptsToClose();
 });
 
 addEventListener("MozAfterPaint", function onFirstPaint() {

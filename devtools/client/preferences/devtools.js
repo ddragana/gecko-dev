@@ -30,7 +30,7 @@ pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.previousHost", "side");
 pref("devtools.toolbox.selectedTool", "webconsole");
-pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage", "rulers", "measure"]');
+pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","scratchpad","resize toggle","screenshot --fullpage", "rulers", "measure"]');
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 pref("devtools.toolbox.splitconsoleEnabled", false);
@@ -43,7 +43,6 @@ pref("devtools.command-button-splitconsole.enabled", true);
 pref("devtools.command-button-paintflashing.enabled", false);
 pref("devtools.command-button-scratchpad.enabled", false);
 pref("devtools.command-button-responsive.enabled", true);
-pref("devtools.command-button-eyedropper.enabled", false);
 pref("devtools.command-button-screenshot.enabled", false);
 pref("devtools.command-button-rulers.enabled", false);
 pref("devtools.command-button-measure.enabled", false);
@@ -66,6 +65,15 @@ pref("devtools.inspector.showAllAnonymousContent", false);
 // Enable the MDN docs tooltip
 pref("devtools.inspector.mdnDocsTooltip.enabled", true);
 
+// Enable the Font Inspector
+pref("devtools.fontinspector.enabled", true);
+
+// Enable the Layout View
+pref("devtools.layoutview.enabled", false);
+
+// By how many times eyedropper will magnify pixels
+pref("devtools.eyedropper.zoom", 6);
+
 // Enable to collapse attributes that are too long.
 pref("devtools.markup.collapseAttributes", true);
 
@@ -82,6 +90,7 @@ pref("devtools.responsiveUI.no-reload-notification", false);
 pref("devtools.debugger.enabled", true);
 pref("devtools.debugger.chrome-debugging-host", "localhost");
 pref("devtools.debugger.chrome-debugging-port", 6080);
+pref("devtools.debugger.chrome-debugging-websocket", false);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
@@ -93,6 +102,12 @@ pref("devtools.debugger.auto-black-box", true);
 pref("devtools.debugger.workers", false);
 pref("devtools.debugger.promise", false);
 
+#if defined(NIGHTLY_BUILD)
+pref("devtools.debugger.new-debugger-frontend", true);
+#else
+pref("devtools.debugger.new-debugger-frontend", false);
+#endif
+
 // The default Debugger UI settings
 pref("devtools.debugger.ui.panes-workers-and-sources-width", 200);
 pref("devtools.debugger.ui.panes-instruments-width", 300);
@@ -102,7 +117,7 @@ pref("devtools.debugger.ui.variables-only-enum-visible", false);
 pref("devtools.debugger.ui.variables-searchbox-visible", false);
 
 // Enable the Memory tools
-pref("devtools.memory.enabled", false);
+pref("devtools.memory.enabled", true);
 
 pref("devtools.memory.custom-census-displays", "{}");
 pref("devtools.memory.custom-label-displays", "{}");
@@ -226,21 +241,24 @@ sticky_pref("devtools.theme", "dark");
 sticky_pref("devtools.theme", "light");
 #endif
 
-// Remember the Web Console filters
+// Web console filters
+pref("devtools.webconsole.filter.error", true);
+pref("devtools.webconsole.filter.warn", true);
+pref("devtools.webconsole.filter.info", true);
+pref("devtools.webconsole.filter.log", true);
+pref("devtools.webconsole.filter.debug", true);
+pref("devtools.webconsole.filter.net", false);
+pref("devtools.webconsole.filter.netxhr", false);
+// Deprecated - old console frontend
 pref("devtools.webconsole.filter.network", true);
 pref("devtools.webconsole.filter.networkinfo", false);
 pref("devtools.webconsole.filter.netwarn", true);
-pref("devtools.webconsole.filter.netxhr", false);
 pref("devtools.webconsole.filter.csserror", true);
 pref("devtools.webconsole.filter.cssparser", false);
 pref("devtools.webconsole.filter.csslog", false);
 pref("devtools.webconsole.filter.exception", true);
 pref("devtools.webconsole.filter.jswarn", true);
 pref("devtools.webconsole.filter.jslog", false);
-pref("devtools.webconsole.filter.error", true);
-pref("devtools.webconsole.filter.warn", true);
-pref("devtools.webconsole.filter.info", true);
-pref("devtools.webconsole.filter.log", true);
 pref("devtools.webconsole.filter.secerror", true);
 pref("devtools.webconsole.filter.secwarn", true);
 pref("devtools.webconsole.filter.serviceworkers", true);
@@ -276,6 +294,9 @@ pref("devtools.browserconsole.filter.serverwarn", false);
 pref("devtools.browserconsole.filter.serverinfo", false);
 pref("devtools.browserconsole.filter.serverlog", false);
 
+// Web console filter settings bar
+pref("devtools.webconsole.ui.filterbar", false);
+
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 50);
 
@@ -293,8 +314,15 @@ pref("devtools.webconsole.timestampMessages", false);
 // to automatically trigger multiline editing (equivalent to shift + enter).
 pref("devtools.webconsole.autoMultiline", true);
 
-// Enable the experimental webconsole frontend (work in progress)
+// Enable the experimental webconsole frontend
+#if defined(NIGHTLY_BUILD)
+pref("devtools.webconsole.new-frontend-enabled", true);
+#else
 pref("devtools.webconsole.new-frontend-enabled", false);
+#endif
+
+// Enable the experimental support for source maps in console (work in progress)
+pref("devtools.sourcemap.locations.enabled", false);
 
 // The number of lines that are displayed in the web console.
 pref("devtools.hud.loglimit", 1000);
@@ -306,9 +334,6 @@ pref("devtools.hud.loglimit.network", 1000);
 pref("devtools.hud.loglimit.cssparser", 1000);
 pref("devtools.hud.loglimit.exception", 1000);
 pref("devtools.hud.loglimit.console", 1000);
-
-// By how many times eyedropper will magnify pixels
-pref("devtools.eyedropper.zoom", 6);
 
 // The developer tools editor configuration:
 // - tabsize: how many spaces to use when a Tab character is displayed.
@@ -325,9 +350,6 @@ pref("devtools.editor.detectindentation", true);
 pref("devtools.editor.enableCodeFolding", true);
 pref("devtools.editor.autocomplete", true);
 
-// Enable the Font Inspector
-pref("devtools.fontinspector.enabled", true);
-
 // Pref to store the browser version at the time of a telemetry ping for an
 // opened developer tool. This allows us to ping telemetry just once per browser
 // version for each user.
@@ -335,12 +357,16 @@ pref("devtools.telemetry.tools.opened.version", "{}");
 
 // Enable the JSON View tool (an inspector for application/json documents) on
 // Nightly and Dev. Edition.
-#ifdef RELEASE_BUILD
+#ifdef RELEASE_OR_BETA
 pref("devtools.jsonview.enabled", false);
 #else
 pref("devtools.jsonview.enabled", true);
 #endif
 
-// Disable the HTML responsive design tool by default.  Currently disabled until
-// ready to replace the legacy XUL version.
+// Enable the HTML responsive design tool in Nightly only.  Disabled by default for all
+// other channels.
+#ifdef NIGHTLY_BUILD
+pref("devtools.responsive.html.enabled", true);
+#else
 pref("devtools.responsive.html.enabled", false);
+#endif

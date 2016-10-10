@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko.home;
 
+import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.util.StringUtils;
 
 import android.database.Cursor;
@@ -28,7 +29,7 @@ public class HomeContextMenuInfo extends AdapterContextMenuInfo {
 
     // Item type to be handled with "Remove" selection.
     public static enum RemoveItemType {
-        BOOKMARKS, HISTORY
+        BOOKMARKS, COMBINED, HISTORY
     }
 
     public HomeContextMenuInfo(View targetView, int position, long id) {
@@ -43,8 +44,12 @@ public class HomeContextMenuInfo extends AdapterContextMenuInfo {
         return historyId > -1;
     }
 
+    public boolean hasPartnerBookmarkId() {
+        return bookmarkId <= BrowserContract.Bookmarks.FAKE_PARTNER_BOOKMARKS_START;
+    }
+
     public boolean canRemove() {
-        return hasBookmarkId() || hasHistoryId();
+        return hasBookmarkId() || hasHistoryId() || hasPartnerBookmarkId();
     }
 
     public String getDisplayTitle() {

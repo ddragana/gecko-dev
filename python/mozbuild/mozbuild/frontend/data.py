@@ -313,6 +313,7 @@ class LinkageWrongKindError(Exception):
 class Linkable(ContextDerived):
     """Generic context derived container object for programs and libraries"""
     __slots__ = (
+        'cxx_link',
         'lib_defines',
         'linked_libraries',
         'linked_system_libs',
@@ -320,6 +321,7 @@ class Linkable(ContextDerived):
 
     def __init__(self, context):
         ContextDerived.__init__(self, context)
+        self.cxx_link = False
         self.linked_libraries = []
         self.linked_system_libs = []
         self.lib_defines = Defines(context, {})
@@ -332,6 +334,8 @@ class Linkable(ContextDerived):
         if obj.KIND != self.KIND:
             raise LinkageWrongKindError('%s != %s' % (obj.KIND, self.KIND))
         self.linked_libraries.append(obj)
+        if obj.cxx_link:
+            self.cxx_link = True
         obj.refs.append(self)
 
     def link_system_library(self, lib):
@@ -445,16 +449,6 @@ class Library(BaseLibrary):
         self.is_sdk = is_sdk
 
 
-class RustRlibLibrary(Library):
-    """Context derived container object for a Rust rlib"""
-
-    def __init__(self, context, basename, crate_name, rlib_filename, link_into):
-        Library.__init__(self, context, basename)
-        self.crate_name = crate_name
-        self.rlib_filename = rlib_filename
-        self.link_into = link_into
-
-
 class StaticLibrary(Library):
     """Context derived container object for a static library"""
     __slots__ = (
@@ -467,6 +461,36 @@ class StaticLibrary(Library):
         Library.__init__(self, context, basename, real_name, is_sdk)
         self.link_into = link_into
         self.no_expand_lib = no_expand_lib
+
+
+class RustLibrary(StaticLibrary):
+    """Context derived container object for a static library"""
+    __slots__ = (
+        'cargo_file',
+        'crate_type',
+        'deps_path',
+    )
+
+    def __init__(self, context, basename, cargo_file, crate_type, **args):
+        StaticLibrary.__init__(self, context, basename, **args)
+        self.cargo_file = cargo_file
+        self.crate_type = crate_type
+        # We need to adjust our naming here because cargo replaces '-' in
+        # package names defined in Cargo.toml with underscores in actual
+        # filenames. But we need to keep the basename consistent because
+        # many other things in the build system depend on that.
+        assert self.crate_type == 'rlib'
+        self.lib_name = 'lib%s.rlib' % basename.replace('-', '_')
+        # cargo creates several directories and places its build artifacts
+        # in those directories.  The directory structure depends not only
+        # on the target, but also what sort of build we are doing.
+        rust_build_kind = 'release'
+        if context.config.substs.get('MOZ_DEBUG'):
+            rust_build_kind = 'debug'
+        build_dir = mozpath.join(context.config.substs['RUST_TARGET'],
+                                 rust_build_kind)
+        self.import_name = mozpath.join(build_dir, self.lib_name)
+        self.deps_path = mozpath.join(build_dir, 'deps')
 
 
 class SharedLibrary(Library):

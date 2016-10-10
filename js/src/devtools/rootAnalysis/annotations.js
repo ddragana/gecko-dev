@@ -76,15 +76,15 @@ var ignoreCallees = {
     "js::ClassOps.finalize" : true,
     "JSRuntime.destroyPrincipals" : true,
     "icu_50::UObject.__deleting_dtor" : true, // destructors in ICU code can't cause GC
-    "mozilla::CycleCollectedJSRuntime.DescribeCustomObjects" : true, // During tracing, cannot GC.
-    "mozilla::CycleCollectedJSRuntime.NoteCustomGCThingXPCOMChildren" : true, // During tracing, cannot GC.
+    "mozilla::CycleCollectedJSContext.DescribeCustomObjects" : true, // During tracing, cannot GC.
+    "mozilla::CycleCollectedJSContext.NoteCustomGCThingXPCOMChildren" : true, // During tracing, cannot GC.
     "PLDHashTableOps.hashKey" : true,
     "z_stream_s.zfree" : true,
     "z_stream_s.zalloc" : true,
     "GrGLInterface.fCallback" : true,
     "std::strstreambuf._M_alloc_fun" : true,
     "std::strstreambuf._M_free_fun" : true,
-    "struct js::gc::Callback<void (*)(JSRuntime*, void*)>.op" : true,
+    "struct js::gc::Callback<void (*)(JSContext*, void*)>.op" : true,
     "mozilla::ThreadSharedFloatArrayBufferList::Storage.mFree" : true,
 };
 
@@ -218,7 +218,7 @@ var ignoreFunctions = {
     // nsTHashtable<T>::s_MatchEntry for its matchEntry function pointer, but
     // there is no mechanism for that. So we will just annotate a particularly
     // troublesome logging-related usage.
-    "EntryType* nsTHashtable<EntryType>::PutEntry(nsTHashtable<EntryType>::KeyType) [with EntryType = nsBaseHashtableET<nsCharPtrHashKey, nsAutoPtr<mozilla::LogModule> >; nsTHashtable<EntryType>::KeyType = const char*]" : true,
+    "EntryType* nsTHashtable<EntryType>::PutEntry(nsTHashtable<EntryType>::KeyType, const fallible_t&) [with EntryType = nsBaseHashtableET<nsCharPtrHashKey, nsAutoPtr<mozilla::LogModule> >; nsTHashtable<EntryType>::KeyType = const char*; nsTHashtable<EntryType>::fallible_t = mozilla::fallible_t]" : true,
     "EntryType* nsTHashtable<EntryType>::GetEntry(nsTHashtable<EntryType>::KeyType) const [with EntryType = nsBaseHashtableET<nsCharPtrHashKey, nsAutoPtr<mozilla::LogModule> >; nsTHashtable<EntryType>::KeyType = const char*]" : true,
     "EntryType* nsTHashtable<EntryType>::PutEntry(nsTHashtable<EntryType>::KeyType) [with EntryType = nsBaseHashtableET<nsPtrHashKey<const mozilla::BlockingResourceBase>, nsAutoPtr<mozilla::DeadlockDetector<mozilla::BlockingResourceBase>::OrderingEntry> >; nsTHashtable<EntryType>::KeyType = const mozilla::BlockingResourceBase*]" : true,
     "EntryType* nsTHashtable<EntryType>::GetEntry(nsTHashtable<EntryType>::KeyType) const [with EntryType = nsBaseHashtableET<nsPtrHashKey<const mozilla::BlockingResourceBase>, nsAutoPtr<mozilla::DeadlockDetector<mozilla::BlockingResourceBase>::OrderingEntry> >; nsTHashtable<EntryType>::KeyType = const mozilla::BlockingResourceBase*]" : true,
@@ -306,6 +306,8 @@ function isRootedGCPointerTypeName(name)
     if (name == "ErrorResult" ||
         name == "JSErrorResult" ||
         name == "WrappableJSErrorResult" ||
+        name == "binding_detail::FastErrorResult" ||
+        name == "IgnoredErrorResult" ||
         name == "frontend::TokenStream" ||
         name == "frontend::TokenStream::Position" ||
         name == "ModuleValidator")

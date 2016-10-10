@@ -24,6 +24,9 @@ Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/main.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-sync/bookmark_validator.js");
+Cu.import("resource://services-sync/engines/passwords.js");
+Cu.import("resource://services-sync/engines/forms.js");
+Cu.import("resource://services-sync/engines/addons.js");
 // TPS modules
 Cu.import("resource://tps/logger.jsm");
 
@@ -80,7 +83,7 @@ const ACTIONS = [
 const OBSERVER_TOPICS = ["fxaccounts:onlogin",
                          "fxaccounts:onlogout",
                          "private-browsing",
-                         "quit-application-requested",
+                         "profile-before-change",
                          "sessionstore-windows-restored",
                          "weave:engine:start-tracking",
                          "weave:engine:stop-tracking",
@@ -111,7 +114,10 @@ var TPS = {
   _triggeredSync: false,
   _usSinceEpoch: 0,
   _requestedQuit: false,
+  shouldValidateAddons: false,
   shouldValidateBookmarks: false,
+  shouldValidatePasswords: false,
+  shouldValidateForms: false,
 
   _init: function TPS__init() {
     // Check if Firefox Accounts is enabled
@@ -162,7 +168,7 @@ var TPS = {
           Logger.logInfo("private browsing " + data);
           break;
 
-        case "quit-application-requested":
+        case "profile-before-change":
           OBSERVER_TOPICS.forEach(function(topic) {
             Services.obs.removeObserver(this, topic);
           }, this);
@@ -356,23 +362,25 @@ var TPS = {
   },
 
   HandleForms: function (data, action) {
+    this.shouldValidateForms = true;
     for (let datum of data) {
       Logger.logInfo("executing action " + action.toUpperCase() +
                      " on form entry " + JSON.stringify(datum));
       let formdata = new FormData(datum, this._usSinceEpoch);
       switch(action) {
         case ACTION_ADD:
-          formdata.Create();
+          Async.promiseSpinningly(formdata.Create());
           break;
         case ACTION_DELETE:
-          formdata.Remove();
+          Async.promiseSpinningly(formdata.Remove());
           break;
         case ACTION_VERIFY:
-          Logger.AssertTrue(formdata.Find(), "form data not found");
+          Logger.AssertTrue(Async.promiseSpinningly(formdata.Find()),
+                            "form data not found");
           break;
         case ACTION_VERIFY_NOT:
-          Logger.AssertTrue(!formdata.Find(),
-            "form data found, but it shouldn't be present");
+          Logger.AssertTrue(!Async.promiseSpinningly(formdata.Find()),
+                            "form data found, but it shouldn't be present");
           break;
         default:
           Logger.AssertTrue(false, "invalid action: " + action);
@@ -416,6 +424,7 @@ var TPS = {
   },
 
   HandlePasswords: function (passwords, action) {
+    this.shouldValidatePasswords = true;
     try {
       for (let password of passwords) {
         let password_id = -1;
@@ -457,6 +466,7 @@ var TPS = {
   },
 
   HandleAddons: function (addons, action, state) {
+    this.shouldValidateAddons = true;
     for (let entry of addons) {
       Logger.logInfo("executing action " + action.toUpperCase() +
                      " on addon " + JSON.stringify(entry));
@@ -585,7 +595,14 @@ var TPS = {
       Logger.logError("Failed to wipe server: " + Log.exceptionStr(ex));
     }
     try {
-      Authentication.signOut();
+      if (Authentication.isLoggedIn) {
+        // signout and wait for Sync to completely reset itself.
+        Logger.logInfo("signing out");
+        let waiter = this.createEventWaiter("weave:service:start-over:finish");
+        Authentication.signOut();
+        waiter();
+        Logger.logInfo("signout complete");
+      }
     } catch (e) {
       Logger.logError("Failed to sign out: " + Log.exceptionStr(e));
     }
@@ -598,7 +615,7 @@ var TPS = {
 
     let getServerBookmarkState = () => {
       let bookmarkEngine = Weave.Service.engineManager.get('bookmarks');
-      let collection = bookmarkEngine._itemSource();
+      let collection = bookmarkEngine.itemSource();
       let collectionKey = bookmarkEngine.service.collectionKeys.keyForCollection(bookmarkEngine.name);
       collection.full = true;
       let items = [];
@@ -627,15 +644,6 @@ var TPS = {
         // report it every time, see bug 1273234 and 1274394 for more information.
         if (name === "serverUnexpected" && problemData.serverUnexpected.indexOf("mobile") >= 0) {
           --count;
-        } else if (name === "differences") {
-          // Also exclude errors in parentName/wrongParentName (bug 1276969) for
-          // the same reason.
-          let newCount = problemData.differences.filter(diffInfo =>
-            !diffInfo.differences.every(diff =>
-              diff === "parentName")).length
-          count = newCount;
-        } else if (name === "wrongParentName") {
-          continue;
         }
         if (count) {
           // Log this out before we assert. This is useful in the context of TPS logs, since we
@@ -656,13 +664,82 @@ var TPS = {
     Logger.logInfo("Bookmark validation finished");
   },
 
+  ValidateCollection(engineName, ValidatorType) {
+    let serverRecordDumpStr;
+    let clientRecordDumpStr;
+    try {
+      Logger.logInfo(`About to perform validation for "${engineName}"`);
+      let engine = Weave.Service.engineManager.get(engineName);
+      let validator = new ValidatorType(engine);
+      let serverRecords = validator.getServerItems(engine);
+      let clientRecords = Async.promiseSpinningly(validator.getClientItems());
+      try {
+        // This substantially improves the logs for addons while not making a
+        // substantial difference for the other two
+        clientRecordDumpStr = JSON.stringify(clientRecords.map(r => {
+          let res = validator.normalizeClientItem(r);
+          delete res.original; // Try and prevent cyclic references
+          return res;
+        }));
+      } catch (e) {
+        // ignore the error, the dump string is just here to make debugging easier.
+        clientRecordDumpStr = "<Cyclic value>";
+      }
+      try {
+        serverRecordDumpStr = JSON.stringify(serverRecords);
+      } catch (e) {
+        // as above
+        serverRecordDumpStr = "<Cyclic value>";
+      }
+      let { problemData } = validator.compareClientWithServer(clientRecords, serverRecords);
+      for (let { name, count } of problemData.getSummary()) {
+        if (count) {
+          Logger.logInfo(`Validation problem: "${name}": ${JSON.stringify(problemData[name])}`);
+        }
+        Logger.AssertEqual(count, 0, `Validation error for "${engineName}" of type "${name}"`);
+      }
+    } catch (e) {
+      // Dump the client records if possible
+      if (clientRecordDumpStr) {
+        Logger.logInfo(`Client state for ${engineName}:\n${clientRecordDumpStr}\n`);
+      }
+      // Dump the server records if gotten them already.
+      if (serverRecordDumpStr) {
+        Logger.logInfo(`Server state for ${engineName}:\n${serverRecordDumpStr}\n`);
+      }
+      this.DumpError(`Validation failed for ${engineName}`, e);
+    }
+    Logger.logInfo(`Validation finished for ${engineName}`);
+  },
+
+  ValidatePasswords() {
+    return this.ValidateCollection("passwords", PasswordValidator);
+  },
+
+  ValidateForms() {
+    return this.ValidateCollection("forms", FormValidator);
+  },
+
+  ValidateAddons() {
+    return this.ValidateCollection("addons", AddonValidator);
+  },
+
   RunNextTestAction: function() {
     try {
       if (this._currentAction >=
           this._phaselist[this._currentPhase].length) {
+        // Run necessary validations and then finish up
         if (this.shouldValidateBookmarks) {
-          // Run bookmark validation and then finish up
           this.ValidateBookmarks();
+        }
+        if (this.shouldValidatePasswords) {
+          this.ValidatePasswords();
+        }
+        if (this.shouldValidateForms) {
+          this.ValidateForms();
+        }
+        if (this.shouldValidateAddons) {
+          this.ValidateAddons();
         }
         // we're all done
         Logger.logInfo("test phase " + this._currentPhase + ": " +
@@ -902,23 +979,55 @@ var TPS = {
   },
 
   /**
+   * Return an object that when called, will block until the named event
+   * is observed. This is similar to waitForEvent, although is typically safer
+   * if you need to do some other work that may make the event fire.
+   *
+   * eg:
+   *    doSomething(); // causes the event to be fired.
+   *    waitForEvent("something");
+   * is risky as the call to doSomething may trigger the event before the
+   * waitForEvent call is made. Contrast with:
+   *
+   *   let waiter = createEventWaiter("something"); // does *not* block.
+   *   doSomething(); // causes the event to be fired.
+   *   waiter(); // will return as soon as the event fires, even if it fires
+   *             // before this function is called.
+   *
+   * @param aEventName
+   *        String event to wait for.
+   */
+  createEventWaiter(aEventName) {
+    Logger.logInfo("Setting up wait for " + aEventName + "...");
+    let cb = Async.makeSpinningCallback();
+    Svc.Obs.add(aEventName, cb);
+    return function() {
+      try {
+        cb.wait();
+      } finally {
+        Svc.Obs.remove(aEventName, cb);
+        Logger.logInfo(aEventName + " observed!");
+      }
+    }
+  },
+
+
+  /**
    * Synchronously wait for the named event to be observed.
    *
    * When the event is observed, the function will wait an extra tick before
    * returning.
    *
+   * Note that in general, you should probably use createEventWaiter unless you
+   * are 100% sure that the event being waited on can only be sent after this
+   * call adds the listener.
+   *
    * @param aEventName
    *        String event to wait for.
    */
   waitForEvent: function waitForEvent(aEventName) {
-    Logger.logInfo("Waiting for " + aEventName + "...");
-    let cb = Async.makeSpinningCallback();
-    Svc.Obs.add(aEventName, cb);
-    cb.wait();
-    Svc.Obs.remove(aEventName, cb);
-    Logger.logInfo(aEventName + " observed!");
+    this.createEventWaiter(aEventName)();
   },
-
 
   /**
    * Waits for Sync to logged in before returning
@@ -1032,6 +1141,9 @@ var Addons = {
   verifyNot: function Addons__verifyNot(addons) {
     TPS.HandleAddons(addons, ACTION_VERIFY_NOT);
   },
+  skipValidation() {
+    TPS.shouldValidateAddons = false;
+  }
 };
 
 var Bookmarks = {
@@ -1100,6 +1212,9 @@ var Passwords = {
   },
   verifyNot: function Passwords__verifyNot(passwords) {
     this.HandlePasswords(passwords, ACTION_VERIFY_NOT);
+  },
+  skipValidation() {
+    TPS.shouldValidatePasswords = false;
   }
 };
 

@@ -11,7 +11,7 @@
   --timing-dns-color: rgba(223, 128, 255, 0.8); /* pink */
   --timing-connect-color: rgba(217, 102, 41, 0.8); /* orange */
   --timing-send-color: rgba(70, 175, 227, 0.8); /* light blue */
-  --timig-wait-color: rgba(94, 136, 176, 0.8); /* blue grey */
+  --timing-wait-color: rgba(94, 136, 176, 0.8); /* blue grey */
   --timing-receive-color: rgba(112, 191, 83, 0.8); /* green */
 
   --sort-ascending-image: url(chrome://devtools/skin/images/sort-arrows.svg#ascending);
@@ -223,7 +223,10 @@
   width: 16px;
   height: 16px;
   margin-inline-end: 4px;
-  cursor: pointer;
+}
+
+.side-menu-widget-item.selected .requests-security-state-icon {
+  filter: brightness(1.3);
 }
 
 .security-state-insecure {
@@ -269,13 +272,16 @@
   margin: 0;
   margin-inline-end: 3px;
   -moz-user-select: none;
-  cursor: pointer;
 }
 
 .requests-menu-transferred {
   max-width: 8em;
   text-align: center;
   width: 8vw;
+}
+
+.side-menu-widget-item.selected .requests-menu-transferred.theme-comment {
+  color: var(--theme-selection-color);
 }
 
 /* Network requests table: status codes */
@@ -294,6 +300,10 @@
   margin-inline-end: 5px;
   border-radius: 10px;
   transition: box-shadow 0.5s ease-in-out;
+}
+
+.side-menu-widget-item.selected .requests-menu-status-icon {
+  filter: brightness(1.3);
 }
 
 .requests-menu-status-icon:not([code]) {
@@ -494,8 +504,13 @@
 }
 
 /* Method Column */
+
 .theme-firebug .requests-menu-subitem.requests-menu-method-box {
   color: rgb(128, 128, 128);
+}
+
+.side-menu-widget-item.selected .requests-menu-method {
+  color: var(--theme-selection-color);
 }
 
 /* Size Column */
@@ -506,11 +521,13 @@
 
 /* Network request details */
 
-#details-pane-toggle {
+#details-pane-toggle:-moz-locale-dir(ltr),
+#details-pane-toggle.pane-collapsed:-moz-locale-dir(rtl) {
   list-style-image: var(--theme-pane-collapse-image);
 }
 
-#details-pane-toggle.pane-collapsed {
+#details-pane-toggle.pane-collapsed:-moz-locale-dir(ltr),
+#details-pane-toggle:-moz-locale-dir(rtl) {
   list-style-image: var(--theme-pane-expand-image);
 }
 
@@ -532,6 +549,10 @@
   in Firebug theme */
 .theme-firebug .tabpanel-content .variables-view-container .title.devtools-toolbar {
   height: 20px !important;
+}
+
+.theme-firebug .variables-view-scope:focus > .title {
+  color: var(--theme-body-color);
 }
 
 /* Summary tabpanel */

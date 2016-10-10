@@ -361,8 +361,7 @@ nsTreeBodyFrame::EnsureView()
       mTreeBoxObject->GetView(getter_AddRefs(treeView));
       if (treeView && weakFrame.IsAlive()) {
         nsXPIDLString rowStr;
-        box->GetProperty(MOZ_UTF16("topRow"),
-                         getter_Copies(rowStr));
+        box->GetProperty(u"topRow", getter_Copies(rowStr));
         nsAutoString rowStr2(rowStr);
         nsresult error;
         int32_t rowIndex = rowStr2.ToInteger(&error);
@@ -378,7 +377,7 @@ nsTreeBodyFrame::EnsureView()
 
         // Clear out the property info for the top row, but we always keep the
         // view current.
-        box->RemoveProperty(MOZ_UTF16("topRow"));
+        box->RemoveProperty(u"topRow");
       }
     }
   }
@@ -2120,7 +2119,8 @@ nsTreeBodyFrame::GetImage(int32_t aRowIndex, nsTreeColumn* aCol, bool aUseContex
     nsCOMPtr<nsIURI> uri;
     styleRequest->GetURI(getter_AddRefs(uri));
     nsAutoCString spec;
-    uri->GetSpec(spec);
+    nsresult rv = uri->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
     CopyUTF8toUTF16(spec, imageSrc);
   }
 
@@ -2868,7 +2868,7 @@ nsTreeBodyFrame::PaintTreeBody(nsRenderingContext& aRenderingContext,
 #ifdef DEBUG
   int32_t rowCount = mRowCount;
   mView->GetRowCount(&rowCount);
-  NS_WARN_IF_FALSE(mRowCount == rowCount, "row count changed unexpectedly");
+  NS_WARNING_ASSERTION(mRowCount == rowCount, "row count changed unexpectedly");
 #endif
 
   DrawResult result = DrawResult::SUCCESS;
@@ -3262,17 +3262,12 @@ nsTreeBodyFrame::PaintCell(int32_t              aRowIndex,
       aRenderingContext.ThebesContext()->Save();
 
       const nsStyleBorder* borderStyle = lineContext->StyleBorder();
-      nscolor color;
-      bool useForegroundColor;
-      borderStyle->GetBorderColor(NS_SIDE_LEFT, color, useForegroundColor);
-      if (useForegroundColor) {
-        // GetBorderColor didn't touch color, thus grab it from the treeline context
-        color = lineContext->StyleColor()->mColor;
-      }
+      // Resolve currentcolor values against the treeline context
+      nscolor color = lineContext->StyleColor()->
+        CalcComplexColor(borderStyle->mBorderLeftColor);
       ColorPattern colorPatt(ToDeviceColor(color));
 
-      uint8_t style;
-      style = borderStyle->GetBorderStyle(NS_SIDE_LEFT);
+      uint8_t style = borderStyle->GetBorderStyle(NS_SIDE_LEFT);
       StrokeOptions strokeOptions;
       nsLayoutUtils::InitDashPattern(strokeOptions, style);
 

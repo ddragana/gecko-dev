@@ -10,6 +10,8 @@ var { Ci, Cu, Cc, components } = require("chrome");
 var Services = require("Services");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
+var flags = require("./flags");
+var {getStack, callFunctionWithAsyncStack} = require("devtools/shared/platform/stack");
 
 loader.lazyRequireGetter(this, "FileUtils",
                          "resource://gre/modules/FileUtils.jsm", true);
@@ -30,10 +32,10 @@ exports.executeSoon = function executeSoon(aFn) {
     let executor;
     // Only enable async stack reporting when DEBUG_JS_MODULES is set
     // (customized local builds) to avoid a performance penalty.
-    if (AppConstants.DEBUG_JS_MODULES || exports.testing) {
-      let stack = components.stack;
+    if (AppConstants.DEBUG_JS_MODULES || flags.testing) {
+      let stack = getStack();
       executor = () => {
-        Cu.callFunctionWithAsyncStack(aFn, stack, "DevToolsUtils.executeSoon");
+        callFunctionWithAsyncStack(aFn, stack, "DevToolsUtils.executeSoon");
       };
     } else {
       executor = aFn;
@@ -234,27 +236,19 @@ exports.isSafeJSObject = function isSafeJSObject(aObj) {
 };
 
 exports.dumpn = function dumpn(str) {
-  if (exports.dumpn.wantLogging) {
+  if (flags.wantLogging) {
     dump("DBG-SERVER: " + str + "\n");
   }
 };
-
-// We want wantLogging to be writable. The exports object is frozen by the
-// loader, so define it on dumpn instead.
-exports.dumpn.wantLogging = false;
 
 /**
  * A verbose logger for low-level tracing.
  */
 exports.dumpv = function (msg) {
-  if (exports.dumpv.wantVerbose) {
+  if (flags.wantVerbose) {
     exports.dumpn(msg);
   }
 };
-
-// We want wantLogging to be writable. The exports object is frozen by the
-// loader, so define it on dumpn instead.
-exports.dumpv.wantVerbose = false;
 
 /**
  * Defines a getter on a specified object that will be created upon first use.
@@ -318,7 +312,7 @@ function reallyAssert(condition, message) {
  * Assertions are enabled when any of the following are true:
  *   - This is a DEBUG_JS_MODULES build
  *   - This is a DEBUG build
- *   - DevToolsUtils.testing is set to true
+ *   - flags.testing is set to true
  *
  * If assertions are enabled, then `condition` is checked and if false-y, the
  * assertion failure is logged and then an error is thrown.
@@ -326,7 +320,7 @@ function reallyAssert(condition, message) {
  * If assertions are not enabled, then this function is a no-op.
  */
 Object.defineProperty(exports, "assert", {
-  get: () => (AppConstants.DEBUG || AppConstants.DEBUG_JS_MODULES || this.testing)
+  get: () => (AppConstants.DEBUG || AppConstants.DEBUG_JS_MODULES || flags.testing)
     ? reallyAssert
     : exports.noop,
 });
@@ -386,7 +380,8 @@ exports.defineLazyGetter(this, "NetworkHelper", () => {
  *        - window: the window to get the loadGroup from
  *        - charset: the charset to use if the channel doesn't provide one
  *        - principal: the principal to use, if omitted, the request is loaded
- *                     with the system principal
+ *                     with a codebase principal corresponding to the url being
+ *                     loaded, using the origin attributes of the window, if any.
  *        - cacheKey: when loading from cache, use this key to retrieve a cache
  *                    specific to a given SHEntry. (Allows loading POST
  *                    requests from cache)
@@ -454,13 +449,31 @@ function mainThreadFetch(aURL, aOptions = { loadFromCache: true,
       let source = NetUtil.readInputStreamToString(stream, available);
       stream.close();
 
+      // We do our own BOM sniffing here because there's no convenient
+      // implementation of the "decode" algorithm
+      // (https://encoding.spec.whatwg.org/#decode) exposed to JS.
+      let bomCharset = null;
+      if (available >= 3 && source.codePointAt(0) == 0xef &&
+          source.codePointAt(1) == 0xbb && source.codePointAt(2) == 0xbf) {
+        bomCharset = "UTF-8";
+        source = source.slice(3);
+      } else if (available >= 2 && source.codePointAt(0) == 0xfe &&
+                 source.codePointAt(1) == 0xff) {
+        bomCharset = "UTF-16BE";
+        source = source.slice(2);
+      } else if (available >= 2 && source.codePointAt(0) == 0xff &&
+                 source.codePointAt(1) == 0xfe) {
+        bomCharset = "UTF-16LE";
+        source = source.slice(2);
+      }
+
       // If the channel or the caller has correct charset information, the
       // content will be decoded correctly. If we have to fall back to UTF-8 and
       // the guess is wrong, the conversion fails and convertToUnicode returns
       // the input unmodified. Essentially we try to decode the data as UTF-8
       // and if that fails, we use the locale specific default encoding. This is
       // the best we can do if the source does not provide charset info.
-      let charset = channel.contentCharset || aOptions.charset || "UTF-8";
+      let charset = bomCharset || channel.contentCharset || aOptions.charset || "UTF-8";
       let unicodeSource = NetworkHelper.convertToUnicode(source, charset);
 
       deferred.resolve({
@@ -514,51 +527,44 @@ function mainThreadFetch(aURL, aOptions = { loadFromCache: true,
  */
 function newChannelForURL(url, { policy, window, principal }) {
   var securityFlags = Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
-  if (window) {
-    // Respect private browsing.
-    var req = window.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocumentLoader)
-                    .loadGroup;
-    if (req) {
-      var nc = req.notificationCallbacks;
-      if (nc) {
-        try {
-          var lc = nc.getInterface(Ci.nsILoadContext);
-          if (lc) {
-            if (lc.usePrivateBrowsing) {
-              securityFlags |= Ci.nsILoadInfo.SEC_FORCE_PRIVATE_BROWSING;
-            }
-          }
-        } catch (ex) {}
-      }
-    }
-  }
 
-  let channelOptions = {
-    contentPolicyType: policy,
-    securityFlags: securityFlags,
-    uri: url
-  };
-  if (principal) {
-    // contentPolicyType is required when loading with a custom principal
-    if (!channelOptions.contentPolicyType) {
-      channelOptions.contentPolicyType = Ci.nsIContentPolicy.TYPE_OTHER;
-    }
-    channelOptions.loadingPrincipal = principal;
-  } else {
-    channelOptions.loadUsingSystemPrincipal = true;
-  }
-
+  let uri;
   try {
-    return NetUtil.newChannel(channelOptions);
+    uri = Services.io.newURI(url, null, null);
   } catch (e) {
     // In the xpcshell tests, the script url is the absolute path of the test
     // file, which will make a malformed URI error be thrown. Add the file
     // scheme to see if it helps.
-    channelOptions.uri = "file://" + url;
+    uri = Services.io.newURI("file://" + url, null, null);
+  }
+  let channelOptions = {
+    contentPolicyType: policy,
+    securityFlags: securityFlags,
+    uri: uri
+  };
+  let prin = principal;
+  if (!prin) {
+    let oa = {};
+    if (window) {
+      oa = window.document.nodePrincipal.originAttributes;
+    }
+    prin = Services.scriptSecurityManager
+                   .createCodebasePrincipal(uri, oa);
+  }
+  // contentPolicyType is required when specifying a principal
+  if (!channelOptions.contentPolicyType) {
+    channelOptions.contentPolicyType = Ci.nsIContentPolicy.TYPE_OTHER;
+  }
+  channelOptions.loadingPrincipal = prin;
 
+  try {
     return NetUtil.newChannel(channelOptions);
+  } catch (e) {
+    // In xpcshell tests on Windows, nsExternalProtocolHandler::NewChannel()
+    // can throw NS_ERROR_UNKNOWN_PROTOCOL if the external protocol isn't
+    // supported by Windows, so we also need to handle the exception here if
+    // parsing the URL above doesn't throw.
+    return newChannelForURL("file://" + url, { policy, window, principal });
   }
 }
 
@@ -574,93 +580,6 @@ if (!this.isWorker) {
     return rpc("fetch", url, options);
   };
 }
-
-/**
- * Returns a promise that is resolved or rejected when all promises have settled
- * (resolved or rejected).
- *
- * This differs from Promise.all, which will reject immediately after the first
- * rejection, instead of waiting for the remaining promises to settle.
- *
- * @param values
- *        Iterable of promises that may be pending, resolved, or rejected. When
- *        when all promises have settled (resolved or rejected), the returned
- *        promise will be resolved or rejected as well.
- *
- * @return A new promise that is fulfilled when all values have settled
- *         (resolved or rejected). Its resolution value will be an array of all
- *         resolved values in the given order, or undefined if values is an
- *         empty array. The reject reason will be forwarded from the first
- *         promise in the list of given promises to be rejected.
- */
-exports.settleAll = values => {
-  if (values === null || typeof (values[Symbol.iterator]) != "function") {
-    throw new Error("settleAll() expects an iterable.");
-  }
-
-  let deferred = defer();
-
-  values = Array.isArray(values) ? values : [...values];
-  let countdown = values.length;
-  let resolutionValues = new Array(countdown);
-  let rejectionValue;
-  let rejectionOccurred = false;
-
-  if (!countdown) {
-    deferred.resolve(resolutionValues);
-    return deferred.promise;
-  }
-
-  function checkForCompletion() {
-    if (--countdown > 0) {
-      return;
-    }
-    if (!rejectionOccurred) {
-      deferred.resolve(resolutionValues);
-    } else {
-      deferred.reject(rejectionValue);
-    }
-  }
-
-  for (let i = 0; i < values.length; i++) {
-    let index = i;
-    let value = values[i];
-    let resolver = result => {
-      resolutionValues[index] = result;
-      checkForCompletion();
-    };
-    let rejecter = error => {
-      if (!rejectionOccurred) {
-        rejectionValue = error;
-        rejectionOccurred = true;
-      }
-      checkForCompletion();
-    };
-
-    if (value && typeof (value.then) == "function") {
-      value.then(resolver, rejecter);
-    } else {
-      // Given value is not a promise, forward it as a resolution value.
-      resolver(value);
-    }
-  }
-
-  return deferred.promise;
-};
-
-/**
- * When the testing flag is set, various behaviors may be altered from
- * production mode, typically to enable easier testing or enhanced debugging.
- */
-var testing = false;
-Object.defineProperty(exports, "testing", {
-  get: function () {
-    return testing;
-  },
-  set: function (state) {
-    testing = state;
-  }
-});
 
 /**
  * Open the file at the given path for reading.
@@ -685,3 +604,69 @@ exports.openFileStream = function (filePath) {
     );
   });
 };
+
+/*
+ * All of the flags have been moved to a different module. Make sure
+ * nobody is accessing them anymore, and don't write new code using
+ * them. We can remove this code after a while.
+ */
+function errorOnFlag(exports, name) {
+  Object.defineProperty(exports, name, {
+    get: () => {
+      const msg = `Cannot get the flag ${name}. ` +
+            `Use the "devtools/shared/flags" module instead`;
+      console.error(msg);
+      throw new Error(msg);
+    },
+    set: () => {
+      const msg = `Cannot set the flag ${name}. ` +
+            `Use the "devtools/shared/flags" module instead`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+  });
+}
+
+errorOnFlag(exports, "testing");
+errorOnFlag(exports, "wantLogging");
+errorOnFlag(exports, "wantVerbose");
+
+// Calls the property with the given `name` on the given `object`, where
+// `name` is a string, and `object` a Debugger.Object instance.
+///
+// This function uses only the Debugger.Object API to call the property. It
+// avoids the use of unsafeDeference. This is useful for example in workers,
+// where unsafeDereference will return an opaque security wrapper to the
+// referent.
+function callPropertyOnObject(object, name) {
+  // Find the property.
+  let descriptor;
+  let proto = object;
+  do {
+    descriptor = proto.getOwnPropertyDescriptor(name);
+    if (descriptor !== undefined) {
+      break;
+    }
+    proto = proto.proto;
+  } while (proto !== null);
+  if (descriptor === undefined) {
+    throw new Error("No such property");
+  }
+  let value = descriptor.value;
+  if (typeof value !== "object" || value === null || !("callable" in value)) {
+    throw new Error("Not a callable object.");
+  }
+
+  // Call the property.
+  let result = value.call(object);
+  if (result === null) {
+    throw new Error("Code was terminated.");
+  }
+  if ("throw" in result) {
+    throw result.throw;
+  }
+  return result.return;
+}
+
+
+exports.callPropertyOnObject = callPropertyOnObject;

@@ -32,7 +32,7 @@ function PageAction(options, extension) {
 
   this.options = {
     title: options.default_title || extension.name,
-    id: extension.id,
+    id: `{${extension.uuid}}`,
     clickCallback: () => {
       if (this.popupUrl) {
         let win = Services.wm.getMostRecentWindow("navigator:browser");
@@ -64,7 +64,8 @@ PageAction.prototype = {
 
     this.shouldShow = true;
 
-    let {icon} = IconDetails.getURL(this.icons, context.contentWindow, this.extension, 18);
+    let {icon} = IconDetails.getPreferredIcon(this.icons, this.extension,
+                                              18 * context.contentWindow.devicePixelRatio);
 
     let browserWindow = Services.wm.getMostRecentWindow("navigator:browser");
     return IconDetails.convertImageURLToDataURL(icon, context, browserWindow).then(dataURI => {
@@ -116,7 +117,8 @@ extensions.on("shutdown", (type, extension) => {
 });
 /* eslint-enable mozilla/balanced-listeners */
 
-extensions.registerSchemaAPI("pageAction", (extension, context) => {
+extensions.registerSchemaAPI("pageAction", "addon_parent", context => {
+  let {extension} = context;
   return {
     pageAction: {
       onClicked: new SingletonEventManager(context, "pageAction.onClicked", fire => {

@@ -7,11 +7,8 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
 const promise = require("promise");
-const defer = require("devtools/shared/defer");
 const Services = require("Services");
-const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
 const {l10n} = require("devtools/shared/inspector/css-logic");
@@ -21,32 +18,17 @@ const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/u
 const {ElementStyle} = require("devtools/client/inspector/rules/models/element-style");
 const {Rule} = require("devtools/client/inspector/rules/models/rule");
 const {RuleEditor} = require("devtools/client/inspector/rules/views/rule-editor");
-const {createChild, promiseWarn} = require("devtools/client/inspector/shared/utils");
+const {createChild, promiseWarn, throttle} = require("devtools/client/inspector/shared/utils");
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-loader.lazyRequireGetter(this, "overlays",
-  "devtools/client/inspector/shared/style-inspector-overlays");
-loader.lazyRequireGetter(this, "EventEmitter",
-  "devtools/shared/event-emitter");
-loader.lazyRequireGetter(this, "StyleInspectorMenu",
-  "devtools/client/inspector/shared/style-inspector-menu");
-loader.lazyRequireGetter(this, "KeyShortcuts",
-  "devtools/client/shared/key-shortcuts", true);
+const overlays = require("devtools/client/inspector/shared/style-inspector-overlays");
+const EventEmitter = require("devtools/shared/event-emitter");
+const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-    .getService(Ci.nsIClipboardHelper);
-});
-
-XPCOMUtils.defineLazyGetter(this, "_strings", function () {
-  return Services.strings.createBundle(
-    "chrome://devtools-shared/locale/styleinspector.properties");
-});
-
-loader.lazyGetter(this, "AutocompletePopup", function () {
-  return require("devtools/client/shared/autocomplete-popup").AutocompletePopup;
-});
+const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
@@ -96,47 +78,6 @@ const FILTER_STRICT_RE = /\s*`(.*?)`\s*$/;
  */
 
 /**
- * To figure out how shorthand properties are interpreted by the
- * engine, we will set properties on a dummy element and observe
- * how their .style attribute reflects them as computed values.
- * This function creates the document in which those dummy elements
- * will be created.
- */
-var gDummyPromise;
-function createDummyDocument() {
-  if (gDummyPromise) {
-    return gDummyPromise;
-  }
-  const { getDocShell, create: makeFrame } = require("sdk/frame/utils");
-
-  let frame = makeFrame(Services.appShell.hiddenDOMWindow.document, {
-    nodeName: "iframe",
-    namespaceURI: "http://www.w3.org/1999/xhtml",
-    allowJavascript: false,
-    allowPlugins: false,
-    allowAuth: false
-  });
-  let docShell = getDocShell(frame);
-  let eventTarget = docShell.chromeEventHandler;
-  let ssm = Services.scriptSecurityManager;
-
-  // We probably need to call InheritFromDocShellToDoc to get the correct origin
-  // attributes, but right now we can't call it from JS.
-  let nullPrincipal = ssm.createNullPrincipal(docShell.getOriginAttributes());
-  docShell.createAboutBlankContentViewer(nullPrincipal);
-  let window = docShell.contentViewer.DOMDocument.defaultView;
-  window.location = "data:text/html,<html></html>";
-  let deferred = defer();
-  eventTarget.addEventListener("DOMContentLoaded", function handler() {
-    eventTarget.removeEventListener("DOMContentLoaded", handler, false);
-    deferred.resolve(window.document);
-    frame.remove();
-  }, false);
-  gDummyPromise = deferred.promise;
-  return gDummyPromise;
-}
-
-/**
  * CssRuleView is a view of the style rules and declarations that
  * apply to a given element.  After construction, the 'element'
  * property will be available with the user interface.
@@ -159,22 +100,23 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this.store = store || {};
   this.pageStyle = pageStyle;
 
+  // Allow tests to override throttling behavior, as this can cause intermittents.
+  this.throttle = throttle;
+
   this.cssProperties = getCssProperties(inspector.toolbox);
 
-  this._outputParser = new OutputParser(document, this.cssProperties.supportsType);
+  this._outputParser = new OutputParser(document, this.cssProperties);
 
   this._onAddRule = this._onAddRule.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
   this._onCopy = this._onCopy.bind(this);
   this._onFilterStyles = this._onFilterStyles.bind(this);
   this._onClearSearch = this._onClearSearch.bind(this);
-  this._onFilterTextboxContextMenu =
-    this._onFilterTextboxContextMenu.bind(this);
   this._onTogglePseudoClassPanel = this._onTogglePseudoClassPanel.bind(this);
   this._onTogglePseudoClass = this._onTogglePseudoClass.bind(this);
 
   let doc = this.styleDocument;
-  this.element = doc.getElementById("ruleview-container");
+  this.element = doc.getElementById("ruleview-container-focusable");
   this.addRuleButton = doc.getElementById("ruleview-add-rule-button");
   this.searchField = doc.getElementById("ruleview-searchbox");
   this.searchClearButton = doc.getElementById("ruleview-searchinput-clear");
@@ -196,8 +138,7 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this.element.addEventListener("contextmenu", this._onContextMenu);
   this.addRuleButton.addEventListener("click", this._onAddRule);
   this.searchField.addEventListener("input", this._onFilterStyles);
-  this.searchField.addEventListener("contextmenu",
-                                    this._onFilterTextboxContextMenu);
+  this.searchField.addEventListener("contextmenu", this.inspector.onTextBoxContextMenu);
   this.searchClearButton.addEventListener("click", this._onClearSearch);
   this.pseudoClassToggle.addEventListener("click",
                                           this._onTogglePseudoClassPanel);
@@ -218,11 +159,11 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this.enableMdnDocsTooltip =
     Services.prefs.getBoolPref(PREF_ENABLE_MDN_DOCS_TOOLTIP);
 
-  let options = {
+  // The popup will be attached to the toolbox document.
+  this.popup = new AutocompletePopup(inspector._toolbox.doc, {
     autoSelect: true,
     theme: "auto"
-  };
-  this.popup = new AutocompletePopup(inspector._toolbox, options);
+  });
 
   this._showEmpty();
 
@@ -526,7 +467,7 @@ CssRuleView.prototype = {
   _onAddRule: function () {
     let elementStyle = this._elementStyle;
     let element = elementStyle.element;
-    let client = this.inspector.toolbox._target.client;
+    let client = this.inspector.target.client;
     let pseudoClasses = element.pseudoClassLocks;
 
     if (!client.traits.addNewRule) {
@@ -701,19 +642,6 @@ CssRuleView.prototype = {
   },
 
   /**
-   * Context menu handler for filter style search box.
-   */
-  _onFilterTextboxContextMenu: function (event) {
-    try {
-      this.styleWindow.focus();
-      let contextmenu = this.inspector.toolbox.textboxContextMenuPopup;
-      contextmenu.openPopupAtScreen(event.screenX, event.screenY, true);
-    } catch (e) {
-      console.error(e);
-    }
-  },
-
-  /**
    * Called when the user clicks on the clear button in the filter style search
    * box. Returns true if the search box is cleared and false otherwise.
    */
@@ -731,8 +659,6 @@ CssRuleView.prototype = {
     this.clear();
 
     this._dummyElement = null;
-    this.dummyElementPromise = null;
-    gDummyPromise = null;
 
     this._prefObserver.off(PREF_ORIG_SOURCES, this._onSourcePrefChanged);
     this._prefObserver.off(PREF_UA_STYLES, this._handlePrefChange);
@@ -757,7 +683,7 @@ CssRuleView.prototype = {
     this.addRuleButton.removeEventListener("click", this._onAddRule);
     this.searchField.removeEventListener("input", this._onFilterStyles);
     this.searchField.removeEventListener("contextmenu",
-      this._onFilterTextboxContextMenu);
+      this.inspector.onTextBoxContextMenu);
     this.searchClearButton.removeEventListener("click", this._onClearSearch);
     this.pseudoClassToggle.removeEventListener("click",
       this._onTogglePseudoClassPanel);
@@ -839,14 +765,12 @@ CssRuleView.prototype = {
     // To figure out how shorthand properties are interpreted by the
     // engine, we will set properties on a dummy element and observe
     // how their .style attribute reflects them as computed values.
-    this.dummyElementPromise = createDummyDocument().then(document => {
+    let dummyElementPromise = promise.resolve(this.styleDocument).then(document => {
       // ::before and ::after do not have a namespaceURI
       let namespaceURI = this.element.namespaceURI ||
           document.documentElement.namespaceURI;
       this._dummyElement = document.createElementNS(namespaceURI,
                                                    this.element.tagName);
-      document.documentElement.appendChild(this._dummyElement);
-      return this._dummyElement;
     }).then(null, promiseWarn);
 
     let elementStyle = new ElementStyle(element, this, this.store,
@@ -855,7 +779,7 @@ CssRuleView.prototype = {
 
     this._startSelectingElement();
 
-    return this.dummyElementPromise.then(() => {
+    return dummyElementPromise.then(() => {
       if (this._elementStyle === elementStyle) {
         return this._populate();
       }
@@ -1590,7 +1514,7 @@ function RuleViewTool(inspector, window) {
   this.view.on("ruleview-refreshed", this.onViewRefreshed);
   this.view.on("ruleview-linked-clicked", this.onLinkClicked);
 
-  this.inspector.selection.on("detached", this.onSelected);
+  this.inspector.selection.on("detached-front", this.onSelected);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
   this.inspector.target.on("navigate", this.clearUserProperties);
@@ -1721,7 +1645,7 @@ RuleViewTool.prototype = {
   destroy: function () {
     this.inspector.walker.off("mutations", this.onMutations);
     this.inspector.walker.off("resize", this.onResized);
-    this.inspector.selection.off("detached", this.onSelected);
+    this.inspector.selection.off("detached-front", this.onSelected);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);
     this.inspector.target.off("navigate", this.clearUserProperties);

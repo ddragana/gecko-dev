@@ -13,6 +13,7 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TypedEnumBits.h"
@@ -33,6 +34,7 @@
 #include "nsTObserverArray.h"
 
 class mozIApplicationClearPrivateDataParams;
+class nsIConsoleReportCollector;
 
 namespace mozilla {
 
@@ -222,6 +224,10 @@ public:
                                 uint32_t aLineNumber = 0,
                                 uint32_t aColumnNumber = 0);
 
+  void
+  FlushReportsToAllClients(const nsACString& aScope,
+                           nsIConsoleReportCollector* aReporter);
+
   // Always consumes the error by reporting to consoles of all controlled
   // documents.
   void
@@ -255,7 +261,7 @@ public:
   nsresult
   ClaimClients(nsIPrincipal* aPrincipal, const nsCString& aScope, uint64_t aId);
 
-  nsresult
+  void
   SetSkipWaitingFlag(nsIPrincipal* aPrincipal, const nsCString& aScope,
                      uint64_t aServiceWorkerID);
 
@@ -293,6 +299,9 @@ public:
 
   nsresult
   NotifyUnregister(nsIPrincipal* aPrincipal, const nsAString& aScope);
+
+  void
+  WorkerIsIdle(ServiceWorkerInfo* aWorker);
 
 private:
   ServiceWorkerManager();

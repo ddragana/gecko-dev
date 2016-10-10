@@ -19,6 +19,7 @@
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "nsIDOMWindowCollection.h"
 #include "nsJSUtils.h"
+#include "xpcprivate.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -238,7 +239,7 @@ AccessCheck::checkPassToPrivilegedCode(JSContext* cx, HandleObject wrapper, Hand
     if (AccessCheck::isChrome(js::UncheckedUnwrap(wrapper)) && WrapperFactory::IsCOW(obj)) {
         RootedObject target(cx, js::UncheckedUnwrap(obj));
         JSAutoCompartment ac(cx, target);
-        RootedId id(cx, GetRTIdByIndex(cx, XPCJSRuntime::IDX_EXPOSEDPROPS));
+        RootedId id(cx, GetJSIDByIndex(cx, XPCJSContext::IDX_EXPOSEDPROPS));
         bool found = false;
         if (!JS_HasPropertyById(cx, target, id, &found))
             return false;
@@ -251,7 +252,7 @@ AccessCheck::checkPassToPrivilegedCode(JSContext* cx, HandleObject wrapper, Hand
         return true;
 
     // Badness.
-    JS_ReportError(cx, "Permission denied to pass object to privileged code");
+    JS_ReportErrorASCII(cx, "Permission denied to pass object to privileged code");
     return false;
 }
 
@@ -270,10 +271,10 @@ AccessCheck::checkPassToPrivilegedCode(JSContext* cx, HandleObject wrapper, cons
 enum Access { READ = (1<<0), WRITE = (1<<1), NO_ACCESS = 0 };
 
 static void
-EnterAndThrow(JSContext* cx, JSObject* wrapper, const char* msg)
+EnterAndThrowASCII(JSContext* cx, JSObject* wrapper, const char* msg)
 {
     JSAutoCompartment ac(cx, wrapper);
-    JS_ReportError(cx, msg);
+    JS_ReportErrorASCII(cx, msg);
 }
 
 bool
@@ -291,7 +292,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
                check(cx, wrapper, id, Wrapper::SET);
     }
 
-    RootedId exposedPropsId(cx, GetRTIdByIndex(cx, XPCJSRuntime::IDX_EXPOSEDPROPS));
+    RootedId exposedPropsId(cx, GetJSIDByIndex(cx, XPCJSContext::IDX_EXPOSEDPROPS));
 
     // We need to enter the wrappee's compartment to look at __exposedProps__,
     // but we want to be in the wrapper's compartment if we call Deny().
@@ -336,7 +337,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
         return false;
 
     if (desc.hasGetterOrSetter()) {
-        EnterAndThrow(cx, wrapper, "__exposedProps__ must be a value property");
+        EnterAndThrowASCII(cx, wrapper, "__exposedProps__ must be a value property");
         return false;
     }
 
@@ -345,14 +346,14 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
         return false;
 
     if (!exposedProps.isObject()) {
-        EnterAndThrow(cx, wrapper, "__exposedProps__ must be undefined, null, or an Object");
+        EnterAndThrowASCII(cx, wrapper, "__exposedProps__ must be undefined, null, or an Object");
         return false;
     }
 
     RootedObject hallpass(cx, &exposedProps.toObject());
 
     if (!AccessCheck::subsumes(js::UncheckedUnwrap(hallpass), wrappedObject)) {
-        EnterAndThrow(cx, wrapper, "Invalid __exposedProps__");
+        EnterAndThrowASCII(cx, wrapper, "Invalid __exposedProps__");
         return false;
     }
 
@@ -365,7 +366,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
         return false;
 
     if (!desc.value().isString()) {
-        EnterAndThrow(cx, wrapper, "property must be a string");
+        EnterAndThrowASCII(cx, wrapper, "property must be a string");
         return false;
     }
 
@@ -380,7 +381,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
         switch (ch) {
         case 'r':
             if (access & READ) {
-                EnterAndThrow(cx, wrapper, "duplicate 'readable' property flag");
+                EnterAndThrowASCII(cx, wrapper, "duplicate 'readable' property flag");
                 return false;
             }
             access = Access(access | READ);
@@ -388,20 +389,20 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
 
         case 'w':
             if (access & WRITE) {
-                EnterAndThrow(cx, wrapper, "duplicate 'writable' property flag");
+                EnterAndThrowASCII(cx, wrapper, "duplicate 'writable' property flag");
                 return false;
             }
             access = Access(access | WRITE);
             break;
 
         default:
-            EnterAndThrow(cx, wrapper, "properties can only be readable or read and writable");
+            EnterAndThrowASCII(cx, wrapper, "properties can only be readable or read and writable");
             return false;
         }
     }
 
     if (access == NO_ACCESS) {
-        EnterAndThrow(cx, wrapper, "specified properties must have a permission bit set");
+        EnterAndThrowASCII(cx, wrapper, "specified properties must have a permission bit set");
         return false;
     }
 
@@ -416,7 +417,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
 
     // Reject accessor properties.
     if (desc.hasGetterOrSetter()) {
-        EnterAndThrow(cx, wrapper, "Exposing privileged accessor properties is prohibited");
+        EnterAndThrowASCII(cx, wrapper, "Exposing privileged accessor properties is prohibited");
         return false;
     }
 
@@ -424,7 +425,7 @@ ExposedPropertiesOnly::check(JSContext* cx, HandleObject wrapper, HandleId id, W
     if (desc.value().isObject()) {
         RootedObject maybeCallable(cx, js::UncheckedUnwrap(&desc.value().toObject()));
         if (JS::IsCallable(maybeCallable) && !AccessCheck::subsumes(wrapper, maybeCallable)) {
-            EnterAndThrow(cx, wrapper, "Exposing privileged or cross-origin callable is prohibited");
+            EnterAndThrowASCII(cx, wrapper, "Exposing privileged or cross-origin callable is prohibited");
             return false;
         }
     }

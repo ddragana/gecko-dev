@@ -18,16 +18,12 @@
 #include "TestHarness.h"
 #endif
 
-#if (defined(_WIN32) || defined(__WIN32__))
-#define __func__ __FUNCTION__
-#endif
-
 #define ARRAY_LENGTH(_x) (sizeof(_x) / sizeof(_x[0]))
 #define BEGIN_TEST fprintf(stderr, "START %s\n", __func__)
 #define END_TEST fprintf(stderr, "END %s\n", __func__)
 
-#define STREAM_LATENCY 100
 #define STREAM_RATE 44100
+#define STREAM_LATENCY 100 * STREAM_RATE / 1000
 #define STREAM_CHANNELS 1
 #if (defined(_WIN32) || defined(__WIN32__))
 #define STREAM_FORMAT CUBEB_SAMPLE_FLOAT32LE
@@ -40,7 +36,7 @@ static uint64_t total_frames_written;
 static int delay_callback;
 
 static long
-test_data_callback(cubeb_stream * stm, void * user_ptr, const void * inputbuffer, void * outputbuffer, long nframes)
+test_data_callback(cubeb_stream * stm, void * user_ptr, const void * /*inputbuffer*/, void * outputbuffer, long nframes)
 {
   assert(stm && user_ptr == &dummy && outputbuffer && nframes > 0);
 #if (defined(_WIN32) || defined(__WIN32__))
@@ -57,7 +53,7 @@ test_data_callback(cubeb_stream * stm, void * user_ptr, const void * inputbuffer
 }
 
 void
-test_state_callback(cubeb_stream * stm, void * user_ptr, cubeb_state state)
+test_state_callback(cubeb_stream * /*stm*/, void * /*user_ptr*/, cubeb_state /*state*/)
 {
 }
 
@@ -498,7 +494,7 @@ static int do_drain;
 static int got_drain;
 
 static long
-test_drain_data_callback(cubeb_stream * stm, void * user_ptr, const void * inputbuffer, void * outputbuffer, long nframes)
+test_drain_data_callback(cubeb_stream * stm, void * user_ptr, const void * /*inputbuffer*/, void * outputbuffer, long nframes)
 {
   assert(stm && user_ptr == &dummy && outputbuffer && nframes > 0);
   if (do_drain == 1) {
@@ -517,7 +513,7 @@ test_drain_data_callback(cubeb_stream * stm, void * user_ptr, const void * input
 }
 
 void
-test_drain_state_callback(cubeb_stream * stm, void * user_ptr, cubeb_state state)
+test_drain_state_callback(cubeb_stream * /*stm*/, void * /*user_ptr*/, cubeb_state state)
 {
   if (state == CUBEB_STATE_DRAINED) {
     assert(!got_drain);
@@ -612,7 +608,7 @@ int is_windows_7()
 }
 
 int
-main(int argc, char * argv[])
+main(int /*argc*/, char * /*argv*/[])
 {
 #ifdef CUBEB_GECKO_BUILD
   ScopedXPCOM xpcom("test_sanity");

@@ -21,11 +21,12 @@
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsContentUtils.h"
 #include "nsIReflowCallback.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
+using namespace mozilla::image;
 
 class nsSVGImageFrame;
 
@@ -65,9 +66,9 @@ public:
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsISVGChildFrame interface:
-  virtual nsresult PaintSVG(gfxContext& aContext,
-                            const gfxMatrix& aTransform,
-                            const nsIntRect* aDirtyRect = nullptr) override;
+  virtual DrawResult PaintSVG(gfxContext& aContext,
+                              const gfxMatrix& aTransform,
+                              const nsIntRect* aDirtyRect = nullptr) override;
   virtual nsIFrame* GetFrameForPoint(const gfxPoint& aPoint) override;
   virtual void ReflowSVG() override;
 
@@ -79,8 +80,7 @@ public:
                                      nsIAtom*        aAttribute,
                                      int32_t         aModType) override;
 
-  void OnVisibilityChange(Visibility aOldVisibility,
-                          Visibility aNewVisibility,
+  void OnVisibilityChange(Visibility aNewVisibility,
                           Maybe<OnNonvisible> aNonvisibleAction = Nothing()) override;
 
   virtual void Init(nsIContent*       aContent,
@@ -159,7 +159,7 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
   if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
     // Non-display frames are likely to be patterns, masks or the like.
     // Treat them as always visible.
-    IncVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
+    IncApproximateVisibleCount();
   }
 
   mListener = new nsSVGImageListener(this);
@@ -179,7 +179,7 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
 nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
-    DecVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
+    DecApproximateVisibleCount();
   }
 
   if (mReflowCallbackPosted) {
@@ -225,11 +225,15 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
       return NS_OK;
     }
   }
-  if (aNameSpaceID == kNameSpaceID_XLink &&
+  if ((aNameSpaceID == kNameSpaceID_XLink ||
+       aNameSpaceID == kNameSpaceID_None) &&
       aAttribute == nsGkAtoms::href) {
     SVGImageElement *element = static_cast<SVGImageElement*>(mContent);
 
-    if (element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet()) {
+    bool hrefIsSet =
+      element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet() ||
+      element->mStringAttributes[SVGImageElement::XLINK_HREF].IsExplicitlySet();
+    if (hrefIsSet) {
       element->LoadSVGImage(true, true);
     } else {
       element->CancelImageRequests(true);
@@ -241,22 +245,18 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
 }
 
 void
-nsSVGImageFrame::OnVisibilityChange(Visibility aOldVisibility,
-                                    Visibility aNewVisibility,
+nsSVGImageFrame::OnVisibilityChange(Visibility aNewVisibility,
                                     Maybe<OnNonvisible> aNonvisibleAction)
 {
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
   if (!imageLoader) {
-    nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                               aNonvisibleAction);
+    nsSVGPathGeometryFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
     return;
   }
 
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
+  imageLoader->OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 
-  nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                             aNonvisibleAction);
+  nsSVGPathGeometryFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 }
 
 gfx::Matrix
@@ -324,15 +324,13 @@ nsSVGImageFrame::TransformContextForPainting(gfxContext* aGfxContext,
 
 //----------------------------------------------------------------------
 // nsISVGChildFrame methods:
-nsresult
+DrawResult
 nsSVGImageFrame::PaintSVG(gfxContext& aContext,
                           const gfxMatrix& aTransform,
                           const nsIntRect *aDirtyRect)
 {
-  nsresult rv = NS_OK;
-
   if (!StyleVisibility()->IsVisible())
-    return NS_OK;
+    return DrawResult::SUCCESS;
 
   float x, y, width, height;
   SVGImageElement *imgElem = static_cast<SVGImageElement*>(mContent);
@@ -351,6 +349,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       currentRequest->GetImage(getter_AddRefs(mImageContainer));
   }
 
+  DrawResult result = DrawResult::SUCCESS;
   if (mImageContainer) {
     gfxContextAutoSaveRestore autoRestorer(&aContext);
 
@@ -361,7 +360,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
     }
 
     if (!TransformContextForPainting(&aContext, aTransform)) {
-      return NS_ERROR_FAILURE;
+      return DrawResult::SUCCESS;
     }
 
     // fill-opacity doesn't affect <image>, so if we're allowed to
@@ -403,7 +402,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       // come from width/height *attributes* in SVG). They influence the region
       // of the SVG image's internal document that is visible, in combination
       // with preserveAspectRatio and viewBox.
-      SVGImageContext context(CSSIntSize(width, height),
+      SVGImageContext context(CSSIntSize::Truncate(width, height),
                               Some(imgElem->mPreserveAspectRatio.GetAnimValue()),
                               1.0, true);
 
@@ -417,8 +416,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
       // Note: Can't use DrawSingleUnscaledImage for the TYPE_VECTOR case.
       // That method needs our image to have a fixed native width & height,
       // and that's not always true for TYPE_VECTOR images.
-      // FIXME We should use the return value, see bug 1258510.
-      Unused << nsLayoutUtils::DrawSingleImage(
+      result = nsLayoutUtils::DrawSingleImage(
         aContext,
         PresContext(),
         mImageContainer,
@@ -428,8 +426,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
         &context,
         drawFlags);
     } else { // mImageContainer->GetType() == TYPE_RASTER
-      // FIXME We should use the return value, see bug 1258510.
-      Unused << nsLayoutUtils::DrawSingleUnscaledImage(
+      result = nsLayoutUtils::DrawSingleUnscaledImage(
         aContext,
         PresContext(),
         mImageContainer,
@@ -445,7 +442,7 @@ nsSVGImageFrame::PaintSVG(gfxContext& aContext,
     // gfxContextAutoSaveRestore goes out of scope & cleans up our gfxContext
   }
 
-  return rv;
+  return result;
 }
 
 nsIFrame*

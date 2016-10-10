@@ -15,6 +15,8 @@
 #include "mozilla/net/WebSocketChannelParent.h"
 #include "mozilla/net/WebSocketEventListenerParent.h"
 #include "mozilla/net/DataChannelParent.h"
+#include "mozilla/net/AltDataOutputStreamParent.h"
+#include "mozilla/Unused.h"
 #ifdef NECKO_PROTOCOL_rtsp
 #include "mozilla/net/RtspControllerParent.h"
 #include "mozilla/net/RtspChannelParent.h"
@@ -63,8 +65,6 @@ using IPC::SerializedLoadContext;
 namespace mozilla {
 namespace net {
 
-PNeckoParent *gNeckoParent = nullptr;
-
 // C++ file contents
 NeckoParent::NeckoParent()
 {
@@ -75,12 +75,19 @@ NeckoParent::NeckoParent()
     do_GetService("@mozilla.org/network/protocol;1?name=http");
 
   mObserver = new OfflineObserver(this);
-  gNeckoParent = this;
+
+  // only register once--we will have multiple NeckoParents if there are
+  // multiple child processes.
+  static bool registeredBool = false;
+  if (!registeredBool) {
+    Preferences::AddBoolVarCache(&NeckoCommonInternal::gSecurityDisabled,
+                                 "network.disable.ipc.security");
+    registeredBool = true;
+  }
 }
 
 NeckoParent::~NeckoParent()
 {
-  gNeckoParent = nullptr;
   if (mObserver) {
     mObserver->RemoveObserver();
   }
@@ -90,11 +97,23 @@ static PBOverrideStatus
 PBOverrideStatusFromLoadContext(const SerializedLoadContext& aSerialized)
 {
   if (!aSerialized.IsNotNull() && aSerialized.IsPrivateBitValid()) {
-    return aSerialized.mUsePrivateBrowsing ?
+    return (aSerialized.mOriginAttributes.mPrivateBrowsingId > 0) ?
       kPBOverride_Private :
       kPBOverride_NotPrivate;
   }
   return kPBOverride_Unset;
+}
+
+// Bug 1289001 - If GetValidatedAppInfo returns an error string, that usually
+// leads to a content crash with very little info about the cause.
+// We prefer to crash on the parent, so we get the reason in the crash report.
+static MOZ_NORETURN MOZ_COLD
+void CrashWithReason(const char * reason)
+{
+#ifndef RELEASE_OR_BETA
+  MOZ_CRASH_ANNOTATE(reason);
+  MOZ_REALLY_CRASH();
+#endif
 }
 
 const char*
@@ -104,10 +123,12 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
 {
   if (UsingNeckoIPCSecurity()) {
     if (!aSerialized.IsNotNull()) {
+      CrashWithReason("GetValidatedAppInfo | SerializedLoadContext from child is null");
       return "SerializedLoadContext from child is null";
     }
   }
 
+  nsAutoCString debugString;
   nsTArray<TabContext> contextArray =
     static_cast<ContentParent*>(aContent)->GetManagedTabContext();
   for (uint32_t i = 0; i < contextArray.Length(); i++) {
@@ -118,19 +139,27 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
                               tabContext.IsIsolatedMozBrowserElement();
 
     if (appId == NECKO_UNKNOWN_APP_ID) {
+      debugString.Append("u,");
       continue;
     }
     // We may get appID=NO_APP if child frame is neither a browser nor an app
     if (appId == NECKO_NO_APP_ID && tabContext.HasOwnApp()) {
       // NECKO_NO_APP_ID but also is an app?  Weird, skip.
+      debugString.Append("h,");
       continue;
     }
 
     if (!aSerialized.mOriginAttributes.mSignedPkg.IsEmpty() &&
         aSerialized.mOriginAttributes.mSignedPkg != tabContext.OriginAttributesRef().mSignedPkg) {
+      debugString.Append("s,");
       continue;
     }
     if (aSerialized.mOriginAttributes.mUserContextId != tabContext.OriginAttributesRef().mUserContextId) {
+      debugString.Append("(");
+      debugString.AppendInt(aSerialized.mOriginAttributes.mUserContextId);
+      debugString.Append(",");
+      debugString.AppendInt(tabContext.OriginAttributesRef().mUserContextId);
+      debugString.Append(")");
       continue;
     }
     aAttrs = DocShellOriginAttributes();
@@ -139,11 +168,21 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
     aAttrs.mSignedPkg = aSerialized.mOriginAttributes.mSignedPkg;
     aAttrs.mUserContextId = aSerialized.mOriginAttributes.mUserContextId;
     aAttrs.mPrivateBrowsingId = aSerialized.mOriginAttributes.mPrivateBrowsingId;
+    aAttrs.mFirstPartyDomain = aSerialized.mOriginAttributes.mFirstPartyDomain;
 
     return nullptr;
   }
 
   if (contextArray.Length() != 0) {
+    nsAutoCString errorString;
+    errorString.Append("GetValidatedAppInfo | App does not have permission -");
+    errorString.Append(debugString);
+
+    // Leak the buffer on the heap to make sure that it lives long enough, as
+    // MOZ_CRASH_ANNOTATE expects the pointer passed to it to live to the end of
+    // the program.
+    char * error = strdup(errorString.BeginReading());
+    CrashWithReason(error);
     return "App does not have permission";
   }
 
@@ -157,6 +196,7 @@ NeckoParent::GetValidatedAppInfo(const SerializedLoadContext& aSerialized,
     return nullptr;
   }
 
+  CrashWithReason("GetValidatedAppInfo | ContentParent does not have any PBrowsers");
   return "ContentParent does not have any PBrowsers";
 }
 
@@ -175,7 +215,7 @@ NeckoParent::CreateChannelLoadContext(const PBrowserOrId& aBrowser,
   // if !UsingNeckoIPCSecurity(), we may not have a LoadContext to set. This is
   // the common case for most xpcshell tests.
   if (aSerialized.IsNotNull()) {
-    attrs.SyncAttributesWithPrivateBrowsing(aSerialized.mUsePrivateBrowsing);
+    attrs.SyncAttributesWithPrivateBrowsing(aSerialized.mOriginAttributes.mPrivateBrowsingId > 0);
     switch (aBrowser.type()) {
       case PBrowserOrId::TPBrowserParent:
       {
@@ -204,7 +244,8 @@ NeckoParent::CreateChannelLoadContext(const PBrowserOrId& aBrowser,
 void
 NeckoParent::ActorDestroy(ActorDestroyReason aWhy)
 {
-  // Implement me! Bug 1005184
+  // Nothing needed here. Called right before destructor since this is a
+  // non-refcounted class.
 }
 
 PHttpChannelParent*
@@ -244,6 +285,30 @@ NeckoParent::RecvPHttpChannelConstructor(
 {
   HttpChannelParent* p = static_cast<HttpChannelParent*>(aActor);
   return p->Init(aOpenArgs);
+}
+
+PAltDataOutputStreamParent*
+NeckoParent::AllocPAltDataOutputStreamParent(
+        const nsCString& type,
+        PHttpChannelParent* channel)
+{
+  HttpChannelParent* chan = static_cast<HttpChannelParent*>(channel);
+  nsCOMPtr<nsIOutputStream> stream;
+  nsresult rv = chan->OpenAlternativeOutputStream(type, getter_AddRefs(stream));
+  AltDataOutputStreamParent* parent = new AltDataOutputStreamParent(stream);
+  parent->AddRef();
+  // If the return value was not NS_OK, the error code will be sent
+  // asynchronously to the child, after receiving the first message.
+  parent->SetError(rv);
+  return parent;
+}
+
+bool
+NeckoParent::DeallocPAltDataOutputStreamParent(PAltDataOutputStreamParent* aActor)
+{
+  AltDataOutputStreamParent* parent = static_cast<AltDataOutputStreamParent*>(aActor);
+  parent->Release();
+  return true;
 }
 
 PFTPChannelParent*
@@ -382,7 +447,7 @@ NeckoParent::RecvPDataChannelConstructor(PDataChannelParent* actor,
                                          const uint32_t& channelId)
 {
   DataChannelParent* p = static_cast<DataChannelParent*>(actor);
-  p->Init(channelId);
+  MOZ_DIAGNOSTIC_ASSERT(p->Init(channelId));
   return true;
 }
 
@@ -695,14 +760,6 @@ NeckoParent::DeallocPTransportProviderParent(PTransportProviderParent* aActor)
   return true;
 }
 
-void
-NeckoParent::CloneManagees(ProtocolBase* aSource,
-                         mozilla::ipc::ProtocolCloneContext* aCtx)
-{
-  aCtx->SetNeckoParent(this); // For cloning protocols managed by this.
-  PNeckoParent::CloneManagees(aSource, aCtx);
-}
-
 mozilla::ipc::IProtocol*
 NeckoParent::CloneProtocol(Channel* aChannel,
                            mozilla::ipc::ProtocolCloneContext* aCtx)
@@ -815,7 +872,7 @@ NeckoParent::RecvPredPredict(const ipc::OptionalURIParams& aTargetURI,
   DocShellOriginAttributes attrs(NECKO_UNKNOWN_APP_ID, false);
   nsCOMPtr<nsILoadContext> loadContext;
   if (aLoadContext.IsNotNull()) {
-    attrs.SyncAttributesWithPrivateBrowsing(aLoadContext.mUsePrivateBrowsing);
+    attrs.SyncAttributesWithPrivateBrowsing(aLoadContext.mOriginAttributes.mPrivateBrowsingId > 0);
     loadContext = new LoadContext(aLoadContext, nestedFrameId, attrs);
   }
 
@@ -848,7 +905,7 @@ NeckoParent::RecvPredLearn(const ipc::URIParams& aTargetURI,
   DocShellOriginAttributes attrs(NECKO_UNKNOWN_APP_ID, false);
   nsCOMPtr<nsILoadContext> loadContext;
   if (aLoadContext.IsNotNull()) {
-    attrs.SyncAttributesWithPrivateBrowsing(aLoadContext.mUsePrivateBrowsing);
+    attrs.SyncAttributesWithPrivateBrowsing(aLoadContext.mOriginAttributes.mPrivateBrowsingId > 0);
     loadContext = new LoadContext(aLoadContext, nestedFrameId, attrs);
   }
 

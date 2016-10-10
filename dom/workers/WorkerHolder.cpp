@@ -16,17 +16,19 @@ WorkerHolder::WorkerHolder()
 
 WorkerHolder::~WorkerHolder()
 {
+  NS_ASSERT_OWNINGTHREAD(WorkerHolder);
   ReleaseWorkerInternal();
   MOZ_ASSERT(mWorkerPrivate == nullptr);
 }
 
 bool
-WorkerHolder::HoldWorker(WorkerPrivate* aWorkerPrivate)
+WorkerHolder::HoldWorker(WorkerPrivate* aWorkerPrivate, Status aFailStatus)
 {
+  NS_ASSERT_OWNINGTHREAD(WorkerHolder);
   MOZ_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
 
-  if (!aWorkerPrivate->AddHolder(this)) {
+  if (!aWorkerPrivate->AddHolder(this, aFailStatus)) {
     return false;
   }
 
@@ -37,13 +39,17 @@ WorkerHolder::HoldWorker(WorkerPrivate* aWorkerPrivate)
 void
 WorkerHolder::ReleaseWorker()
 {
+  NS_ASSERT_OWNINGTHREAD(WorkerHolder);
   MOZ_ASSERT(mWorkerPrivate);
+
   ReleaseWorkerInternal();
 }
 
 void
 WorkerHolder::ReleaseWorkerInternal()
 {
+  NS_ASSERT_OWNINGTHREAD(WorkerHolder);
+
   if (mWorkerPrivate) {
     mWorkerPrivate->AssertIsOnWorkerThread();
     mWorkerPrivate->RemoveHolder(this);

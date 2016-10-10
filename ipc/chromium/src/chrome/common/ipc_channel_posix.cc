@@ -216,11 +216,13 @@ bool Channel::ChannelImpl::CreatePipe(const std::wstring& channel_id,
   if (mode == MODE_SERVER) {
     int pipe_fds[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, pipe_fds) != 0) {
+      mozilla::ipc::AnnotateCrashReportWithErrno("IpcCreatePipeSocketPairErrno", errno);
       return false;
     }
     // Set both ends to be non-blocking.
     if (fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK) == -1 ||
         fcntl(pipe_fds[1], F_SETFL, O_NONBLOCK) == -1) {
+      mozilla::ipc::AnnotateCrashReportWithErrno("IpcCreatePipeFcntlErrno", errno);
       HANDLE_EINTR(close(pipe_fds[0]));
       HANDLE_EINTR(close(pipe_fds[1]));
       return false;
@@ -228,6 +230,7 @@ bool Channel::ChannelImpl::CreatePipe(const std::wstring& channel_id,
 
     if (!SetCloseOnExec(pipe_fds[0]) ||
         !SetCloseOnExec(pipe_fds[1])) {
+      mozilla::ipc::AnnotateCrashReportWithErrno("IpcCreatePipeCloExecErrno", errno);
       HANDLE_EINTR(close(pipe_fds[0]));
       HANDLE_EINTR(close(pipe_fds[1]));
       return false;
@@ -260,8 +263,7 @@ void Channel::ChannelImpl::ResetFileDescriptor(int fd) {
 
 bool Channel::ChannelImpl::EnqueueHelloMessage() {
   mozilla::UniquePtr<Message> msg(new Message(MSG_ROUTING_NONE,
-                                              HELLO_MESSAGE_TYPE,
-                                              IPC::Message::PRIORITY_NORMAL));
+                                              HELLO_MESSAGE_TYPE));
   if (!msg->WriteInt(base::GetCurrentProcId())) {
     Close();
     return false;
@@ -497,8 +499,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages() {
         // Send a message to the other side, indicating that we are now
         // responsible for closing the descriptor.
         Message *fdAck = new Message(MSG_ROUTING_NONE,
-                                     RECEIVED_FDS_MESSAGE_TYPE,
-                                     IPC::Message::PRIORITY_NORMAL);
+                                     RECEIVED_FDS_MESSAGE_TYPE);
         DCHECK(m.fd_cookie() != 0);
         fdAck->set_fd_cookie(m.fd_cookie());
         OutputQueuePush(fdAck);
@@ -576,7 +577,12 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
         int[FileDescriptorSet::MAX_DESCRIPTORS_PER_MESSAGE]));
     char buf[tmp];
 
-    if (partial_write_iter_.isNothing() &&
+    if (partial_write_iter_.isNothing()) {
+      Pickle::BufferList::IterImpl iter(msg->Buffers());
+      partial_write_iter_.emplace(iter);
+    }
+
+    if (partial_write_iter_.value().Data() == msg->Buffers().Start() &&
         !msg->file_descriptor_set()->empty()) {
       // This is the first chunk of a message which has descriptors to send
       struct cmsghdr *cmsg;
@@ -607,11 +613,6 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
     struct iovec iov[kMaxIOVecSize];
     size_t iov_count = 0;
     size_t amt_to_write = 0;
-
-    if (partial_write_iter_.isNothing()) {
-      Pickle::BufferList::IterImpl iter(msg->Buffers());
-      partial_write_iter_.emplace(iter);
-    }
 
     // How much of this message have we written so far?
     Pickle::BufferList::IterImpl iter = partial_write_iter_.value();

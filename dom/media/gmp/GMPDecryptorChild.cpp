@@ -8,7 +8,7 @@
 #include "GMPChild.h"
 #include "base/task.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "runnable_utils.h"
 #include <ctime>
 
@@ -161,9 +161,29 @@ GMPDecryptorChild::KeyStatusChanged(const char* aSessionId,
 {
   AutoTArray<uint8_t, 16> kid;
   kid.AppendElements(aKeyId, aKeyIdLength);
-  CALL_ON_GMP_THREAD(SendKeyStatusChanged,
-                     nsCString(aSessionId, aSessionIdLength), kid,
-                     aStatus);
+
+  nsTArray<GMPKeyInformation> keyInfos;
+  keyInfos.AppendElement(GMPKeyInformation(kid, aStatus));
+  CALL_ON_GMP_THREAD(SendBatchedKeyStatusChanged,
+                     nsCString(aSessionId, aSessionIdLength),
+                     keyInfos);
+}
+
+void
+GMPDecryptorChild::BatchedKeyStatusChanged(const char* aSessionId,
+                                           uint32_t aSessionIdLength,
+                                           const GMPMediaKeyInfo* aKeyInfos,
+                                           uint32_t aKeyInfosLength)
+{
+  nsTArray<GMPKeyInformation> keyInfos;
+  for (uint32_t i = 0; i < aKeyInfosLength; i++) {
+    nsTArray<uint8_t> keyId;
+    keyId.AppendElements(aKeyInfos[i].keyid, aKeyInfos[i].keyid_size);
+    keyInfos.AppendElement(GMPKeyInformation(keyId, aKeyInfos[i].status));
+  }
+  CALL_ON_GMP_THREAD(SendBatchedKeyStatusChanged,
+                     nsCString(aSessionId, aSessionIdLength),
+                     keyInfos);
 }
 
 void
@@ -220,12 +240,13 @@ GMPDecryptorChild::GetPluginVoucher(const uint8_t** aVoucher,
 }
 
 bool
-GMPDecryptorChild::RecvInit()
+GMPDecryptorChild::RecvInit(const bool& aDistinctiveIdentifierRequired,
+                            const bool& aPersistentStateRequired)
 {
   if (!mSession) {
     return false;
   }
-  mSession->Init(this);
+  mSession->Init(this, aDistinctiveIdentifierRequired, aPersistentStateRequired);
   return true;
 }
 

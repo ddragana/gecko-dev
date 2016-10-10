@@ -614,7 +614,6 @@ HTMLSelectElement::Add(nsIDOMHTMLElement* aElement,
   }
 
   nsCOMPtr<nsISupports> supports;
-  nsCOMPtr<nsIDOMHTMLElement> beforeElement;
 
   // whether aBefore is nsIDOMHTMLElement...
   if (NS_SUCCEEDED(aBefore->GetAsISupports(getter_AddRefs(supports)))) {
@@ -1882,6 +1881,28 @@ HTMLSelectElement::UpdateSelectedOptions()
 {
   if (mSelectedOptions) {
     mSelectedOptions->SetDirty();
+  }
+}
+
+bool
+HTMLSelectElement::OpenInParentProcess()
+{
+  nsIFormControlFrame* formControlFrame = GetFormControlFrame(false);
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(formControlFrame);
+  if (comboFrame) {
+    return comboFrame->IsOpenInParentProcess();
+  }
+
+  return false;
+}
+
+void
+HTMLSelectElement::SetOpenInParentProcess(bool aVal)
+{
+  nsIFormControlFrame* formControlFrame = GetFormControlFrame(false);
+  nsIComboboxControlFrame* comboFrame = do_QueryFrame(formControlFrame);
+  if (comboFrame) {
+    comboFrame->SetOpenInParentProcess(aVal);
   }
 }
 

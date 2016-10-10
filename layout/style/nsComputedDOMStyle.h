@@ -11,6 +11,7 @@
 #include "mozilla/ArenaRefPtr.h"
 #include "mozilla/ArenaRefPtrInlines.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/StyleComplexColor.h"
 #include "nsCOMPtr.h"
 #include "nscore.h"
 #include "nsCSSProps.h"
@@ -149,8 +150,7 @@ private:
 #undef STYLE_STRUCT
 
   already_AddRefed<CSSValue> GetEllipseRadii(const nsStyleCorners& aRadius,
-                                             uint8_t aFullCorner,
-                                             bool aIsBorder); // else outline
+                                             uint8_t aFullCorner);
 
   already_AddRefed<CSSValue> GetOffsetWidthFor(mozilla::css::Side aSide);
 
@@ -404,6 +404,7 @@ private:
   already_AddRefed<CSSValue> DoGetImageRegion();
 
   /* Text Properties */
+  already_AddRefed<CSSValue> DoGetInitialLetter();
   already_AddRefed<CSSValue> DoGetLineHeight();
   already_AddRefed<CSSValue> DoGetRubyAlign();
   already_AddRefed<CSSValue> DoGetRubyPosition();
@@ -480,6 +481,7 @@ private:
   already_AddRefed<CSSValue> DoGetScrollSnapPointsY();
   already_AddRefed<CSSValue> DoGetScrollSnapDestination();
   already_AddRefed<CSSValue> DoGetScrollSnapCoordinate();
+  already_AddRefed<CSSValue> DoGetShapeOutside();
 
   /* User interface properties */
   already_AddRefed<CSSValue> DoGetCursor();
@@ -581,13 +583,16 @@ private:
 
   /* Helper functions */
   void SetToRGBAColor(nsROCSSPrimitiveValue* aValue, nscolor aColor);
+  void SetValueFromComplexColor(nsROCSSPrimitiveValue* aValue,
+                                const mozilla::StyleComplexColor& aColor);
   void SetValueToStyleImage(const nsStyleImage& aStyleImage,
                             nsROCSSPrimitiveValue* aValue);
-  void SetValueToPositionCoord(
-    const nsStyleImageLayers::Position::PositionCoord& aCoord,
-    nsROCSSPrimitiveValue* aValue);
-  void SetValueToPosition(const nsStyleImageLayers::Position& aPosition,
+  void SetValueToPositionCoord(const mozilla::Position::Coord& aCoord,
+                               nsROCSSPrimitiveValue* aValue);
+  void SetValueToPosition(const mozilla::Position& aPosition,
                           nsDOMCSSValueList* aValueList);
+  void SetValueToFragmentOrURL(const mozilla::FragmentOrURL* aFragmentOrURL,
+                               nsROCSSPrimitiveValue* aValue);
 
   /**
    * A method to get a percentage base for a percentage value.  Returns true
@@ -642,12 +647,21 @@ private:
   already_AddRefed<CSSValue> CreatePrimitiveValueForStyleFilter(
     const nsStyleFilter& aStyleFilter);
 
-  already_AddRefed<CSSValue> CreatePrimitiveValueForClipPath(
-    const nsStyleBasicShape* aStyleBasicShape, uint8_t aSizingBox);
+  template<typename ReferenceBox>
+  already_AddRefed<CSSValue>
+  GetShapeSource(const mozilla::StyleShapeSource<ReferenceBox>& aShapeSource,
+                 const KTableEntry aBoxKeywordTable[]);
+
+  template<typename ReferenceBox>
+  already_AddRefed<CSSValue>
+  CreatePrimitiveValueForShapeSource(
+    const mozilla::StyleBasicShape* aStyleBasicShape,
+    ReferenceBox aReferenceBox,
+    const KTableEntry aBoxKeywordTable[]);
 
   // Helper function for computing basic shape styles.
   already_AddRefed<CSSValue> CreatePrimitiveValueForBasicShape(
-    const nsStyleBasicShape* aStyleBasicShape);
+    const mozilla::StyleBasicShape* aStyleBasicShape);
   void BoxValuesToString(nsAString& aString,
                          const nsTArray<nsStyleCoord>& aBoxValues);
   void BasicShapeRadiiToString(nsAString& aCssText,

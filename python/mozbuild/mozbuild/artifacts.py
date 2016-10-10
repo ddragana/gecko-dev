@@ -68,11 +68,15 @@ from mozbuild.util import (
     FileAvoidWrite,
 )
 import mozinstall
-from mozpack.files import FileFinder
+from mozpack.files import (
+    JarFinder,
+    TarFinder,
+)
 from mozpack.mozjar import (
     JarReader,
     JarWriter,
 )
+from mozpack.packager.unpack import UnpackFinder
 import mozpack.path as mozpath
 from mozregression.download_manager import (
     DownloadManager,
@@ -124,12 +128,15 @@ class ArtifactJob(object):
     # be the same across platforms.
     _test_archive_suffix = '.common.tests.zip'
 
-    def __init__(self, package_re, tests_re, log=None):
+    def __init__(self, package_re, tests_re, log=None, download_symbols=False):
         self._package_re = re.compile(package_re)
         self._tests_re = None
         if tests_re:
             self._tests_re = re.compile(tests_re)
         self._log = log
+        self._symbols_archive_suffix = None
+        if download_symbols:
+            self._symbols_archive_suffix = 'crashreporter-symbols.zip'
 
     def log(self, *args, **kwargs):
         if self._log:
@@ -145,6 +152,8 @@ class ArtifactJob(object):
             elif self._tests_re and self._tests_re.match(name):
                 tests_artifact = name
                 yield name
+            elif self._symbols_archive_suffix and name.endswith(self._symbols_archive_suffix):
+                yield name
             else:
                 self.log(logging.DEBUG, 'artifact',
                          {'name': name},
@@ -156,6 +165,8 @@ class ArtifactJob(object):
     def process_artifact(self, filename, processed_filename):
         if filename.endswith(ArtifactJob._test_archive_suffix) and self._tests_re:
             return self.process_tests_artifact(filename, processed_filename)
+        if self._symbols_archive_suffix and filename.endswith(self._symbols_archive_suffix):
+            return self.process_symbols_archive(filename, processed_filename)
         return self.process_package_artifact(filename, processed_filename)
 
     def process_package_artifact(self, filename, processed_filename):
@@ -184,22 +195,42 @@ class ArtifactJob(object):
                              'matched an archive path.'.format(
                                  patterns=LinuxArtifactJob.test_artifact_patterns))
 
+    def process_symbols_archive(self, filename, processed_filename):
+        with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
+            reader = JarReader(filename)
+            for filename in reader.entries:
+                destpath = mozpath.join('crashreporter-symbols', filename)
+                self.log(logging.INFO, 'artifact',
+                         {'destpath': destpath},
+                         'Adding {destpath} to processed archive')
+                writer.add(destpath.encode('utf-8'), reader[filename])
+
 class AndroidArtifactJob(ArtifactJob):
+
+    package_artifact_patterns = {
+        'application.ini',
+        'platform.ini',
+        '**/*.so',
+        '**/interfaces.xpt',
+    }
+
     def process_artifact(self, filename, processed_filename):
         # Extract all .so files into the root, which will get copied into dist/bin.
         with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
-            for f in JarReader(filename):
-                if not f.filename.endswith('.so') and \
-                   not f.filename in ('platform.ini', 'application.ini'):
+            for p, f in UnpackFinder(JarFinder(filename, JarReader(filename))):
+                if not any(mozpath.match(p, pat) for pat in self.package_artifact_patterns):
                     continue
 
-                basename = os.path.basename(f.filename)
+                dirname, basename = os.path.split(p)
                 self.log(logging.INFO, 'artifact',
                     {'basename': basename},
                    'Adding {basename} to processed archive')
 
-                basename = mozpath.join('bin', basename)
-                writer.add(basename.encode('utf-8'), f)
+                basedir = 'bin'
+                if not basename.endswith('.so'):
+                    basedir = mozpath.join('bin', dirname.lstrip('assets/'))
+                basename = mozpath.join(basedir, basename)
+                writer.add(basename.encode('utf-8'), f.open())
 
 
 class LinuxArtifactJob(ArtifactJob):
@@ -214,6 +245,7 @@ class LinuxArtifactJob(ArtifactJob):
         'firefox/plugin-container',
         'firefox/updater',
         'firefox/**/*.so',
+        'firefox/**/interfaces.xpt',
     }
 
     def process_package_artifact(self, filename, processed_filename):
@@ -221,21 +253,18 @@ class LinuxArtifactJob(ArtifactJob):
 
         with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
             with tarfile.open(filename) as reader:
-                for f in reader:
-                    if not f.isfile():
-                        continue
-
-                    if not any(mozpath.match(f.name, p) for p in self.package_artifact_patterns):
+                for p, f in UnpackFinder(TarFinder(filename, reader)):
+                    if not any(mozpath.match(p, pat) for pat in self.package_artifact_patterns):
                         continue
 
                     # We strip off the relative "firefox/" bit from the path,
                     # but otherwise preserve it.
                     destpath = mozpath.join('bin',
-                                            mozpath.relpath(f.name, "firefox"))
+                                            mozpath.relpath(p, "firefox"))
                     self.log(logging.INFO, 'artifact',
                              {'destpath': destpath},
                              'Adding {destpath} to processed archive')
-                    writer.add(destpath.encode('utf-8'), reader.extractfile(f), mode=f.mode)
+                    writer.add(destpath.encode('utf-8'), f.open(), mode=f.mode)
                     added_entry = True
 
         if not added_entry:
@@ -307,28 +336,29 @@ class MacArtifactJob(ArtifactJob):
                 'gmp-clearkey/0.1/libclearkey.dylib',
                 # 'gmp-fake/1.0/libfake.dylib',
                 # 'gmp-fakeopenh264/1.0/libfakeopenh264.dylib',
+                '**/interfaces.xpt',
             ])
 
             with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
                 root, paths = paths_no_keep_path
-                finder = FileFinder(mozpath.join(source, root))
+                finder = UnpackFinder(mozpath.join(source, root))
                 for path in paths:
                     for p, f in finder.find(path):
                         self.log(logging.INFO, 'artifact',
-                            {'path': path},
+                            {'path': p},
                             'Adding {path} to processed archive')
                         destpath = mozpath.join('bin', os.path.basename(p))
-                        writer.add(destpath.encode('utf-8'), f, mode=os.stat(mozpath.join(finder.base, p)).st_mode)
+                        writer.add(destpath.encode('utf-8'), f, mode=f.mode)
 
                 root, paths = paths_keep_path
-                finder = FileFinder(mozpath.join(source, root))
+                finder = UnpackFinder(mozpath.join(source, root))
                 for path in paths:
                     for p, f in finder.find(path):
                         self.log(logging.INFO, 'artifact',
-                            {'path': path},
+                            {'path': p},
                             'Adding {path} to processed archive')
                         destpath = mozpath.join('bin', p)
-                        writer.add(destpath.encode('utf-8'), f, mode=os.stat(mozpath.join(finder.base, p)).st_mode)
+                        writer.add(destpath.encode('utf-8'), f.open(), mode=f.mode)
 
         finally:
             try:
@@ -347,6 +377,7 @@ class WinArtifactJob(ArtifactJob):
         'firefox/application.ini',
         'firefox/**/*.dll',
         'firefox/*.exe',
+        'firefox/**/interfaces.xpt',
     }
     # These are a subset of TEST_HARNESS_BINS in testing/mochitest/Makefile.in.
     test_artifact_patterns = {
@@ -364,17 +395,17 @@ class WinArtifactJob(ArtifactJob):
     def process_package_artifact(self, filename, processed_filename):
         added_entry = False
         with JarWriter(file=processed_filename, optimize=False, compress_level=5) as writer:
-            for f in JarReader(filename):
-                if not any(mozpath.match(f.filename, p) for p in self.package_artifact_patterns):
+            for p, f in UnpackFinder(JarFinder(filename, JarReader(filename))):
+                if not any(mozpath.match(p, pat) for pat in self.package_artifact_patterns):
                     continue
 
                 # strip off the relative "firefox/" bit from the path:
-                basename = mozpath.relpath(f.filename, "firefox")
+                basename = mozpath.relpath(p, "firefox")
                 basename = mozpath.join('bin', basename)
                 self.log(logging.INFO, 'artifact',
                     {'basename': basename},
                     'Adding {basename} to processed archive')
-                writer.add(basename.encode('utf-8'), f)
+                writer.add(basename.encode('utf-8'), f.open(), mode=f.mode)
                 added_entry = True
 
         if not added_entry:
@@ -415,9 +446,9 @@ JOB_DETAILS = {
 
 
 
-def get_job_details(job, log=None):
+def get_job_details(job, log=None, download_symbols=False):
     cls, (package_re, tests_re) = JOB_DETAILS[job]
-    return cls(package_re, tests_re, log=log)
+    return cls(package_re, tests_re, log=log, download_symbols=download_symbols)
 
 def cachedmethod(cachefunc):
     '''Decorator to wrap a class or instance method with a memoizing callable that
@@ -596,9 +627,9 @@ class TaskCache(CacheManager):
         self._queue = taskcluster.Queue()
 
     @cachedmethod(operator.attrgetter('_cache'))
-    def artifact_urls(self, tree, job, rev):
+    def artifact_urls(self, tree, job, rev, download_symbols):
         try:
-            artifact_job = get_job_details(job, log=self._log)
+            artifact_job = get_job_details(job, log=self._log, download_symbols=download_symbols)
         except KeyError:
             self.log(logging.INFO, 'artifact',
                 {'job': job},
@@ -733,6 +764,7 @@ class Artifacts(object):
             raise ValueError("Must provide path to exactly one of hg and git")
 
         self._substs = substs
+        self._download_symbols = self._substs.get('MOZ_ARTIFACT_BUILD_SYMBOLS', False)
         self._defines = defines
         self._tree = tree
         self._job = job or self._guess_artifact_job()
@@ -744,7 +776,7 @@ class Artifacts(object):
         self._topsrcdir = topsrcdir
 
         try:
-            self._artifact_job = get_job_details(self._job, log=self._log)
+            self._artifact_job = get_job_details(self._job, log=self._log, download_symbols=self._download_symbols)
         except KeyError:
             self.log(logging.INFO, 'artifact',
                 {'job': self._job},
@@ -834,11 +866,11 @@ class Artifacts(object):
             self._git, 'rev-list', '--topo-order',
             '--max-count={num}'.format(num=NUM_REVISIONS_TO_QUERY),
             'HEAD',
-        ])
+        ], cwd=self._topsrcdir)
 
         hg_hash_list = subprocess.check_output([
             self._git, 'cinnabar', 'git2hg'
-        ] + rev_list.splitlines())
+        ] + rev_list.splitlines(), cwd=self._topsrcdir)
 
         zeroes = "0" * 40
 
@@ -899,7 +931,7 @@ class Artifacts(object):
 
         for tree in trees:
             try:
-                urls = task_cache.artifact_urls(tree, job, pushhead)
+                urls = task_cache.artifact_urls(tree, job, pushhead, self._download_symbols)
             except ValueError:
                 continue
             if urls:
@@ -1002,12 +1034,12 @@ class Artifacts(object):
     def install_from_revset(self, revset, distdir):
         if self._hg:
             revision = subprocess.check_output([self._hg, 'log', '--template', '{node}\n',
-                                                '-r', revset]).strip()
+                                                '-r', revset], cwd=self._topsrcdir).strip()
             if len(revision.split('\n')) != 1:
                 raise ValueError('hg revision specification must resolve to exactly one commit')
         else:
-            revision = subprocess.check_output([self._git, 'rev-parse', revset]).strip()
-            revision = subprocess.check_output([self._git, 'cinnabar', 'git2hg', revision]).strip()
+            revision = subprocess.check_output([self._git, 'rev-parse', revset], cwd=self._topsrcdir).strip()
+            revision = subprocess.check_output([self._git, 'cinnabar', 'git2hg', revision], cwd=self._topsrcdir).strip()
             if len(revision.split('\n')) != 1:
                 raise ValueError('hg revision specification must resolve to exactly one commit')
             if revision == "0" * 40:

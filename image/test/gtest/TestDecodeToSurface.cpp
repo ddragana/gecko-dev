@@ -33,7 +33,7 @@ public:
     , mTestCase(aTestCase)
   { }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     Go();
     return NS_OK;
@@ -87,13 +87,8 @@ RunDecodeToSurface(const ImageTestCase& aTestCase)
 
 class ImageDecodeToSurface : public ::testing::Test
 {
-  protected:
-  static void SetUpTestCase()
-  {
-    // Ensure that ImageLib services are initialized.
-    nsCOMPtr<imgITools> imgTools = do_CreateInstance("@mozilla.org/image/tools;1");
-    EXPECT_TRUE(imgTools != nullptr);
-  }
+protected:
+  AutoInitializeImageLib mInit;
 };
 
 TEST_F(ImageDecodeToSurface, PNG) { RunDecodeToSurface(GreenPNGTestCase()); }

@@ -7,6 +7,7 @@
 #define mozilla_layers_APZCCallbackHelper_h
 
 #include "FrameMetrics.h"
+#include "InputData.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Function.h"
 #include "mozilla/layers/APZUtils.h"
@@ -66,6 +67,9 @@ public:
        given presShell. */
     static void InitializeRootDisplayport(nsIPresShell* aPresShell);
 
+    /* Get the pres context associated with the document enclosing |aContent|. */
+    static nsPresContext* GetPresContextForContent(nsIContent* aContent);
+
     /* Get the pres shell associated with the root content document enclosing |aContent|. */
     static nsIPresShell* GetRootContentDocumentPresShellForContent(nsIContent* aContent);
 
@@ -104,6 +108,7 @@ public:
                                                        uint64_t aTime,
                                                        const LayoutDevicePoint& aRefPoint,
                                                        Modifiers aModifiers,
+                                                       int32_t aClickCount,
                                                        nsIWidget* aWidget);
 
     /* Dispatch a mouse event with the given parameters.
@@ -121,6 +126,7 @@ public:
      * via the given widget. */
     static void FireSingleTapEvent(const LayoutDevicePoint& aPoint,
                                    Modifiers aModifiers,
+                                   int32_t aClickCount,
                                    nsIWidget* aWidget);
 
     /* Perform hit-testing on the touch points of |aEvent| to determine
@@ -141,6 +147,7 @@ public:
     /* Figure out the allowed touch behaviors of each touch point in |aEvent|
      * and send that information to the provided callback. */
     static void SendSetAllowedTouchBehaviorNotification(nsIWidget* aWidget,
+                                                        nsIDocument* aDocument,
                                                         const WidgetTouchEvent& aEvent,
                                                         uint64_t aInputBlockId,
                                                         const SetAllowedTouchBehaviorCallback& aCallback);
@@ -183,6 +190,15 @@ public:
      */
     static bool
     IsScrollInProgress(nsIScrollableFrame* aFrame);
+
+    /* Notify content of the progress of a pinch gesture that APZ won't do
+     * zooming for (because the apz.allow_zooming pref is false). This function
+     * will dispatch appropriate WidgetSimpleGestureEvent events to gecko.
+     */
+    static void NotifyPinchGesture(PinchGestureInput::PinchGestureType aType,
+                                   LayoutDeviceCoord aSpanChange,
+                                   Modifiers aModifiers,
+                                   nsIWidget* aWidget);
 private:
   static uint64_t sLastTargetAPZCNotificationInputBlock;
 };

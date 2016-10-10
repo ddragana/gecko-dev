@@ -103,15 +103,14 @@ namespace js {
 template <typename T>
 static T ConvertScalar(double d)
 {
-    if (TypeIsFloatingPoint<T>()) {
+    if (TypeIsFloatingPoint<T>())
         return T(d);
-    } else if (TypeIsUnsigned<T>()) {
+    if (TypeIsUnsigned<T>()) {
         uint32_t n = JS::ToUint32(d);
         return T(n);
-    } else {
-        int32_t n = JS::ToInt32(d);
-        return T(n);
     }
+    int32_t n = JS::ToInt32(d);
+    return T(n);
 }
 
 namespace type {
@@ -534,6 +533,10 @@ class TypedObject : public ShapedObject
     static MOZ_MUST_USE bool obj_enumerate(JSContext* cx, HandleObject obj,
                                            AutoIdVector& properties, bool enumerableOnly);
 
+
+    uint8_t* typedMem() const;
+    uint8_t* typedMemBase() const;
+
   public:
     TypedProto& typedProto() const {
         // Typed objects' prototypes can't be modified.
@@ -546,22 +549,21 @@ class TypedObject : public ShapedObject
 
     int32_t offset() const;
     int32_t length() const;
-    uint8_t* typedMem() const;
-    uint8_t* typedMemBase() const;
+    uint8_t* typedMem(const JS::AutoAssertOnGC&) const { return typedMem(); }
     bool isAttached() const;
 
     int32_t size() const {
         return typeDescr().size();
     }
 
-    uint8_t* typedMem(size_t offset) const {
+    uint8_t* typedMem(size_t offset, const JS::AutoAssertOnGC& nogc) const {
         // It seems a bit surprising that one might request an offset
         // == size(), but it can happen when taking the "address of" a
         // 0-sized value. (In other words, we maintain the invariant
         // that `offset + size <= size()` -- this is always checked in
         // the caller's side.)
         MOZ_ASSERT(offset <= (size_t) size());
-        return typedMem() + offset;
+        return typedMem(nogc) + offset;
     }
 
     inline MOZ_MUST_USE bool opaque() const;
@@ -617,6 +619,11 @@ class OutlineTypedObject : public TypedObject
 
     void setData(uint8_t* data) {
         data_ = data;
+    }
+
+    void resetOffset(size_t offset) {
+        MOZ_ASSERT(offset <= (size_t) size());
+        setData(typedMemBase() + offset);
     }
 
     // Helper for createUnattached()
@@ -677,8 +684,15 @@ class OutlineOpaqueTypedObject : public OutlineTypedObject
 // Class for a typed object whose data is allocated inline.
 class InlineTypedObject : public TypedObject
 {
+    friend class TypedObject;
+
     // Start of the inline data, which immediately follows the shape and type.
     uint8_t data_[1];
+
+  protected:
+    uint8_t* inlineTypedMem() const {
+        return (uint8_t*) &data_;
+    }
 
   public:
     static const size_t MaximumSize = JSObject::MAX_BYTE_SIZE - sizeof(TypedObject);
@@ -690,8 +704,12 @@ class InlineTypedObject : public TypedObject
         return gc::GetGCObjectKindForBytes(nbytes + sizeof(TypedObject));
     }
 
-    uint8_t* inlineTypedMem() const {
-        return (uint8_t*) &data_;
+    uint8_t* inlineTypedMem(const JS::AutoAssertOnGC&) const {
+        return inlineTypedMem();
+    }
+
+    uint8_t* inlineTypedMemForGC() const {
+        return inlineTypedMem();
     }
 
     static void obj_trace(JSTracer* trace, JSObject* object);
@@ -715,6 +733,10 @@ class InlineTransparentTypedObject : public InlineTypedObject
     static const Class class_;
 
     ArrayBufferObject* getOrCreateBuffer(JSContext* cx);
+
+    uint8_t* inlineTypedMem() const {
+        return InlineTypedObject::inlineTypedMem();
+    }
 };
 
 // Class for an opaque typed object with inline data and no array buffer.
@@ -722,6 +744,16 @@ class InlineOpaqueTypedObject : public InlineTypedObject
 {
   public:
     static const Class class_;
+};
+
+// Class for the global SIMD object.
+class SimdObject : public JSObject
+{
+  public:
+    static const Class class_;
+    static MOZ_MUST_USE bool toString(JSContext* cx, unsigned int argc, Value* vp);
+    static MOZ_MUST_USE bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId,
+                                     bool* resolved);
 };
 
 /*

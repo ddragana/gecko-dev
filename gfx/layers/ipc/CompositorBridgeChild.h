@@ -23,13 +23,19 @@
 namespace mozilla {
 
 namespace dom {
-  class TabChild;
+class TabChild;
 } // namespace dom
+
+namespace widget {
+class CompositorWidget;
+} // namespace widget
 
 namespace layers {
 
 using mozilla::dom::TabChild;
 
+class IAPZCTreeManager;
+class APZCTreeManagerChild;
 class ClientLayerManager;
 class CompositorBridgeParent;
 class TextureClient;
@@ -37,12 +43,13 @@ class TextureClientPool;
 struct FrameMetrics;
 
 class CompositorBridgeChild final : public PCompositorBridgeChild,
-                                    public TextureForwarder,
-                                    public ShmemAllocator
+                                    public TextureForwarder
 {
   typedef InfallibleTArray<AsyncParentMessageData> AsyncParentMessageArray;
 
 public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorBridgeChild, override);
+
   explicit CompositorBridgeChild(ClientLayerManager *aLayerManager);
 
   void Destroy();
@@ -55,18 +62,27 @@ public:
   bool LookupCompositorFrameMetrics(const FrameMetrics::ViewID aId, FrameMetrics&);
 
   /**
-   * We're asked to create a new Compositor in response to an Opens()
-   * or Bridge() request from our parent process.  The Transport is to
-   * the compositor's context.
+   * Initialize the singleton compositor bridge for a content process.
    */
-  static PCompositorBridgeChild*
-  Create(Transport* aTransport, ProcessId aOtherProcess);
+  static bool InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
+  static bool ReinitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoint);
+
+  static RefPtr<CompositorBridgeChild> CreateRemote(
+    const uint64_t& aProcessToken,
+    ClientLayerManager* aLayerManager,
+    Endpoint<PCompositorBridgeChild>&& aEndpoint);
 
   /**
-   * Initialize the CompositorBridgeChild and open the connection in the non-multi-process
-   * case.
+   * Initialize the CompositorBridgeChild, create CompositorBridgeParent, and
+   * open a same-process connection.
    */
-  bool OpenSameProcess(CompositorBridgeParent* aParent);
+  CompositorBridgeParent* InitSameProcess(
+    widget::CompositorWidget* aWidget,
+    const uint64_t& aLayerTreeId,
+    CSSToLayoutDeviceScale aScale,
+    bool aUseAPZ,
+    bool aUseExternalSurface,
+    const gfx::IntSize& aSurfaceSize);
 
   static CompositorBridgeChild* Get();
 
@@ -98,6 +114,9 @@ public:
                                  nsTArray<PluginWindowData>&& aPlugins) override;
 
   virtual bool
+  RecvCaptureAllPlugins(const uintptr_t& aParentWidget) override;
+
+  virtual bool
   RecvHideAllPlugins(const uintptr_t& aParentWidget) override;
 
   virtual PTextureChild* AllocPTextureChild(const SurfaceDescriptor& aSharedData,
@@ -114,6 +133,8 @@ public:
                                        LayersBackend aLayersBackend,
                                        TextureFlags aFlags,
                                        uint64_t aSerial) override;
+
+  virtual void FatalError(const char* const aName, const char* const aMsg) const override;
 
   /**
    * Request that the parent tell us when graphics are ready on GPU.
@@ -134,8 +155,6 @@ public:
   bool SendWillClose();
   bool SendPause();
   bool SendResume();
-  bool SendNotifyHidden(const uint64_t& id);
-  bool SendNotifyVisible(const uint64_t& id);
   bool SendNotifyChildCreated(const uint64_t& id);
   bool SendAdoptChild(const uint64_t& id);
   bool SendMakeSnapshot(const SurfaceDescriptor& inSnapshot, const gfx::IntRect& dirtyRect);
@@ -145,10 +164,10 @@ public:
   bool SendStopFrameTimeRecording(const uint32_t& startIndex, nsTArray<float>* intervals);
   bool SendNotifyRegionInvalidated(const nsIntRegion& region);
   bool SendRequestNotifyAfterRemotePaint();
-  bool SendClearVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
-  bool SendUpdateVisibleRegion(VisibilityCounter aCounter,
-                               const ScrollableLayerGuid& aGuid,
-                               const mozilla::CSSIntRegion& aRegion);
+  bool SendClearApproximatelyVisibleRegions(uint64_t aLayersId, uint32_t aPresShellId);
+  bool SendNotifyApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                            const mozilla::CSSIntRegion& aRegion);
+  bool SendAllPluginsCaptured();
   bool IsSameProcess() const override;
 
   virtual bool IPCOpen() const override { return mCanSend; }
@@ -174,10 +193,12 @@ public:
 
   virtual void CancelWaitForRecycle(uint64_t aTextureId) override;
 
-  TextureClientPool* GetTexturePool(LayersBackend aBackend,
+  TextureClientPool* GetTexturePool(KnowsCompositor* aAllocator,
                                     gfx::SurfaceFormat aFormat,
                                     TextureFlags aFlags);
   void ClearTexturePool();
+
+  virtual FixedSizeSmallShmemSectionAllocator* GetTileLockAllocator() override;
 
   void HandleMemoryPressure();
 
@@ -196,9 +217,17 @@ public:
   PCompositorWidgetChild* AllocPCompositorWidgetChild(const CompositorWidgetInitData& aInitData) override;
   bool DeallocPCompositorWidgetChild(PCompositorWidgetChild* aActor) override;
 
-  virtual ShmemAllocator* AsShmemAllocator() override { return this; }
+  RefPtr<IAPZCTreeManager> GetAPZCTreeManager(uint64_t aLayerTreeId);
+
+  PAPZCTreeManagerChild* AllocPAPZCTreeManagerChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActor) override;
+
+  PAPZChild* AllocPAPZChild(const uint64_t& aLayersId) override;
+  bool DeallocPAPZChild(PAPZChild* aActor) override;
 
   void ProcessingError(Result aCode, const char* aReason) override;
+
+  void WillEndTransaction();
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -224,6 +253,10 @@ private:
 
   virtual bool
   RecvRemotePaintIsReady() override;
+
+  bool RecvObserveLayerUpdate(const uint64_t& aLayersId,
+                              const uint64_t& aEpoch,
+                              const bool& aActive) override;
 
   // Class used to store the shared FrameMetrics, mutex, and APZCId  in a hash table
   class SharedFrameMetricsData {
@@ -287,6 +320,10 @@ private:
   MessageLoop* mMessageLoop;
 
   AutoTArray<RefPtr<TextureClientPool>,2> mTexturePools;
+
+  uint64_t mProcessToken;
+
+  FixedSizeSmallShmemSectionAllocator* mSectionAllocator;
 };
 
 } // namespace layers

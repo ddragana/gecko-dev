@@ -24,10 +24,6 @@
 #include "js/TypeDecls.h"
 
 namespace js {
-
-class ArrayBufferObjectMaybeShared;
-class WasmInstanceObject;
-
 namespace wasm {
 
 // LinkData contains all the metadata necessary to patch all the locations
@@ -43,7 +39,6 @@ struct LinkDataCacheablePod
     uint32_t interruptOffset;
     uint32_t outOfBoundsOffset;
     uint32_t unalignedAccessOffset;
-    uint32_t badIndirectCallOffset;
 
     LinkDataCacheablePod() { mozilla::PodZero(this); }
 };
@@ -103,73 +98,64 @@ struct Import
 
 typedef Vector<Import, 0, SystemAllocPolicy> ImportVector;
 
-// ExportMap describes all of a single module's exports. The ExportMap describes
-// how the Exports (stored in Metadata) are mapped to the fields of the export
-// object produced by instantiation. The 'fieldNames' vector provides the list
-// of names of the module's exports. For each field name, 'fieldsToExports'
-// provides either:
-//  - the sentinel value MemoryExport indicating an export of linear memory; or
-//  - the index of an export into the ExportVector in Metadata
+// Export describes the export of a definition in a Module to a field in the
+// export object. For functions, Export stores an index into the
+// FuncDefExportVector in Metadata. For memory and table exports, there is
+// at most one (default) memory/table so no index is needed. Note: a single
+// definition can be exported by multiple Exports in the ExportVector.
 //
-// ExportMap also contains the start function's export index, which maps to the
-// export that is called at each instantiation of a given module.
-//
-// ExportMap is built incrementally by ModuleGenerator and then stored immutably
-// by Module.
+// ExportVector is built incrementally by ModuleGenerator and then stored
+// immutably by Module.
 
-static const uint32_t MemoryExport = UINT32_MAX;
-
-static const uint32_t NO_START_FUNCTION = UINT32_MAX;
-
-class ExportMap
+class Export
 {
-    uint32_t startExportIndex;
+    CacheableChars fieldName_;
+    struct CacheablePod {
+        DefinitionKind kind_;
+        uint32_t index_;
+    } pod;
 
   public:
-    CacheableCharsVector fieldNames;
-    Uint32Vector fieldsToExports;
+    Export() = default;
+    explicit Export(UniqueChars fieldName, uint32_t index, DefinitionKind kind);
+    explicit Export(UniqueChars fieldName, DefinitionKind kind);
 
-    ExportMap() : startExportIndex(NO_START_FUNCTION) {}
+    const char* fieldName() const { return fieldName_.get(); }
 
-    bool hasStartFunction() const {
-        return startExportIndex != NO_START_FUNCTION;
-    }
-    void setStartFunction(uint32_t index) {
-        MOZ_ASSERT(!hasStartFunction());
-        startExportIndex = index;
-    }
-    uint32_t startFunctionExportIndex() const {
-        MOZ_ASSERT(hasStartFunction());
-        return startExportIndex;
-    }
+    DefinitionKind kind() const { return pod.kind_; }
+    uint32_t funcIndex() const;
+    uint32_t globalIndex() const;
 
-    WASM_DECLARE_SERIALIZABLE(ExportMap)
+    WASM_DECLARE_SERIALIZABLE(Export)
 };
+
+typedef Vector<Export, 0, SystemAllocPolicy> ExportVector;
 
 // DataSegment describes the offset of a data segment in the bytecode that is
 // to be copied at a given offset into linear memory upon instantiation.
 
 struct DataSegment
 {
-    uint32_t memoryOffset;
+    InitExpr offset;
     uint32_t bytecodeOffset;
     uint32_t length;
 };
 
 typedef Vector<DataSegment, 0, SystemAllocPolicy> DataSegmentVector;
 
-// ElemSegment represents an element segment in the module where each element's
-// function index has been translated to its offset in the code section.
+// ElemSegment represents an element segment in the module where each element
+// describes both its function index and its code range.
 
 struct ElemSegment
 {
     uint32_t tableIndex;
-    uint32_t offset;
-    Uint32Vector elems;
+    InitExpr offset;
+    Uint32Vector elemFuncIndices;
+    Uint32Vector elemCodeRangeIndices;
 
     ElemSegment() = default;
-    ElemSegment(uint32_t tableIndex, uint32_t offset, Uint32Vector&& elems)
-      : tableIndex(tableIndex), offset(offset), elems(Move(elems))
+    ElemSegment(uint32_t tableIndex, InitExpr offset, Uint32Vector&& elemFuncIndices)
+      : tableIndex(tableIndex), offset(offset), elemFuncIndices(Move(elemFuncIndices))
     {}
 
     WASM_DECLARE_SERIALIZABLE(ElemSegment)
@@ -189,25 +175,33 @@ typedef Vector<ElemSegment, 0, SystemAllocPolicy> ElemSegmentVector;
 // time it is instantiated. In the future, Module will store a shareable,
 // immutable CodeSegment that can be shared by all its instances.
 
-class Module
+class Module : public RefCounted<Module>
 {
     const Bytes             code_;
     const LinkData          linkData_;
     const ImportVector      imports_;
-    const ExportMap         exportMap_;
+    const ExportVector      exports_;
     const DataSegmentVector dataSegments_;
     const ElemSegmentVector elemSegments_;
     const SharedMetadata    metadata_;
     const SharedBytes       bytecode_;
 
+    bool instantiateFunctions(JSContext* cx, Handle<FunctionVector> funcImports) const;
     bool instantiateMemory(JSContext* cx, MutableHandleWasmMemoryObject memory) const;
-    bool instantiateTable(JSContext* cx, const CodeSegment& cs, SharedTableVector* tables) const;
+    bool instantiateTable(JSContext* cx,
+                          MutableHandleWasmTableObject table,
+                          SharedTableVector* tables) const;
+    bool initSegments(JSContext* cx,
+                      HandleWasmInstanceObject instance,
+                      Handle<FunctionVector> funcImports,
+                      HandleWasmMemoryObject memory,
+                      const ValVector& globalImports) const;
 
   public:
     Module(Bytes&& code,
            LinkData&& linkData,
            ImportVector&& imports,
-           ExportMap&& exportMap,
+           ExportVector&& exports,
            DataSegmentVector&& dataSegments,
            ElemSegmentVector&& elemSegments,
            const Metadata& metadata,
@@ -215,7 +209,7 @@ class Module
       : code_(Move(code)),
         linkData_(Move(linkData)),
         imports_(Move(imports)),
-        exportMap_(Move(exportMap)),
+        exports_(Move(exports)),
         dataSegments_(Move(dataSegments)),
         elemSegments_(Move(elemSegments)),
         metadata_(&metadata),
@@ -229,14 +223,17 @@ class Module
 
     bool instantiate(JSContext* cx,
                      Handle<FunctionVector> funcImports,
+                     HandleWasmTableObject tableImport,
                      HandleWasmMemoryObject memoryImport,
-                     HandleWasmInstanceObject instanceObj) const;
+                     const ValVector& globalImports,
+                     HandleObject instanceProto,
+                     MutableHandleWasmInstanceObject instanceObj) const;
 
     // Structured clone support:
 
     size_t serializedSize() const;
     uint8_t* serialize(uint8_t* cursor) const;
-    static const uint8_t* deserialize(const uint8_t* cursor, UniquePtr<Module>* module,
+    static const uint8_t* deserialize(const uint8_t* cursor, RefPtr<Module>* module,
                                       Metadata* maybeMetadata = nullptr);
 
     // about:memory reporting:
@@ -247,19 +244,7 @@ class Module
                        size_t* code, size_t* data) const;
 };
 
-typedef UniquePtr<Module> UniqueModule;
-
-// These accessors are used to implemented the special asm.js semantics of
-// exported wasm functions:
-
-extern bool
-IsExportedFunction(JSFunction* fun);
-
-extern Instance&
-ExportedFunctionToInstance(JSFunction* fun);
-
-extern uint32_t
-ExportedFunctionToExportIndex(JSFunction* fun);
+typedef RefPtr<Module> SharedModule;
 
 } // namespace wasm
 } // namespace js

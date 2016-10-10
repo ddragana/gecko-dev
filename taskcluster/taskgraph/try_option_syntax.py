@@ -6,8 +6,11 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import argparse
 import copy
+import logging
 import re
 import shlex
+
+logger = logging.getLogger(__name__)
 
 TRY_DELIMITER = 'try:'
 
@@ -17,6 +20,27 @@ BUILD_TYPE_ALIASES = {
     'o': 'opt',
     'd': 'debug'
 }
+
+# consider anything in this whitelist of kinds to be governed by -b/-p
+BUILD_KINDS = set([
+    'build',
+    'artifact-build',
+    'hazard',
+    'l10n',
+    'upload-symbols',
+    'valgrind',
+    'static-analysis',
+    'spidermonkey',
+    'b2g-device',
+])
+
+# anything in this list is governed by -j
+JOB_KINDS = set([
+    'source-check',
+    'toolchain',
+    'marionette-harness',
+    'android-stuff',
+])
 
 
 # mapping from shortcut name (usable with -u) to a boolean function identifying
@@ -56,7 +80,6 @@ UNITTEST_ALIASES = {
     'jittests': alias_prefix('jittest'),
     'jsreftest': alias_prefix('jsreftest'),
     'jsreftest-e10s': alias_prefix('jsreftest-e10s'),
-    'luciddream': alias_prefix('luciddream'),
     'marionette': alias_prefix('marionette'),
     'marionette-e10s': alias_prefix('marionette-e10s'),
     'mochitest': alias_prefix('mochitest'),
@@ -66,12 +89,12 @@ UNITTEST_ALIASES = {
     'mochitest-debug': alias_prefix('mochitest-debug-'),
     'mochitest-a11y': alias_contains('mochitest-a11y'),
     'mochitest-bc': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-bc-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-bc': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-browser-chrome': alias_prefix('mochitest-browser-chrome'),
-    'mochitest-browser-chrome-e10s': alias_prefix('mochitest-browser-chrome-e10s'),
+    'mochitest-e10s-browser-chrome': alias_prefix('mochitest-e10s-browser-chrome'),
     'mochitest-chrome': alias_contains('mochitest-chrome'),
     'mochitest-dt': alias_prefix('mochitest-devtools-chrome'),
-    'mochitest-dt-e10s': alias_prefix('mochitest-devtools-chrome-e10s'),
+    'mochitest-e10s-dt': alias_prefix('mochitest-e10s-devtools-chrome'),
     'mochitest-gl': alias_prefix('mochitest-webgl'),
     'mochitest-gl-e10s': alias_prefix('mochitest-webgl-e10s'),
     'mochitest-gpu': alias_prefix('mochitest-gpu'),
@@ -101,8 +124,9 @@ UNITTEST_ALIASES = {
 # substrings.  This is intended only for backward-compatibility.  New test
 # platforms should have their `test_platform` spelled out fully in try syntax.
 UNITTEST_PLATFORM_PRETTY_NAMES = {
-    'Ubuntu': ['linux', 'linux64'],
-    'x64': ['linux64'],
+    'Ubuntu': ['linux', 'linux64', 'linux64-asan'],
+    'x64': ['linux64', 'linux64-asan'],
+    'Android 4.3': ['android-4.3-arm7-api-15'],
     # other commonly-used substrings for platforms not yet supported with
     # in-tree taskgraphs:
     # '10.10': [..TODO..],
@@ -110,7 +134,6 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
     # '10.6': [..TODO..],
     # '10.8': [..TODO..],
     # 'Android 2.3 API9': [..TODO..],
-    # 'Android 4.3 API15+': [..TODO..],
     # 'Windows 7':  [..TODO..],
     # 'Windows 7 VM': [..TODO..],
     # 'Windows 8':  [..TODO..],
@@ -121,8 +144,12 @@ UNITTEST_PLATFORM_PRETTY_NAMES = {
 
 # We have a few platforms for which we want to do some "extra" builds, or at
 # least build-ish things.  Sort of.  Anyway, these other things are implemented
-# as different "platforms".
+# as different "platforms".  These do *not* automatically ride along with "-p
+# all"
 RIDEALONG_BUILDS = {
+    'android-api-15': [
+        'android-api-15-l10n',
+    ],
     'linux': [
         'linux-l10n',
     ],
@@ -135,6 +162,9 @@ RIDEALONG_BUILDS = {
         'sm-compacting',
         'sm-rootanalysis',
         'sm-package',
+        'sm-tsan',
+        'sm-asan',
+        'sm-msan',
     ],
 }
 
@@ -156,7 +186,8 @@ class TryOptionSyntax(object):
         - unittests: a list of tests, of the form given below, or None for all
         - jobs: a list of requested job names, or None for all
         - trigger_tests: the number of times tests should be triggered (--rebuild)
-        - interactive; true if --interactive
+        - interactive: true if --interactive
+        - notifications: either None if no notifications or one of 'all' or 'failure'
 
         Note that -t is currently completely ignored.
 
@@ -175,6 +206,7 @@ class TryOptionSyntax(object):
         self.talos = []
         self.trigger_tests = 0
         self.interactive = False
+        self.notifications = None
 
         # shlex used to ensure we split correctly when giving values to argparse.
         parts = shlex.split(self.escape_whitespace_in_brackets(message))
@@ -197,6 +229,10 @@ class TryOptionSyntax(object):
         parser.add_argument('-t', '--talos', nargs='?', dest='talos', const='all', default='all')
         parser.add_argument('-i', '--interactive',
                             dest='interactive', action='store_true', default=False)
+        parser.add_argument('-e', '--all-emails',
+                            dest='notifications', action='store_const', const='all')
+        parser.add_argument('-f', '--failure-emails',
+                            dest='notifications', action='store_const', const='failure')
         parser.add_argument('-j', '--job', dest='jobs', action='append')
         # In order to run test jobs multiple times
         parser.add_argument('--rebuild', dest='trigger_tests', type=int, default=1)
@@ -210,6 +246,7 @@ class TryOptionSyntax(object):
         self.talos = self.parse_test_option("talos_try_name", args.talos, full_task_graph)
         self.trigger_tests = args.trigger_tests
         self.interactive = args.interactive
+        self.notifications = args.notifications
 
     def parse_jobs(self, jobs_arg):
         if not jobs_arg or jobs_arg == ['all']:
@@ -235,6 +272,8 @@ class TryOptionSyntax(object):
             results.append(build)
             if build in RIDEALONG_BUILDS:
                 results.extend(RIDEALONG_BUILDS[build])
+                logger.info("platform %s triggers ridealong builds %s" %
+                            (build, ', '.join(RIDEALONG_BUILDS[build])))
 
         return results
 
@@ -402,17 +441,9 @@ class TryOptionSyntax(object):
         seen_chunks = {}
         for test in tests:
             matches = TEST_CHUNK_SUFFIX.match(test['test'])
-
-            if not matches:
-                results.extend(self.handle_alias(test, all_tests))
-                continue
-
-            name = matches.group(1)
-            chunk = matches.group(2)
-            test['test'] = name
-
-            for test in self.handle_alias(test, all_tests):
-                name = test['test']
+            if matches:
+                name = matches.group(1)
+                chunk = matches.group(2)
                 if name in seen_chunks:
                     seen_chunks[name].add(chunk)
                 else:
@@ -420,6 +451,8 @@ class TryOptionSyntax(object):
                     test['test'] = name
                     test['only_chunks'] = seen_chunks[name]
                     results.append(test)
+            else:
+                results.extend(self.handle_alias(test, all_tests))
 
         # uniquify the results over the test names
         results = {test['test']: test for test in results}.values()
@@ -483,26 +516,24 @@ class TryOptionSyntax(object):
                 return True
             return True
 
-        if attr('kind') == 'legacy':
-            if attr('legacy_kind') in ('build', 'post_build'):
-                if attr('build_type') not in self.build_types:
+        if attr('kind') in ('desktop-test', 'android-test'):
+            return match_test(self.unittests, 'unittest_try_name')
+        elif attr('kind') in JOB_KINDS:
+            if self.jobs is None:
+                return True
+            if attr('build_platform') in self.jobs:
+                return True
+        elif attr('kind') in BUILD_KINDS:
+            if attr('build_type') not in self.build_types:
+                return False
+            elif self.platforms is None:
+                # for "-p all", look for try in the 'run_on_projects' attribute
+                return set(['try', 'all']) & set(attr('run_on_projects', []))
+            else:
+                if attr('build_platform') not in self.platforms:
                     return False
-                if self.platforms is not None:
-                    if attr('build_platform') not in self.platforms:
-                        return False
-                return True
-            elif attr('legacy_kind') == 'job':
-                if self.jobs is not None:
-                    if attr('job') not in self.jobs:
-                        return False
-                return True
-            elif attr('legacy_kind') == 'unittest':
-                return match_test(self.unittests, 'unittest_try_name')
-            elif attr('legacy_kind') == 'talos':
-                return match_test(self.talos, 'talos_try_name')
-            return False
+            return True
         else:
-            # TODO: match other kinds
             return False
 
     def __str__(self):
@@ -518,4 +549,5 @@ class TryOptionSyntax(object):
             "jobs: " + none_for_all(self.jobs),
             "trigger_tests: " + str(self.trigger_tests),
             "interactive: " + str(self.interactive),
+            "notifications: " + self.notifications,
         ])

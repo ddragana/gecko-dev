@@ -76,10 +76,46 @@ this.BrowserUtils = {
       try {
         principalStr = " from " + aPrincipal.URI.spec;
       }
-      catch(e2) { }
+      catch (e2) { }
 
       throw "Load of " + aURL + principalStr + " denied.";
     }
+  },
+
+  /**
+   * Return or create a principal with the codebase of one, and the originAttributes
+   * of an existing principal (e.g. on a docshell, where the originAttributes ought
+   * not to change, that is, we should keep the userContextId, privateBrowsingId,
+   * etc. the same when changing the principal).
+   *
+   * @param principal
+   *        The principal whose codebase/null/system-ness we want.
+   * @param existingPrincipal
+   *        The principal whose originAttributes we want, usually the current
+   *        principal of a docshell.
+   * @return an nsIPrincipal that matches the codebase/null/system-ness of the first
+   *         param, and the originAttributes of the second.
+   */
+  principalWithMatchingOA(principal, existingPrincipal) {
+    // Don't care about system principals:
+    if (principal.isSystemPrincipal) {
+      return principal;
+    }
+
+    // If the originAttributes already match, just return the principal as-is.
+    if (existingPrincipal.originSuffix == principal.originSuffix) {
+      return principal;
+    }
+
+    let secMan = Services.scriptSecurityManager;
+    if (principal.isCodebasePrincipal) {
+      return secMan.createCodebasePrincipal(principal.URI, existingPrincipal.originAttributes);
+    }
+
+    if (principal.isNullPrincipal) {
+      return secMan.createNullPrincipal(existingPrincipal.originAttributes);
+    }
+    throw new Error("Can't change the originAttributes of an expanded principal!");
   },
 
   /**
@@ -166,7 +202,7 @@ this.BrowserUtils = {
     try {
       linkHost = linkURI.host;
       docHost = linkNode.ownerDocument.documentURIObject.host;
-    } catch(e) {
+    } catch (e) {
       // nsIURI.host can throw for non-nsStandardURL nsIURIs.
       // If we fail to get either host, just return originalTarget.
       return originalTarget;
@@ -301,6 +337,62 @@ this.BrowserUtils = {
       return false;
 
     return true;
+  },
+
+  _visibleToolbarsMap: new WeakMap(),
+
+  /**
+   * Return true if any or a specific toolbar that interacts with the content
+   * document is visible.
+   *
+   * @param  {nsIDocShell} docShell The docShell instance that a toolbar should
+   *                                be interacting with
+   * @param  {String}      which    Identifier of a specific toolbar
+   * @return {Boolean}
+   */
+  isToolbarVisible(docShell, which) {
+    let window = this.getRootWindow(docShell);
+    if (!this._visibleToolbarsMap.has(window))
+      return false;
+    let toolbars = this._visibleToolbarsMap.get(window);
+    return !!toolbars && toolbars.has(which);
+  },
+
+  /**
+   * Track whether a toolbar is visible for a given a docShell.
+   *
+   * @param  {nsIDocShell} docShell  The docShell instance that a toolbar should
+   *                                 be interacting with
+   * @param  {String}      which     Identifier of a specific toolbar
+   * @param  {Boolean}     [visible] Whether the toolbar is visible. Optional,
+   *                                 defaults to `true`.
+   */
+  trackToolbarVisibility(docShell, which, visible = true) {
+    // We have to get the root window object, because XPConnect WrappedNatives
+    // can't be used as WeakMap keys.
+    let window = this.getRootWindow(docShell);
+    let toolbars = this._visibleToolbarsMap.get(window);
+    if (!toolbars) {
+      toolbars = new Set();
+      this._visibleToolbarsMap.set(window, toolbars);
+    }
+    if (!visible)
+      toolbars.delete(which);
+    else
+      toolbars.add(which);
+  },
+
+  /**
+   * Retrieve the root window object (i.e. the top-most content global) for a
+   * specific docShell object.
+   *
+   * @param  {nsIDocShell} docShell
+   * @return {nsIDOMWindow}
+   */
+  getRootWindow(docShell) {
+    return docShell.QueryInterface(Ci.nsIDocShellTreeItem)
+      .sameTypeRootTreeItem.QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIDOMWindow);
   },
 
   getSelectionDetails: function(topWindow, aCharLen) {

@@ -4,13 +4,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositorWidgetChild.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
+#include "mozilla/widget/CompositorWidgetVsyncObserver.h"
+#include "nsBaseWidget.h"
+#include "VsyncDispatcher.h"
 
 namespace mozilla {
 namespace widget {
 
-CompositorWidgetChild::CompositorWidgetChild(nsIWidget* aWidget)
+CompositorWidgetChild::CompositorWidgetChild(RefPtr<CompositorVsyncDispatcher> aVsyncDispatcher,
+                                             RefPtr<CompositorWidgetVsyncObserver> aVsyncObserver)
+ : mVsyncDispatcher(aVsyncDispatcher),
+   mVsyncObserver(aVsyncObserver)
 {
+  MOZ_ASSERT(XRE_IsParentProcess());
 }
 
 CompositorWidgetChild::~CompositorWidgetChild()
@@ -46,16 +53,25 @@ CompositorWidgetChild::ClearTransparentWindow()
   Unused << SendClearTransparentWindow();
 }
 
-void
-CompositorWidgetChild::ResizeTransparentWindow(const gfx::IntSize& aSize)
-{
-  Unused << SendResizeTransparentWindow(aSize);
-}
-
-HDC CompositorWidgetChild::GetTransparentDC() const
+HDC
+CompositorWidgetChild::GetTransparentDC() const
 {
   // Not supported in out-of-process mode.
   return nullptr;
+}
+
+bool
+CompositorWidgetChild::RecvObserveVsync()
+{
+  mVsyncDispatcher->SetCompositorVsyncObserver(mVsyncObserver);
+  return true;
+}
+
+bool
+CompositorWidgetChild::RecvUnobserveVsync()
+{
+  mVsyncDispatcher->SetCompositorVsyncObserver(nullptr);
+  return true;
 }
 
 } // namespace widget

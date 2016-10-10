@@ -36,7 +36,7 @@ differently.  Some kinds may generate task definitions entirely internally (for
 example, symbol-upload tasks are all alike, and very simple), while other kinds
 may do little more than parse a directory of YAML files.
 
-A `kind.yml` file contains data about the kind, as well as referring to a
+A ``kind.yml`` file contains data about the kind, as well as referring to a
 Python class implementing the kind in its ``implementation`` key.  That
 implementation may rely on lots of code shared with other kinds, or contain a
 completely unique implementation of some functionality.
@@ -61,14 +61,10 @@ the bread-and-butter build and test configuration more complicated.
 Dependencies
 ------------
 
-Dependency links between tasks are always between different kinds(*).  At a
-large scale, you can think of the dependency graph as one between kinds, rather
-than between tasks.  For example, the unittest kind depends on the build kind.
-The details of *which* tasks of the two kinds are linked is left to the kind
-definition.
-
-(*) A kind can depend on itself, though.  You can safely ignore that detail.
-Tasks can also be linked within a kind using explicit dependencies.
+Dependencies between tasks are represented as labeled edges in the task graph.
+For example, a test task must depend on the build task creating the artifact it
+tests, and this dependency edge is named 'build'.  The task graph generation
+process later resolves these dependencies to specific taskIds.
 
 Decision Task
 -------------
@@ -76,10 +72,16 @@ Decision Task
 The decision task is the first task created when a new graph begins.  It is
 responsible for creating the rest of the task graph.
 
-The decision task for pushes is defined in-tree, in ``.taskcluster.yml``.  The
+The decision task for pushes is defined in-tree, in ``.taskcluster.yml``.  That
 task description invokes ``mach taskcluster decision`` with some metadata about
 the push.  That mach command determines the optimized task graph, then calls
 the TaskCluster API to create the tasks.
+
+Note that this mach command is *not* designed to be invoked directly by humans.
+Instead, use the mach commands described below, supplying ``parameters.yml``
+from a recent decision task.  These commands allow testing everything the
+decision task does except the command-line processing and the
+``queue.createTask`` calls.
 
 Graph Generation
 ----------------
@@ -87,8 +89,8 @@ Graph Generation
 Graph generation, as run via ``mach taskgraph decision``, proceeds as follows:
 
 #. For all kinds, generate all tasks.  The result is the "full task set"
-#. Create links between tasks using kind-specific mechanisms.  The result is
-   the "full task graph".
+#. Create dependency links between tasks using kind-specific mechanisms.  The
+   result is the "full task graph".
 #. Select the target tasks (based on try syntax or a tree-specific
    specification).  The result is the "target task set".
 #. Based on the full task graph, calculate the transitive closure of the target
@@ -98,6 +100,28 @@ Graph generation, as run via ``mach taskgraph decision``, proceeds as follows:
    The result is the "optimized task graph" with fewer nodes than the target
    task graph.
 #. Create tasks for all tasks in the optimized task graph.
+
+Transitive Closure
+..................
+
+Transitive closure is a fancy name for this sort of operation:
+
+ * start with a set of tasks
+ * add all tasks on which any of those tasks depend
+ * repeat until nothing changes
+
+The effect is this: imagine you start with a linux32 test job and a linux64 test job.
+In the first round, each test task depends on the test docker image task, so add that image task.
+Each test also depends on a build, so add the linux32 and linux64 build tasks.
+
+Then repeat: the test docker image task is already present, as are the build
+tasks, but those build tasks depend on the build docker image task.  So add
+that build docker image task.  Repeat again: this time, none of the tasks in
+the set depend on a task not in the set, so nothing changes and the process is
+complete.
+
+And as you can see, the graph we've built now includes everything we wanted
+(the test jobs) plus everything required to do that (docker images, builds).
 
 Optimization
 ------------
@@ -126,6 +150,28 @@ the target task set is almost the entire task graph, so targetted tasks are
 considered for optimization.  This behavior is controlled with the
 ``optimize_target_tasks`` parameter.
 
+Action Tasks
+------------
+
+Action Tasks are tasks which help you to schedule new jobs via Treeherder's
+"Add New Jobs" feature. The Decision Task creates a YAML file named
+``action.yml`` which can be used to schedule Action Tasks after suitably replacing
+``{{decision_task_id}}`` and ``{{task_labels}}``, which correspond to the decision
+task ID of the push and a comma separated list of task labels which need to be
+scheduled.
+
+This task invokes ``mach taskgraph action-task`` which builds up a task graph of
+the requested tasks. This graph is optimized using the tasks running initially in
+the same push, due to the decision task.
+
+So for instance, if you had already requested a build task in the ``try`` command,
+and you wish to add a test which depends on this build, the original build task
+is re-used.
+
+Action Tasks are currently scheduled by
+[pulse_actions](https://github.com/mozilla/pulse_actions). This feature is only
+present on ``try`` pushes for now.
+
 Mach commands
 -------------
 
@@ -153,12 +199,28 @@ Each of these commands taskes a ``--parameters`` option giving a file with
 parameters to guide the graph generation.  The decision task helpfully produces
 such a file on every run, and that is generally the easiest way to get a
 parameter file.  The parameter keys and values are described in
-:doc:`parameters`.
+:doc:`parameters`; using that information, you may modify an existing
+``parameters.yml`` or create your own.
 
-Finally, the ``mach taskgraph decision`` subcommand performs the entire
-task-graph generation process, then creates the tasks.  This command should
-only be used within a decision task, as it assumes it is running in that
-context.
+Task Parameterization
+---------------------
+
+A few components of tasks are only known at the very end of the decision task
+-- just before the ``queue.createTask`` call is made.  These are specified
+using simple parameterized values, as follows:
+
+``{"relative-datestamp": "certain number of seconds/hours/days/years"}``
+    Objects of this form will be replaced with an offset from the current time
+    just before the ``queue.createTask`` call is made.  For example, an
+    artifact expiration might be specified as ``{"relative-timestamp": "1
+    year"}``.
+
+``{"task-reference": "string containing <dep-name>"}``
+    The task definition may contain "task references" of this form.  These will
+    be replaced during the optimization step, with the appropriate taskId for
+    the named dependency substituted for ``<dep-name>`` in the string.
+    Multiple labels may be substituted in a single string, and ``<<>`` can be
+    used to escape a literal ``<``.
 
 Taskgraph JSON Format
 ---------------------
@@ -191,18 +253,6 @@ Each task has the following properties:
 ``kind_implementation``
    The module and the class name which was used to implement this particular task.
    It is always of the form ``<module-path>:<object-path>``
-
-The task definition may contain "relative datestamps" of the form
-``{"relative-datestamp": "certain number of seconds/hours/days/years"}``.
-These will be replaced in the last step, while creating tasks.
-The UTC timestamp at that moment is noted, and all the relative datestamps
-are replaced with respect to this timestamp.
-
-The task definition may contain "task references" of the form
-``{"task-reference": "string containing <task-label>"}``.  These will be
-replaced during the optimization step, with the appropriate taskId substituted
-for ``<task-label>`` in the string.  Multiple labels may be substituted in a
-single string, and ``<<>`` can be used to escape a literal ``<``.
 
 The results from each command are in the same format, but with some differences
 in the content:

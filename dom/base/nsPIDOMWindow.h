@@ -28,6 +28,7 @@ class nsICSSDeclaration;
 class nsIDocShell;
 class nsIDocument;
 class nsIIdleObserver;
+class nsIPrincipal;
 class nsIScriptTimeoutHandler;
 class nsIURI;
 class nsPIDOMWindowInner;
@@ -44,10 +45,8 @@ class AudioContext;
 class Element;
 class Performance;
 class ServiceWorkerRegistration;
+class CustomElementsRegistry;
 } // namespace dom
-namespace gfx {
-class VRDeviceProxy;
-} // namespace gfx
 } // namespace mozilla
 
 // Popup control state enum. The values in this enum must go from most
@@ -96,7 +95,7 @@ public:
   const nsPIDOMWindowOuter* AsOuter() const;
 
   virtual nsPIDOMWindowOuter* GetPrivateRoot() = 0;
-
+  virtual mozilla::dom::CustomElementsRegistry* CustomElements() = 0;
   // Outer windows only.
   virtual void ActivateOrDeactivate(bool aActivate) = 0;
 
@@ -119,6 +118,12 @@ public:
   virtual nsPIDOMWindowOuter* GetScriptableTop() = 0;
   virtual nsPIDOMWindowOuter* GetScriptableParent() = 0;
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() = 0;
+
+  bool IsRootOuterWindow()
+  {
+    MOZ_ASSERT(IsOuterWindow());
+    return mIsRootOuterWindow;
+  }
 
   /**
    * Behavies identically to GetScriptableParent extept that it returns null
@@ -321,7 +326,7 @@ public:
   {
     return mMayHavePaintEventListener;
   }
-  
+
   /**
    * Call this to indicate that some node (this window, its document,
    * or content in that document) has a touch event listener.
@@ -338,14 +343,10 @@ public:
    * Moves the top-level window into fullscreen mode if aIsFullScreen is true,
    * otherwise exits fullscreen.
    *
-   * If aHMD is not null, the window is made full screen on the given VR HMD
-   * device instead of its currrent display.
-   *
    * Outer windows only.
    */
   virtual nsresult SetFullscreenInternal(
-    FullscreenReason aReason, bool aIsFullscreen,
-    mozilla::gfx::VRDeviceProxy *aHMD = nullptr) = 0;
+    FullscreenReason aReason, bool aIsFullscreen) = 0;
 
   /**
    * This function should be called when the fullscreen state is flipped.
@@ -672,6 +673,8 @@ protected:
   // current desktop mode flag.
   bool                   mDesktopModeViewport;
 
+  bool                   mIsRootOuterWindow;
+
   // And these are the references between inner and outer windows.
   nsPIDOMWindowInner* MOZ_NON_OWNING_REF mInnerWindow;
   nsCOMPtr<nsPIDOMWindowOuter> mOuterWindow;
@@ -846,6 +849,12 @@ public:
     GetDoc();
     return GetCurrentInnerWindow();
   }
+
+  /**
+   * Set initial keyboard indicator state for accelerators and focus rings.
+   */
+  void SetInitialKeyboardIndicators(UIStateChangeType aShowAccelerators,
+                                    UIStateChangeType aShowFocusRings);
 
   // Internal getter/setter for the frame element, this version of the
   // getter crosses chrome boundaries whereas the public scriptable

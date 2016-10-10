@@ -58,9 +58,23 @@ var handlers = [
           presentationId: command.presentationId
         });
         break;
+      case CommandType.TERMINATE:
+        stateMachine._notifyTerminate(command.presentationId);
+        break;
+      case CommandType.TERMINATE_ACK:
+        stateMachine._notifyTerminate(command.presentationId);
+        break;
       case CommandType.OFFER:
       case CommandType.ICE_CANDIDATE:
         stateMachine._notifyChannelDescriptor(command);
+        break;
+      case CommandType.RECONNECT:
+        stateMachine._notifyReconnect(command.presentationId,
+                                      command.url);
+        stateMachine._sendCommand({
+          type: CommandType.RECONNECT_ACK,
+          presentationId: command.presentationId
+        });
         break;
       default:
         debug("unexpected command: " + JSON.stringify(command));
@@ -69,8 +83,16 @@ var handlers = [
     }
   },
   function _closingHandler(stateMachine, command) {
-    // ignore every command in closing state.
-    DEBUG && debug("unexpected command: " + JSON.stringify(command)); // jshint ignore:line
+    switch (command.type) {
+      case CommandType.DISCONNECT:
+        stateMachine.state = State.CLOSED;
+        stateMachine._notifyDisconnected(command.reason);
+        break;
+      default:
+        debug("unexpected command: " + JSON.stringify(command));
+        // ignore unexpected command
+        break;
+    }
   },
   function _closedHandler(stateMachine, command) {
     // ignore every command in closed state.
@@ -87,6 +109,28 @@ ReceiverStateMachine.prototype = {
   launch: function _launch() {
     // presentation session can only be launched by controlling UA.
     debug("receiver shouldn't trigger launch");
+  },
+
+  terminate: function _terminate(presentationId) {
+    if (this.state === State.CONNECTED) {
+      this._sendCommand({
+        type: CommandType.TERMINATE,
+        presentationId: presentationId,
+      });
+    }
+  },
+
+  terminateAck: function _terminateAck(presentationId) {
+    if (this.state === State.CONNECTED) {
+      this._sendCommand({
+        type: CommandType.TERMINATE_ACK,
+        presentationId: presentationId,
+      });
+    }
+  },
+
+  reconnect: function _reconnect() {
+    debug("receiver shouldn't trigger reconnect");
   },
 
   sendOffer: function _sendOffer() {
@@ -169,6 +213,14 @@ ReceiverStateMachine.prototype = {
 
   _notifyLaunch: function _notifyLaunch(presentationId, url) {
     this._channel.notifyLaunch(presentationId, url);
+  },
+
+  _notifyTerminate: function _notifyTerminate(presentationId) {
+    this._channel.notifyTerminate(presentationId);
+  },
+
+  _notifyReconnect: function _notifyReconnect(presentationId, url) {
+    this._channel.notifyReconnect(presentationId, url);
   },
 
   _notifyChannelDescriptor: function _notifyChannelDescriptor(command) {

@@ -8,6 +8,7 @@
 
 #include "base/win/windows_version.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/Logging.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/security_level.h"
 
@@ -15,6 +16,10 @@ namespace mozilla
 {
 
 sandbox::BrokerServices *SandboxBroker::sBrokerService = nullptr;
+
+static LazyLogModule sSandboxBrokerLog("SandboxBroker");
+
+#define LOG_E(...) MOZ_LOG(sSandboxBrokerLog, LogLevel::Error, (__VA_ARGS__))
 
 /* static */
 void
@@ -188,10 +193,15 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel)
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                      "With these static arguments AddRule should never fail, what happened?");
 
-  // The content process needs to be able to duplicate shared memory to the
-  // broker process, which are Section type handles.
+  // The content process needs to be able to duplicate shared memory handles,
+  // which are Section handles, to the broker process and other child processes.
   result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
                             sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                            L"Section");
+  MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
+                     "With these static arguments AddRule should never fail, what happened?");
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_ANY,
                             L"Section");
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                      "With these static arguments AddRule should never fail, what happened?");
@@ -298,6 +308,20 @@ SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel)
   result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
                             L"\\??\\pipe\\jpi2_pid*_pipe*");
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "With these static arguments AddRule should never fail, what happened?");
+
+  // These register keys are used by the file-browser dialog box.  They
+  // remember the most-recently-used folders.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_REGISTRY,
+                            sandbox::TargetPolicy::REG_ALLOW_ANY,
+                            L"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\OpenSavePidlMRU\\*");
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "With these static arguments AddRule should never fail, what happened?");
+
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_REGISTRY,
+                            sandbox::TargetPolicy::REG_ALLOW_ANY,
+                            L"HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\ComDlg32\\LastVisitedPidlMRULegacy\\*");
   SANDBOX_ENSURE_SUCCESS(result,
                          "With these static arguments AddRule should never fail, what happened?");
 
@@ -453,7 +477,12 @@ SandboxBroker::AllowReadFile(wchar_t const *file)
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      file);
-  return (sandbox::SBOX_ALL_OK == result);
+  if (sandbox::SBOX_ALL_OK != result) {
+    LOG_E("Failed (ResultCode %d) to add read access to: %S", result, file);
+    return false;
+  }
+
+  return true;
 }
 
 bool
@@ -467,7 +496,13 @@ SandboxBroker::AllowReadWriteFile(wchar_t const *file)
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_ANY,
                      file);
-  return (sandbox::SBOX_ALL_OK == result);
+  if (sandbox::SBOX_ALL_OK != result) {
+    LOG_E("Failed (ResultCode %d) to add read/write access to: %S",
+          result, file);
+    return false;
+  }
+
+  return true;
 }
 
 bool
@@ -481,7 +516,12 @@ SandboxBroker::AllowDirectory(wchar_t const *dir)
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_DIR_ANY,
                      dir);
-  return (sandbox::SBOX_ALL_OK == result);
+  if (sandbox::SBOX_ALL_OK != result) {
+    LOG_E("Failed (ResultCode %d) to add directory access to: %S", result, dir);
+    return false;
+  }
+
+  return true;
 }
 
 bool

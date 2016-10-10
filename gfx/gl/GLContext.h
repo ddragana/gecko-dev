@@ -19,10 +19,6 @@
 #include <string.h>
 #endif
 
-#ifdef WIN32
-#include <windows.h>
-#endif
-
 #ifdef GetClassName
 #undef GetClassName
 #endif
@@ -33,7 +29,6 @@
 #define MOZ_GL_DEBUG 1
 #endif
 
-#include "../../mfbt/Maybe.h"
 #include "../../mfbt/RefPtr.h"
 #include "../../mfbt/UniquePtr.h"
 
@@ -42,7 +37,6 @@
 #include "nsISupportsImpl.h"
 #include "plstr.h"
 #include "GLContextTypes.h"
-//#include "GLTextureImage.h"
 #include "SurfaceTypes.h"
 #include "GLContextSymbols.h"
 #include "base/platform_thread.h"       // for PlatformThreadId
@@ -116,6 +110,8 @@ enum class GLFeature {
     occlusion_query_boolean,
     occlusion_query2,
     packed_depth_stencil,
+    prim_restart,
+    prim_restart_fixed,
     query_counter,
     query_objects,
     query_time_elapsed,
@@ -175,9 +171,12 @@ enum class GLRenderer {
     Adreno205,
     AdrenoTM200,
     AdrenoTM205,
+    AdrenoTM305,
     AdrenoTM320,
+    AdrenoTM330,
     AdrenoTM420,
     Mali400MP,
+    Mali450MP,
     SGX530,
     SGX540,
     Tegra,
@@ -481,6 +480,7 @@ public:
         NV_geometry_program4,
         NV_half_float,
         NV_instanced_arrays,
+        NV_primitive_restart,
         NV_texture_barrier,
         NV_transform_feedback,
         NV_transform_feedback2,
@@ -1228,6 +1228,14 @@ public:
         fGetIntegerv(pname, reinterpret_cast<GLint*>(params));
     }
 
+    template<typename T>
+    T GetIntAs(GLenum pname) {
+        static_assert(sizeof(T) == sizeof(GLint), "Invalid T.");
+        T ret = 0;
+        fGetIntegerv(pname, (GLint*)&ret);
+        return ret;
+    }
+
     void fGetFloatv(GLenum pname, GLfloat* params) {
         BEFORE_GL_CALL;
         mSymbols.fGetFloatv(pname, params);
@@ -1618,17 +1626,9 @@ private:
     }
 
 public:
-    void fTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid* pixels) {
-        if (!IsTextureSizeSafeToPassToDriver(target, width, height)) {
-            // pass wrong values to cause the GL to generate GL_INVALID_VALUE.
-            // See bug 737182 and the comment in IsTextureSizeSafeToPassToDriver.
-            level = -1;
-            width = -1;
-            height = -1;
-            border = -1;
-        }
-        raw_fTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
-    }
+    void fTexImage2D(GLenum target, GLint level, GLint internalformat,
+                     GLsizei width, GLsizei height, GLint border,
+                     GLenum format, GLenum type, const GLvoid* pixels);
 
     void fTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels) {
         ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
@@ -1968,6 +1968,9 @@ public:
         BEFORE_GL_CALL;
         mSymbols.fFramebufferTexture2D(target, attachmentPoint, textureTarget, texture, level);
         AFTER_GL_CALL;
+        if (mNeedsCheckAfterAttachTextureToFb) {
+            fCheckFramebufferStatus(target);
+        }
     }
 
     void fFramebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer) {
@@ -3176,6 +3179,16 @@ public:
     }
 
 // -----------------------------------------------------------------------------
+// prim_restart
+
+    void fPrimitiveRestartIndex(GLuint index) {
+        BEFORE_GL_CALL;
+        ASSERT_SYMBOL_PRESENT(fPrimitiveRestartIndex);
+        mSymbols.fPrimitiveRestartIndex(index);
+        AFTER_GL_CALL;
+    }
+
+// -----------------------------------------------------------------------------
 // Constructor
 protected:
     explicit GLContext(CreateContextFlags flags, const SurfaceCaps& caps,
@@ -3305,13 +3318,6 @@ public:
     GLuint GetReadFB();
 
     GLuint GetFB();
-
-    /*
-     * Retrieves the size of the native windowing system drawable.
-     */
-    virtual Maybe<gfx::IntSize> GetTargetSize() {
-        return Maybe<gfx::IntSize>();
-    };
 
 private:
     void GetShaderPrecisionFormatNonES2(GLenum shadertype, GLenum precisiontype, GLint* range, GLint* precision) {
@@ -3528,6 +3534,8 @@ protected:
     GLsizei mMaxSamples;
     bool mNeedsTextureSizeChecks;
     bool mNeedsFlushBeforeDeleteFB;
+    bool mTextureAllocCrashesOnMapFailure;
+    bool mNeedsCheckAfterAttachTextureToFb;
     bool mWorkAroundDriverBugs;
 
     bool IsTextureSizeSafeToPassToDriver(GLenum target, GLsizei width, GLsizei height) const {
@@ -3695,6 +3703,12 @@ GLuint CreateTextureForOffscreen(GLContext* aGL, const GLFormats& aFormats,
  */
 GLuint CreateTexture(GLContext* aGL, GLenum aInternalFormat, GLenum aFormat,
                      GLenum aType, const gfx::IntSize& aSize, bool linear = true);
+
+/**
+ * Helper function that calculates the number of bytes required per
+ * texel for a texture from its format and type.
+ */
+uint32_t GetBytesPerTexel(GLenum format, GLenum type);
 
 } /* namespace gl */
 } /* namespace mozilla */

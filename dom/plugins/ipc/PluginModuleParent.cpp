@@ -25,7 +25,7 @@
 #include "mozilla/ProcessHangMonitor.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
 #include "nsIFile.h"
@@ -44,6 +44,7 @@
 #include "mozilla/plugins/PluginSurfaceParent.h"
 #include "mozilla/widget/AudioSession.h"
 #include "PluginHangUIParent.h"
+#include "PluginUtilsWin.h"
 #endif
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -733,7 +734,6 @@ PluginModuleChromeParent::PluginModuleChromeParent(const char* aFilePath,
     , mPluginId(aPluginId)
     , mChromeTaskFactory(this)
     , mHangAnnotationFlags(0)
-    , mProtocolCallStackMutex("PluginModuleChromeParent::mProtocolCallStackMutex")
 #ifdef XP_WIN
     , mPluginCpuUsageOnHang()
     , mHangUIParent(nullptr)
@@ -774,6 +774,12 @@ PluginModuleChromeParent::~PluginModuleChromeParent()
 
 #ifdef MOZ_ENABLE_PROFILER_SPS
     ShutdownPluginProfiling();
+#endif
+
+#ifdef XP_WIN
+    // If we registered for audio notifications, stop.
+    mozilla::plugins::PluginUtilsWin::RegisterForAudioDeviceChanges(this,
+                                                                    false);
 #endif
 
     if (!mShutdown) {
@@ -998,40 +1004,6 @@ GetProcessCpuUsage(const InfallibleTArray<base::ProcessHandle>& processHandles, 
 } // namespace
 
 #endif // #ifdef XP_WIN
-
-void
-PluginModuleChromeParent::OnEnteredCall()
-{
-    mozilla::ipc::IProtocol* protocol = GetInvokingProtocol();
-    MOZ_ASSERT(protocol);
-    mozilla::MutexAutoLock lock(mProtocolCallStackMutex);
-    mProtocolCallStack.AppendElement(protocol);
-}
-
-void
-PluginModuleChromeParent::OnExitedCall()
-{
-    mozilla::MutexAutoLock lock(mProtocolCallStackMutex);
-    MOZ_ASSERT(!mProtocolCallStack.IsEmpty());
-    mProtocolCallStack.RemoveElementAt(mProtocolCallStack.Length() - 1);
-}
-
-void
-PluginModuleChromeParent::OnEnteredSyncSend()
-{
-    mozilla::ipc::IProtocol* protocol = GetInvokingProtocol();
-    MOZ_ASSERT(protocol);
-    mozilla::MutexAutoLock lock(mProtocolCallStackMutex);
-    mProtocolCallStack.AppendElement(protocol);
-}
-
-void
-PluginModuleChromeParent::OnExitedSyncSend()
-{
-    mozilla::MutexAutoLock lock(mProtocolCallStackMutex);
-    MOZ_ASSERT(!mProtocolCallStack.IsEmpty());
-    mProtocolCallStack.RemoveElementAt(mProtocolCallStack.Length() - 1);
-}
 
 /**
  * This function converts the topmost routing id on the call stack (as recorded
@@ -1907,6 +1879,26 @@ PluginModuleParent::NPP_SetValue(NPP instance, NPNVariable variable,
 }
 
 bool
+PluginModuleChromeParent::AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+    const bool& shouldRegister, NPError* result)
+{
+#ifdef XP_WIN
+    *result = NPERR_NO_ERROR;
+    nsresult err =
+      mozilla::plugins::PluginUtilsWin::RegisterForAudioDeviceChanges(this,
+                                                               shouldRegister);
+    if (err != NS_OK) {
+      *result = NPERR_GENERIC_ERROR;
+    }
+    return true;
+#else
+    NS_RUNTIMEABORT("NPPVpluginRequiresAudioDeviceChanges is not valid on this platform.");
+    *result = NPERR_GENERIC_ERROR;
+    return true;
+#endif
+}
+
+bool
 PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 {
 #ifndef MOZ_X11
@@ -1914,9 +1906,9 @@ PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 #else
     MOZ_ASSERT(0 > mPluginXSocketFdDup.get(),
                "Already backed up X resources??");
-    mPluginXSocketFdDup.forget();
     if (aXSocketFd.IsValid()) {
-      mPluginXSocketFdDup.reset(aXSocketFd.PlatformHandle());
+      auto rawFD = aXSocketFd.ClonePlatformHandle();
+      mPluginXSocketFdDup.reset(rawFD.release());
     }
 #endif
     return true;
@@ -2032,12 +2024,6 @@ PluginModuleParent::GetScrollCaptureContainer(NPP aInstance,
 {
     PluginInstanceParent* inst = PluginInstanceParent::Cast(aInstance);
     return !inst ? NS_ERROR_FAILURE : inst->GetScrollCaptureContainer(aContainer);
-}
-nsresult
-PluginModuleParent::UpdateScrollState(NPP aInstance, bool aIsScrolling)
-{
-    PluginInstanceParent* inst = PluginInstanceParent::Cast(aInstance);
-    return !inst ? NS_ERROR_FAILURE : inst->UpdateScrollState(aIsScrolling);
 }
 #endif
 
@@ -2693,6 +2679,7 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
                                     InfallibleTArray<nsCString>& values,
                                     NPSavedData* saved, NPError* error)
 {
+    MOZ_ASSERT(names.Length() == values.Length());
     if (mPluginName.IsEmpty()) {
         GetPluginDetails();
         InitQuirksModes(nsDependentCString(pluginType));
@@ -2718,13 +2705,30 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
         new PluginInstanceParent(this, instance, strPluginType, mNPNIface);
 
     if (mIsFlashPlugin) {
+        // In Bug 1287588, we found out that if the salign attribute is before
+        // the scale attribute in embed parameters, flash objects render
+        // incorrectly. This is most likely due to an order of operations
+        // problem in the plugin itself. Bug 1264270 changes the order in which
+        // parameters were passed, causing this bug to trigger on pages that
+        // formerly worked. In order to keep things working the way they were in
+        // Firefox <= 48, we reverse the order of parameters, making sure it
+        // happens before we possibly appends more parameters. This should keep
+        // parameters in the same order as prior versions.
+        std::reverse(names.begin(), names.end());
+        std::reverse(values.begin(), values.end());
+
         parentInstance->InitMetadata(strPluginType, srcAttribute);
 #ifdef XP_WIN
-        // Force windowless mode (bug 1201904) when sandbox level >= 2 or Win64
+        bool supportsAsyncRender = false;
+        CallModuleSupportsAsyncRender(&supportsAsyncRender);
 #ifdef _WIN64
-        {
+        // For 64-bit builds force windowless if the flash library doesn't support
+        // async rendering regardless of sandbox level.
+        if (!supportsAsyncRender) {
 #else
-        if (mSandboxLevel >= 2) {
+        // For 32-bit builds force windowless if the flash library doesn't support
+        // async rendering and the sandbox level is 2 or greater.
+        if (!supportsAsyncRender && mSandboxLevel >= 2) {
 #endif
            NS_NAMED_LITERAL_CSTRING(wmodeAttributeName, "wmode");
            NS_NAMED_LITERAL_CSTRING(opaqueAttributeValue, "opaque");
@@ -2843,7 +2847,8 @@ PluginModuleParent::IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing)
 
     return i->IsRemoteDrawingCoreAnimation(aDrawing);
 }
-
+#endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
 nsresult
 PluginModuleParent::ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor)
 {
@@ -3117,9 +3122,20 @@ layers::TextureClientRecycleAllocator*
 PluginModuleParent::EnsureTextureAllocator()
 {
     if (!mTextureAllocator) {
-        mTextureAllocator = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton());
+        mTextureAllocator = new TextureClientRecycleAllocator(ImageBridgeChild::GetSingleton().get());
     }
     return mTextureAllocator;
+}
+
+
+bool
+PluginModuleParent::AnswerNPN_SetValue_NPPVpluginRequiresAudioDeviceChanges(
+                                        const bool& shouldRegister,
+                                        NPError* result) {
+    NS_RUNTIMEABORT("SetValue_NPPVpluginRequiresAudioDeviceChanges is only valid "
+      "with PluginModuleChromeParent");
+    *result = NPERR_GENERIC_ERROR;
+    return true;
 }
 
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -3353,4 +3369,20 @@ PluginModuleChromeParent::RecvProfile(const nsCString& aProfile)
     return true;
 }
 
+bool
+PluginModuleParent::AnswerGetKeyState(const int32_t& aVirtKey, int16_t* aRet)
+{
+    return false;
+}
 
+bool
+PluginModuleChromeParent::AnswerGetKeyState(const int32_t& aVirtKey,
+                                            int16_t* aRet)
+{
+#if defined(XP_WIN)
+    *aRet = ::GetKeyState(aVirtKey);
+    return true;
+#else
+    return PluginModuleParent::AnswerGetKeyState(aVirtKey, aRet);
+#endif
+}

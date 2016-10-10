@@ -68,10 +68,11 @@
     _(NewArrayCopyOnWrite)          \
     _(NewArrayDynamicLength)        \
     _(NewTypedArray)                \
+    _(NewTypedArrayDynamicLength)   \
     _(ArraySplice)                  \
     _(NewObject)                    \
     _(NewTypedObject)               \
-    _(NewDeclEnvObject)             \
+    _(NewNamedLambdaObject)         \
     _(NewCallObject)                \
     _(NewSingletonCallObject)       \
     _(NewStringObject)              \
@@ -112,6 +113,7 @@
     _(BitOpV)                       \
     _(ShiftI)                       \
     _(ShiftI64)                     \
+    _(SignExtend)                   \
     _(UrshD)                        \
     _(Return)                       \
     _(Throw)                        \
@@ -126,8 +128,8 @@
     _(ObjectGroupDispatch)          \
     _(Compare)                      \
     _(CompareAndBranch)             \
-    _(Compare64)                    \
-    _(Compare64AndBranch)           \
+    _(CompareI64)                   \
+    _(CompareI64AndBranch)          \
     _(CompareD)                     \
     _(CompareDAndBranch)            \
     _(CompareF)                     \
@@ -194,6 +196,7 @@
     _(Concat)                       \
     _(CharCodeAt)                   \
     _(FromCharCode)                 \
+    _(FromCodePoint)                \
     _(SinCos)                       \
     _(StringSplit)                  \
     _(Int32ToDouble)                \
@@ -221,7 +224,7 @@
     _(Start)                        \
     _(OsrEntry)                     \
     _(OsrValue)                     \
-    _(OsrScopeChain)                \
+    _(OsrEnvironmentChain)          \
     _(OsrReturnValue)               \
     _(OsrArgumentsObject)           \
     _(RegExp)                       \
@@ -292,6 +295,8 @@
     _(ArrayJoin)                    \
     _(StoreElementHoleV)            \
     _(StoreElementHoleT)            \
+    _(FallibleStoreElementV)        \
+    _(FallibleStoreElementT)        \
     _(LoadTypedArrayElementHole)    \
     _(LoadTypedArrayElementStatic)  \
     _(StoreTypedArrayElementHole)   \
@@ -330,8 +335,9 @@
     _(SetPropertyCache)             \
     _(SetPropertyPolymorphicV)      \
     _(SetPropertyPolymorphicT)      \
-    _(CallIteratorStart)            \
-    _(IteratorStart)                \
+    _(CallIteratorStartV)           \
+    _(CallIteratorStartO)           \
+    _(IteratorStartO)               \
     _(IteratorMore)                 \
     _(IsNoIterAndBranch)            \
     _(IteratorEnd)                  \
@@ -366,13 +372,12 @@
     _(InstanceOfV)                  \
     _(CallInstanceOf)               \
     _(InterruptCheck)               \
-    _(AsmJSInterruptCheck)          \
-    _(AsmThrowUnreachable)          \
+    _(WasmTrap)                     \
     _(AsmReinterpret)               \
     _(AsmReinterpretToI64)          \
     _(AsmReinterpretFromI64)        \
     _(Rotate)                       \
-    _(Rotate64)                     \
+    _(RotateI64)                    \
     _(GetDOMProperty)               \
     _(GetDOMMemberV)                \
     _(GetDOMMemberT)                \
@@ -385,21 +390,27 @@
     _(HasClass)                     \
     _(AsmSelect)                    \
     _(AsmSelectI64)                 \
+    _(WasmBoundsCheck)              \
+    _(WasmAddOffset)                \
     _(WasmLoad)                     \
     _(WasmLoadI64)                  \
     _(WasmStore)                    \
-    _(WasmBoundsCheck)              \
+    _(WasmStoreI64)                 \
+    _(WasmLoadGlobalVar)            \
+    _(WasmLoadGlobalVarI64)         \
+    _(WasmStoreGlobalVar)           \
+    _(WasmStoreGlobalVarI64)        \
     _(AsmJSLoadHeap)                \
     _(AsmJSStoreHeap)               \
-    _(AsmJSLoadFuncPtr)             \
-    _(AsmJSLoadGlobalVar)           \
-    _(AsmJSStoreGlobalVar)          \
-    _(AsmJSLoadFFIFunc)             \
     _(AsmJSParameter)               \
+    _(AsmJSParameterI64)            \
     _(AsmJSReturn)                  \
+    _(AsmJSReturnI64)               \
     _(AsmJSVoidReturn)              \
     _(AsmJSPassStackArg)            \
-    _(AsmJSCall)                    \
+    _(AsmJSPassStackArgI64)         \
+    _(WasmCall)                     \
+    _(WasmCallI64)                  \
     _(AsmJSCompareExchangeHeap)     \
     _(AsmJSAtomicExchangeHeap)      \
     _(AsmJSAtomicBinopHeap)         \
@@ -421,6 +432,7 @@
     _(NewTarget)                    \
     _(ArrowNewTarget)               \
     _(CheckReturn)                  \
+    _(CheckIsObj)                   \
     _(CheckObjCoercible)            \
     _(DebugCheckSelfHosted)
 

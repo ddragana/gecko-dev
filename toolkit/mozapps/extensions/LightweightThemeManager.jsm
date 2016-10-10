@@ -79,7 +79,7 @@ var _themeIDBeingDisabled = null;
   let wasThemeSelected = false;
   try {
     wasThemeSelected = _prefs.getBoolPref("isThemeSelected");
-  } catch(e) { }
+  } catch (e) { }
 
   if (wasThemeSelected) {
     _prefs.clearUserPref("isThemeSelected");
@@ -365,12 +365,10 @@ this.LightweightThemeManager = {
         AddonManagerPrivate.callAddonListeners("onOperationCancelled",
                                                new AddonWrapper(this.getUsedTheme(next)));
       }
-      else {
-        if (id == current.id) {
-          AddonManagerPrivate.callAddonListeners("onOperationCancelled",
-                                                 new AddonWrapper(current));
-          return;
-        }
+      else if (id == current.id) {
+        AddonManagerPrivate.callAddonListeners("onOperationCancelled",
+                                               new AddonWrapper(current));
+        return;
       }
     }
     catch (e) {

@@ -84,6 +84,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
 #include "nsIEditor.h"
 #include "nsIHTMLEditor.h"
+#include "nsFocusManager.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -549,16 +550,22 @@ nsFrameSelection::nsFrameSelection()
   mSelectingTableCellMode = 0;
   mSelectedCellIndex = 0;
 
+  nsAutoCopyListener *autoCopy = nullptr;
+  // On macOS, cache the current selection to send to osx service menu.
+#ifdef XP_MACOSX
+  autoCopy = nsAutoCopyListener::GetInstance(nsIClipboard::kSelectionCache);
+#endif
+
   // Check to see if the autocopy pref is enabled
   //   and add the autocopy listener if it is
   if (Preferences::GetBool("clipboard.autocopy")) {
-    nsAutoCopyListener *autoCopy = nsAutoCopyListener::GetInstance();
+    autoCopy = nsAutoCopyListener::GetInstance(nsIClipboard::kSelectionClipboard);
+  }
 
-    if (autoCopy) {
-      int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
-      if (mDomSelections[index]) {
-        autoCopy->Listen(mDomSelections[index]);
-      }
+  if (autoCopy) {
+    int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
+    if (mDomSelections[index]) {
+      autoCopy->Listen(mDomSelections[index]);
     }
   }
 
@@ -1125,7 +1132,7 @@ nsFrameSelection::MoveCaret(nsDirection       aDirection,
           // For visual movement, pos.mContentOffset depends on the direction-
           // ality of the first/last frame on the line (theFrame), and the caret
           // directionality must correspond.
-          FrameBidiData bidiData = nsBidi::GetBidiData(theFrame);
+          FrameBidiData bidiData = theFrame->GetBidiData();
           SetCaretBidiLevel(visualMovement ? bidiData.embeddingLevel
                                            : bidiData.baseLevel);
           break;
@@ -1136,7 +1143,7 @@ nsFrameSelection::MoveCaret(nsDirection       aDirection,
           if ((pos.mContentOffset != frameStart &&
                pos.mContentOffset != frameEnd) ||
               eSelectLine == aAmount) {
-            SetCaretBidiLevel(nsBidi::GetEmbeddingLevel(theFrame));
+            SetCaretBidiLevel(theFrame->GetEmbeddingLevel());
           }
           else {
             BidiLevelFromMove(mShell, pos.mResultContent, pos.mContentOffset,
@@ -1366,7 +1373,7 @@ nsFrameSelection::GetPrevNextBidiLevels(nsIContent*        aNode,
     direction = eDirNext;
   else {
     // we are neither at the beginning nor at the end of the frame, so we have no worries
-    nsBidiLevel currentLevel = nsBidi::GetEmbeddingLevel(currentFrame);
+    nsBidiLevel currentLevel = currentFrame->GetEmbeddingLevel();
     levels.SetData(currentFrame, currentFrame, currentLevel, currentLevel);
     return levels;
   }
@@ -1381,9 +1388,9 @@ nsFrameSelection::GetPrevNextBidiLevels(nsIContent*        aNode,
   if (NS_FAILED(rv))
     newFrame = nullptr;
 
-  FrameBidiData currentBidi = nsBidi::GetBidiData(currentFrame);
+  FrameBidiData currentBidi = currentFrame->GetBidiData();
   nsBidiLevel currentLevel = currentBidi.embeddingLevel;
-  nsBidiLevel newLevel = newFrame ? nsBidi::GetEmbeddingLevel(newFrame)
+  nsBidiLevel newLevel = newFrame ? newFrame->GetEmbeddingLevel()
                                   : currentBidi.baseLevel;
   
   // If not jumping lines, disregard br frames, since they might be positioned incorrectly.
@@ -1444,7 +1451,7 @@ nsFrameSelection::GetFrameFromLevel(nsIFrame    *aFrameIn,
     foundFrame = frameTraversal->CurrentItem();
     if (!foundFrame)
       return NS_ERROR_FAILURE;
-    foundLevel = nsBidi::GetEmbeddingLevel(foundFrame);
+    foundLevel = foundFrame->GetEmbeddingLevel();
 
   } while (foundLevel > aBidiLevel);
 
@@ -1544,7 +1551,7 @@ void nsFrameSelection::BidiLevelFromClick(nsIContent *aNode,
   if (!clickInFrame)
     return;
 
-  SetCaretBidiLevel(nsBidi::GetEmbeddingLevel(clickInFrame));
+  SetCaretBidiLevel(clickInFrame->GetEmbeddingLevel());
 }
 
 
@@ -1958,7 +1965,7 @@ nsFrameSelection::ScrollSelectionIntoView(SelectionType aSelectionType,
 }
 
 nsresult
-nsFrameSelection::RepaintSelection(SelectionType aSelectionType) const
+nsFrameSelection::RepaintSelection(SelectionType aSelectionType)
 {
   int8_t index = GetIndexFromSelectionType(aSelectionType);
   if (index < 0)
@@ -1966,6 +1973,17 @@ nsFrameSelection::RepaintSelection(SelectionType aSelectionType) const
   if (!mDomSelections[index])
     return NS_ERROR_NULL_POINTER;
   NS_ENSURE_STATE(mShell);
+
+// On macOS, update the selection cache to the new active selection
+// aka the current selection.
+#ifdef XP_MACOSX
+  nsFocusManager* fm = nsFocusManager::GetFocusManager();
+  // Check an active window exists otherwise there cannot be a current selection
+  // and that it's a normal selection.
+  if (fm->GetActiveWindow() && aSelectionType == SelectionType::eNormal) {
+    UpdateSelectionCacheOnRepaintSelection(mDomSelections[index]);
+  }
+#endif
   return mDomSelections[index]->Repaint(mShell->GetPresContext());
 }
  
@@ -2765,7 +2783,6 @@ nsFrameSelection::SelectBlockOfCells(nsIContent *aStartCell, nsIContent *aEndCel
   NS_ENSURE_TRUE(aEndCell, NS_ERROR_NULL_POINTER);
   mEndSelectedCell = aEndCell;
 
-  nsCOMPtr<nsIContent> startCell;
   nsresult result = NS_OK;
 
   // If new end cell is in a different table, do nothing
@@ -5074,17 +5091,17 @@ Selection::Collapse(nsINode& aParentNode, uint32_t aOffset, ErrorResult& aRv)
     return;
   }
 
-  nsCOMPtr<nsINode> kungfuDeathGrip = &aParentNode;
+  nsCOMPtr<nsINode> parentNode = &aParentNode;
 
   mFrameSelection->InvalidateDesiredPos();
-  if (!IsValidSelectionPoint(mFrameSelection, &aParentNode)) {
+  if (!IsValidSelectionPoint(mFrameSelection, parentNode)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
   nsresult result;
 
   RefPtr<nsPresContext> presContext = GetPresContext();
-  if (!presContext || presContext->Document() != aParentNode.OwnerDoc()) {
+  if (!presContext || presContext->Document() != parentNode->OwnerDoc()) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
@@ -5097,37 +5114,37 @@ Selection::Collapse(nsINode& aParentNode, uint32_t aOffset, ErrorResult& aRv)
 
   // Hack to display the caret on the right line (bug 1237236).
   if (mFrameSelection->GetHint() != CARET_ASSOCIATE_AFTER &&
-      aParentNode.IsContent()) {
+      parentNode->IsContent()) {
     int32_t frameOffset;
     nsTextFrame* f =
-      do_QueryFrame(nsCaret::GetFrameAndOffset(this, &aParentNode,
+      do_QueryFrame(nsCaret::GetFrameAndOffset(this, parentNode,
                                                aOffset, &frameOffset));
     if (f && f->IsAtEndOfLine() && f->HasSignificantTerminalNewline()) {
-      if ((aParentNode.AsContent() == f->GetContent() &&
+      if ((parentNode->AsContent() == f->GetContent() &&
            f->GetContentEnd() == int32_t(aOffset)) ||
-          (&aParentNode == f->GetContent()->GetParentNode() &&
-           aParentNode.IndexOf(f->GetContent()) + 1 == int32_t(aOffset))) {
+          (parentNode == f->GetContent()->GetParentNode() &&
+           parentNode->IndexOf(f->GetContent()) + 1 == int32_t(aOffset))) {
         mFrameSelection->SetHint(CARET_ASSOCIATE_AFTER);
       }
     }
   }
 
-  RefPtr<nsRange> range = new nsRange(&aParentNode);
-  result = range->SetEnd(&aParentNode, aOffset);
+  RefPtr<nsRange> range = new nsRange(parentNode);
+  result = range->SetEnd(parentNode, aOffset);
   if (NS_FAILED(result)) {
     aRv.Throw(result);
     return;
   }
-  result = range->SetStart(&aParentNode, aOffset);
+  result = range->SetStart(parentNode, aOffset);
   if (NS_FAILED(result)) {
     aRv.Throw(result);
     return;
   }
 
 #ifdef DEBUG_SELECTION
-  nsCOMPtr<nsIContent> content = do_QueryInterface(&aParentNode);
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(&aParentNode);
-  printf ("Sel. Collapse to %p %s %d\n", &aParentNode,
+  nsCOMPtr<nsIContent> content = do_QueryInterface(parentNode);
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(parentNode);
+  printf ("Sel. Collapse to %p %s %d\n", parentNode.get(),
           content ? nsAtomCString(content->NodeInfo()->NameAtom()).get()
                   : (doc ? "DOCUMENT" : "???"),
           aOffset);
@@ -5233,7 +5250,7 @@ Selection::CollapseToEnd(ErrorResult& aRv)
  * IsCollapsed -- is the whole selection just one point, or unset?
  */
 bool
-Selection::IsCollapsed()
+Selection::IsCollapsed() const
 {
   uint32_t cnt = mRanges.Length();
   if (cnt == 0) {
@@ -5293,7 +5310,7 @@ Selection::GetRangeAt(uint32_t aIndex, ErrorResult& aRv)
 }
 
 nsRange*
-Selection::GetRangeAt(int32_t aIndex)
+Selection::GetRangeAt(int32_t aIndex) const
 {
   RangeData empty(nullptr);
   return mRanges.SafeElementAt(aIndex, empty).mRange;
@@ -5798,6 +5815,48 @@ Selection::ContainsNode(nsINode& aNode, bool aAllowPartial, ErrorResult& aRv)
   return false;
 }
 
+class PointInRectChecker : public nsLayoutUtils::RectCallback {
+public:
+  explicit PointInRectChecker(const nsPoint& aPoint)
+    : mPoint(aPoint)
+    , mMatchFound(false)
+  {
+  }
+
+  void AddRect(const nsRect& aRect) override
+  {
+    mMatchFound = mMatchFound || aRect.Contains(mPoint);
+  }
+
+  bool MatchFound()
+  {
+    return mMatchFound;
+  }
+
+private:
+  nsPoint mPoint;
+  bool mMatchFound;
+};
+
+bool
+Selection::ContainsPoint(const nsPoint& aPoint)
+{
+  if (IsCollapsed()) {
+    return false;
+  }
+  PointInRectChecker checker(aPoint);
+  for (uint32_t i = 0; i < RangeCount(); i++) {
+    nsRange* range = GetRangeAt(i);
+    nsRange::CollectClientRects(&checker, range,
+                                range->GetStartParent(), range->StartOffset(),
+                                range->GetEndParent(), range->EndOffset(),
+                                true, false);
+    if (checker.MatchFound()) {
+      return true;
+    }
+  }
+  return false;
+}
 
 nsPresContext*
 Selection::GetPresContext() const
@@ -6369,7 +6428,7 @@ Selection::SelectionLanguageChange(bool aLangRTL)
     return NS_ERROR_FAILURE;
   }
 
-  nsBidiLevel level = nsBidi::GetEmbeddingLevel(focusFrame);
+  nsBidiLevel level = focusFrame->GetEmbeddingLevel();
   int32_t focusOffset = static_cast<int32_t>(FocusOffset());
   if ((focusOffset != frameStart) && (focusOffset != frameEnd))
     // the cursor is not at a frame boundary, so the level of both the characters (logically) before and after the cursor
@@ -6467,12 +6526,26 @@ NS_IMPL_ISUPPORTS(nsAutoCopyListener, nsISelectionListener)
  *   selections?
  * - maybe we should just never clear the X clipboard?  That would make this 
  *   problem just go away, which is very tempting.
+ *
+ * On macOS,
+ * nsIClipboard::kSelectionCache is the flag for current selection cache.
+ * Set the current selection cache on the parent process in
+ * widget cocoa nsClipboard whenever selection changes.
  */
 
 NS_IMETHODIMP
 nsAutoCopyListener::NotifySelectionChanged(nsIDOMDocument *aDoc,
                                            nsISelection *aSel, int16_t aReason)
 {
+  if (mCachedClipboard == nsIClipboard::kSelectionCache) {
+    nsFocusManager* fm = nsFocusManager::GetFocusManager();
+    // If no active window, do nothing because a current selection changed
+    // cannot occur unless it is in the active window.
+    if (!fm->GetActiveWindow()) {
+      return NS_OK;
+    }
+  }
+
   if (!(aReason & nsISelectionListener::MOUSEUP_REASON   || 
         aReason & nsISelectionListener::SELECTALL_REASON ||
         aReason & nsISelectionListener::KEYPRESS_REASON))
@@ -6484,6 +6557,11 @@ nsAutoCopyListener::NotifySelectionChanged(nsIDOMDocument *aDoc,
 #ifdef DEBUG_CLIPBOARD
     fprintf(stderr, "CLIPBOARD: no selection/collapsed selection\n");
 #endif
+    // If on macOS, clear the current selection transferable cached
+    // on the parent process (nsClipboard) when the selection is empty.
+    if (mCachedClipboard == nsIClipboard::kSelectionCache) {
+      return nsCopySupport::ClearSelectionCache();
+    }
     /* clear X clipboard? */
     return NS_OK;
   }
@@ -6493,7 +6571,45 @@ nsAutoCopyListener::NotifySelectionChanged(nsIDOMDocument *aDoc,
 
   // call the copy code
   return nsCopySupport::HTMLCopy(aSel, doc,
-                                 nsIClipboard::kSelectionClipboard, false);
+                                 mCachedClipboard, false);
+}
+
+/**
+ * See Bug 1288453.
+ *
+ * Update the selection cache on repaint to handle when a pre-existing
+ * selection becomes active aka the current selection.
+ *
+ * 1. Change the current selection by click n dragging another selection.
+ *   - Make a selection on content page. Make a selection in a text editor.
+ *   - You can click n drag the content selection to make it active again.
+ * 2. Change the current selection when switching to a tab with a selection.
+ *   - Make selection in tab.
+ *   - Switching tabs will make its respective selection active.
+ *
+ * Therefore, we only update the selection cache on a repaint
+ * if the current selection being repainted is not an empty selection.
+ *
+ * If the current selection is empty. The current selection cache
+ * would be cleared by nsAutoCopyListener::NotifySelectionChanged.
+ */
+nsresult
+nsFrameSelection::UpdateSelectionCacheOnRepaintSelection(Selection* aSel)
+{
+  nsIPresShell* ps = aSel->GetPresShell();
+  if (!ps) {
+    return NS_OK;
+  }
+  nsCOMPtr<nsIDocument> aDoc = ps->GetDocument();
+
+  bool collapsed;
+  if (aDoc && aSel &&
+      NS_SUCCEEDED(aSel->GetIsCollapsed(&collapsed)) && !collapsed) {
+    return nsCopySupport::HTMLCopy(aSel, aDoc,
+                                   nsIClipboard::kSelectionCache, false);
+  }
+
+  return NS_OK;
 }
 
 // SelectionChangeListener

@@ -36,6 +36,9 @@ JS::Zone::Zone(JSRuntime* rt)
     gcMallocGCTriggered(false),
     usage(&rt->gc.usage),
     gcDelayBytes(0),
+    propertyTree(this),
+    baseShapes(this, BaseShapeSet()),
+    initialShapes(this, InitialShapeSet()),
     data(nullptr),
     isSystem(false),
     usedByExclusiveThread(false),
@@ -58,14 +61,18 @@ JS::Zone::Zone(JSRuntime* rt)
 
 Zone::~Zone()
 {
-    MOZ_ASSERT_IF(typeDescrObjects.initialized(), typeDescrObjects.empty());
-
     JSRuntime* rt = runtimeFromMainThread();
     if (this == rt->gc.systemZone)
         rt->gc.systemZone = nullptr;
 
     js_delete(debuggers);
     js_delete(jitZone_);
+
+#ifdef DEBUG
+    // Avoid assertion destroying the weak map list if the embedding leaked GC things.
+    if (!rt->gc.shutdownCollectedEverything())
+        gcWeakMapList.clear();
+#endif
 }
 
 bool Zone::init(bool isSystemArg)
@@ -302,7 +309,7 @@ Zone::notifyObservingDebuggers()
 {
     for (CompartmentsInZoneIter comps(this); !comps.done(); comps.next()) {
         JSRuntime* rt = runtimeFromAnyThread();
-        RootedGlobalObject global(rt, comps->unsafeUnbarrieredMaybeGlobal());
+        RootedGlobalObject global(rt->contextFromMainThread(), comps->unsafeUnbarrieredMaybeGlobal());
         if (!global)
             continue;
 
@@ -340,6 +347,21 @@ Zone::nextZone() const
 {
     MOZ_ASSERT(isOnList());
     return listNext_;
+}
+
+void
+Zone::clearTables()
+{
+    if (baseShapes.initialized())
+        baseShapes.clear();
+    if (initialShapes.initialized())
+        initialShapes.clear();
+}
+
+void
+Zone::fixupAfterMovingGC()
+{
+    fixupInitialShapeTable();
 }
 
 ZoneList::ZoneList()

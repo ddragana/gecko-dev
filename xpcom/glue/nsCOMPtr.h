@@ -56,7 +56,6 @@
 #ifdef DEBUG
   #define NSCAP_FEATURE_TEST_DONTQUERY_CASES
   #undef NSCAP_FEATURE_USE_BASE
-//#define NSCAP_FEATURE_TEST_NONNULL_QUERY_SUCCEEDS
 #endif
 
 #ifdef __GNUC__
@@ -439,6 +438,15 @@ public:
       NSCAP_ADDREF(this, mRawPtr);
     }
     NSCAP_LOG_ASSIGNMENT(this, aSmartPtr.mRawPtr);
+  }
+
+  nsCOMPtr(nsCOMPtr<T>&& aSmartPtr)
+    : NSCAP_CTOR_BASE(aSmartPtr.mRawPtr)
+  {
+    assert_validity();
+    aSmartPtr.mRawPtr = nullptr;
+    NSCAP_LOG_ASSIGNMENT(this, mRawPtr);
+    NSCAP_ASSERT_NO_QUERY_NEEDED();
   }
 
   MOZ_IMPLICIT nsCOMPtr(T* aRawPtr)

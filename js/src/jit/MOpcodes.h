@@ -47,7 +47,7 @@ namespace jit {
     _(Phi)                                                                  \
     _(Beta)                                                                 \
     _(OsrValue)                                                             \
-    _(OsrScopeChain)                                                        \
+    _(OsrEnvironmentChain)                                                  \
     _(OsrReturnValue)                                                       \
     _(OsrArgumentsObject)                                                   \
     _(ReturnFromCtor)                                                       \
@@ -85,6 +85,7 @@ namespace jit {
     _(Lsh)                                                                  \
     _(Rsh)                                                                  \
     _(Ursh)                                                                 \
+    _(SignExtend)                                                           \
     _(MinMax)                                                               \
     _(Abs)                                                                  \
     _(Clz)                                                                  \
@@ -105,6 +106,7 @@ namespace jit {
     _(Concat)                                                               \
     _(CharCodeAt)                                                           \
     _(FromCharCode)                                                         \
+    _(FromCodePoint)                                                        \
     _(SinCos)                                                               \
     _(StringSplit)                                                          \
     _(Substr)                                                               \
@@ -130,9 +132,10 @@ namespace jit {
     _(NewArrayCopyOnWrite)                                                  \
     _(NewArrayDynamicLength)                                                \
     _(NewTypedArray)                                                        \
+    _(NewTypedArrayDynamicLength)                                           \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
-    _(NewDeclEnvObject)                                                     \
+    _(NewNamedLambdaObject)                                                 \
     _(NewCallObject)                                                        \
     _(NewSingletonCallObject)                                               \
     _(NewStringObject)                                                      \
@@ -210,6 +213,7 @@ namespace jit {
     _(LoadUnboxedString)                                                    \
     _(StoreElement)                                                         \
     _(StoreElementHole)                                                     \
+    _(FallibleStoreElement)                                                 \
     _(StoreUnboxedScalar)                                                   \
     _(StoreUnboxedObjectOrNull)                                             \
     _(StoreUnboxedString)                                                   \
@@ -259,8 +263,6 @@ namespace jit {
     _(InstanceOf)                                                           \
     _(CallInstanceOf)                                                       \
     _(InterruptCheck)                                                       \
-    _(AsmJSInterruptCheck)                                                  \
-    _(AsmThrowUnreachable)                                                  \
     _(GetDOMProperty)                                                       \
     _(GetDOMMember)                                                         \
     _(SetDOMProperty)                                                       \
@@ -270,23 +272,23 @@ namespace jit {
     _(HasClass)                                                             \
     _(CopySign)                                                             \
     _(WasmBoundsCheck)                                                      \
+    _(WasmAddOffset)                                                        \
     _(WasmLoad)                                                             \
     _(WasmStore)                                                            \
+    _(WasmTrap)                                                             \
     _(WasmTruncateToInt32)                                                  \
     _(AsmJSNeg)                                                             \
     _(AsmJSUnsignedToDouble)                                                \
     _(AsmJSUnsignedToFloat32)                                               \
     _(AsmJSLoadHeap)                                                        \
     _(AsmJSStoreHeap)                                                       \
-    _(AsmJSLoadGlobalVar)                                                   \
-    _(AsmJSStoreGlobalVar)                                                  \
-    _(AsmJSLoadFuncPtr)                                                     \
-    _(AsmJSLoadFFIFunc)                                                     \
+    _(WasmLoadGlobalVar)                                                    \
+    _(WasmStoreGlobalVar)                                                   \
     _(AsmJSReturn)                                                          \
     _(AsmJSParameter)                                                       \
     _(AsmJSVoidReturn)                                                      \
     _(AsmJSPassStackArg)                                                    \
-    _(AsmJSCall)                                                            \
+    _(WasmCall)                                                             \
     _(AsmSelect)                                                            \
     _(AsmReinterpret)                                                       \
     _(Rotate)                                                               \
@@ -303,6 +305,7 @@ namespace jit {
     _(NewTarget)                                                            \
     _(ArrowNewTarget)                                                       \
     _(CheckReturn)                                                          \
+    _(CheckIsObj)                                                             \
     _(CheckObjCoercible)                                                    \
     _(DebugCheckSelfHosted)
 

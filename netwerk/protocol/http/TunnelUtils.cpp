@@ -351,7 +351,7 @@ TLSFilterTransaction::WriteSegments(nsAHttpSegmentWriter *aWriter,
   if (NS_SUCCEEDED(rv) && NS_FAILED(mFilterReadCode) && !(*outCountWritten)) {
     // nsPipe turns failures into silent OK.. undo that!
     rv = mFilterReadCode;
-    if (mFilterReadCode == NS_BASE_STREAM_WOULD_BLOCK) {
+    if (Connection() && (mFilterReadCode == NS_BASE_STREAM_WOULD_BLOCK)) {
       Connection()->ResumeRecv();
     }
   }
@@ -778,23 +778,23 @@ class SocketInWrapper : public nsIAsyncInputStream
     , mTLSFilter(aFilter)
   { }
 
-  NS_IMETHODIMP Close() override
+  NS_IMETHOD Close() override
   {
     mTLSFilter = nullptr;
     return mStream->Close();
   }
 
-  NS_IMETHODIMP Available(uint64_t *_retval) override
+  NS_IMETHOD Available(uint64_t *_retval) override
   {
     return mStream->Available(_retval);
   }
 
-  NS_IMETHODIMP IsNonBlocking(bool *_retval) override
+  NS_IMETHOD IsNonBlocking(bool *_retval) override
   {
     return mStream->IsNonBlocking(_retval);
   }
 
-  NS_IMETHODIMP ReadSegments(nsWriteSegmentFun aWriter, void *aClosure, uint32_t aCount, uint32_t *_retval) override
+  NS_IMETHOD ReadSegments(nsWriteSegmentFun aWriter, void *aClosure, uint32_t aCount, uint32_t *_retval) override
   {
     return mStream->ReadSegments(aWriter, aClosure, aCount, _retval);
   }
@@ -845,28 +845,28 @@ class SocketOutWrapper : public nsIAsyncOutputStream
     , mTLSFilter(aFilter)
   { }
 
-  NS_IMETHODIMP Close() override
+  NS_IMETHOD Close() override
   {
     mTLSFilter = nullptr;
     return mStream->Close();
   }
 
-  NS_IMETHODIMP Flush() override
+  NS_IMETHOD Flush() override
   {
     return mStream->Flush();
   }
 
-  NS_IMETHODIMP IsNonBlocking(bool *_retval) override
+  NS_IMETHOD IsNonBlocking(bool *_retval) override
   {
     return mStream->IsNonBlocking(_retval);
   }
 
-  NS_IMETHODIMP WriteSegments(nsReadSegmentFun aReader, void *aClosure, uint32_t aCount, uint32_t *_retval) override
+  NS_IMETHOD WriteSegments(nsReadSegmentFun aReader, void *aClosure, uint32_t aCount, uint32_t *_retval) override
   {
     return mStream->WriteSegments(aReader, aClosure, aCount, _retval);
   }
 
-  NS_IMETHODIMP WriteFrom(nsIInputStream *aFromStream, uint32_t aCount, uint32_t *_retval) override
+  NS_IMETHOD WriteFrom(nsIInputStream *aFromStream, uint32_t aCount, uint32_t *_retval) override
   {
     return mStream->WriteFrom(aFromStream, aCount, _retval);
   }

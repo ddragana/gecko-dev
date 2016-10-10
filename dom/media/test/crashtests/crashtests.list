@@ -82,6 +82,7 @@ skip-if(!B2G) load 1158427.html
 load 1185176.html
 load 1185192.html
 load 1228484.html
+load 1304948.html
 load analyser-channels-1.html
 load audiocontext-double-suspend.html
 load buffer-source-duration-1.html
@@ -95,3 +96,4 @@ load oscillator-ended-2.html
 load video-replay-after-audio-end.html
 # This needs to run at the end to avoid leaking busted state into other tests.
 skip-if(B2G) load 691096-1.html # bug 852821
+load 1236639.html

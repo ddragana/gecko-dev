@@ -344,6 +344,13 @@ SpeechDispatcherService::Setup()
     return;
   }
 
+  if (!PR_FindFunctionSymbol(speechdLib, "spd_get_volume")) {
+    // There is no version getter function, so we rely on a symbol that was
+    // introduced in release 0.8.2 in order to check for ABI compatibility.
+    NS_WARNING("Unsupported version of speechd detected");
+    return;
+  }
+
   for (uint32_t i = 0; i < ArrayLength(kSpeechDispatcherSymbols); i++) {
     *kSpeechDispatcherSymbols[i].function =
       PR_FindFunctionSymbol(speechdLib, kSpeechDispatcherSymbols[i].functionName);
@@ -433,7 +440,7 @@ SpeechDispatcherService::RegisterVoices()
       registry->AddVoice(this, iter.Key(), voice->mName, voice->mLanguage,
                          voice->mName.EqualsLiteral("default"), true);
 
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to add voice");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to add voice");
   }
 
   mInitThread->Shutdown();

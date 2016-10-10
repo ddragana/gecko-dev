@@ -27,7 +27,6 @@ import mozinfo
 SCRIPT_DIR = os.path.abspath(os.path.realpath(os.path.dirname(__file__)))
 
 
-# TODO inherit from MochitestBase instead
 class RobocopTestRunner(MochitestDesktop):
     """
        A test harness for Robocop. Robocop tests are UI tests for Firefox for Android,
@@ -227,6 +226,9 @@ class RobocopTestRunner(MochitestDesktop):
         self.options.extraPrefs.append('browser.casting.enabled=true')
         self.options.extraPrefs.append('extensions.autoupdate.enabled=false')
 
+        # Override the telemetry init delay for integration testing.
+        self.options.extraPrefs.append('toolkit.telemetry.initDelay=1')
+
         self.options.extensionsToExclude.extend([
             'mochikit@mozilla.org',
             'worker-test@mozilla.org.xpi',
@@ -373,9 +375,9 @@ class RobocopTestRunner(MochitestDesktop):
             for key, value in browserEnv.items():
                 try:
                     value.index(',')
-                    self.log.error(
-                        "setupRobotiumConfig: browserEnv - Found a ',' in our value, unable to process value. key=%s,value=%s" %
-                        (key, value))
+                    self.log.error("setupRobotiumConfig: browserEnv - Found a ',' "
+                                   "in our value, unable to process value. key=%s,value=%s" %
+                                   (key, value))
                     self.log.error("browserEnv=%s" % browserEnv)
                 except ValueError:
                     envstr += "%s%s=%s" % (delim, key, value)
@@ -442,9 +444,9 @@ class RobocopTestRunner(MochitestDesktop):
             # This does not launch a test at all. It launches an activity
             # that starts Fennec and then waits indefinitely, since cat
             # never returns.
-            browserArgs = ["start",
-                           "-n", "org.mozilla.roboexample.test/org.mozilla.gecko.LaunchFennecWithConfigurationActivity",
-                           "&&", "cat"]
+            browserArgs = ["start", "-n",
+                           "org.mozilla.roboexample.test/org.mozilla."
+                           "gecko.LaunchFennecWithConfigurationActivity", "&&", "cat"]
             self.dm.default_timeout = sys.maxint  # Forever.
             self.log.info("")
             self.log.info("Serving mochi.test Robocop root at http://%s:%s/tests/robocop/" %
@@ -532,7 +534,9 @@ class RobocopTestRunner(MochitestDesktop):
         return worstTestResult
 
 
-def run_test_harness(options):
+def run_test_harness(parser, options):
+    parser.validate(options)
+
     if options is None:
         raise ValueError(
             "Invalid options specified, use --help for a list of valid options")
@@ -577,7 +581,7 @@ def run_test_harness(options):
 def main(args=sys.argv[1:]):
     parser = MochitestArgumentParser(app='android')
     options = parser.parse_args(args)
-    return run_test_harness(options)
+    return run_test_harness(parser, options)
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -21,6 +21,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
+#include "nsArray.h"
 #include "nsArrayUtils.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsClientAuthRemember.h"
@@ -59,6 +60,8 @@ using namespace mozilla::psm;
 
 namespace {
 
+#define MAX_ALPN_LENGTH 255
+
 void
 getSiteKey(const nsACString& hostName, uint16_t port,
            /*out*/ nsCSubstring& key)
@@ -88,6 +91,7 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags)
     mRememberClientAuthCertificate(false),
     mPreliminaryHandshakeDone(false),
     mNPNCompleted(false),
+    mEarlyDataAccepted(false),
     mFalseStartCallbackCalled(false),
     mFalseStarted(false),
     mIsFullHandshake(false),
@@ -309,6 +313,71 @@ nsNSSSocketInfo::GetNegotiatedNPN(nsACString& aNegotiatedNPN)
 }
 
 NS_IMETHODIMP
+nsNSSSocketInfo::GetAlpnEarlySelection(nsACString& aAlpnSelected)
+{
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown() || isPK11LoggedOut()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  SSLNextProtoState alpnState;
+  unsigned char chosenAlpn[MAX_ALPN_LENGTH];
+  unsigned int chosenAlpnLen;
+  SECStatus rv = SSL_GetNextProto(mFd, &alpnState, chosenAlpn, &chosenAlpnLen,
+                                  AssertedCast<unsigned int>(ArrayLength(chosenAlpn)));
+
+  if (rv != SECSuccess || alpnState != SSL_NEXT_PROTO_EARLY_VALUE ||
+      chosenAlpnLen == 0) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  aAlpnSelected.Assign(BitwiseCast<char*, unsigned char*>(chosenAlpn),
+                       chosenAlpnLen);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetEarlyDataAccepted(bool* aAccepted)
+{
+  *aAccepted = mEarlyDataAccepted;
+  return NS_OK;
+}
+
+void
+nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted)
+{
+  mEarlyDataAccepted = aAccepted;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::DriveHandshake()
+{
+  nsNSSShutDownPreventionLock locker;
+  if (isAlreadyShutDown() || isPK11LoggedOut()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (!mFd) {
+    return NS_ERROR_FAILURE;
+  }
+  PRErrorCode errorCode = GetErrorCode();
+  if (errorCode) {
+    return GetXPCOMFromNSSError(errorCode);
+  }
+
+  SECStatus rv = SSL_ForceHandshake(mFd);
+
+  if (rv != SECSuccess) {
+    errorCode = PR_GetError();
+    if (errorCode == PR_WOULD_BLOCK_ERROR) {
+      return NS_BASE_STREAM_WOULD_BLOCK;
+    }
+
+    SetCanceled(errorCode, PlainErrorMessage);
+    return GetXPCOMFromNSSError(errorCode);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
 {
   // If this is the same hostname then the certicate status does not
@@ -376,10 +445,15 @@ nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname, bool* _retval)
   nsAutoCString hostnameFlat(PromiseFlatCString(hostname));
   CertVerifier::Flags flags = CertVerifier::FLAG_LOCAL_ONLY;
   UniqueCERTCertList unusedBuiltChain;
-  SECStatus rv = certVerifier->VerifySSLServerCert(nssCert, nullptr,
+  SECStatus rv = certVerifier->VerifySSLServerCert(nssCert,
+                                                   nullptr, // stapledOCSPResponse
+                                                   nullptr, // sctsFromTLSExtension
                                                    mozilla::pkix::Now(),
-                                                   nullptr, hostnameFlat.get(),
-                                                   unusedBuiltChain, false, flags);
+                                                   nullptr, // pinarg
+                                                   hostnameFlat.get(),
+                                                   unusedBuiltChain,
+                                                   false, // save intermediates
+                                                   flags);
   if (rv != SECSuccess) {
     return NS_OK;
   }
@@ -694,7 +768,7 @@ nsSSLIOLayerHelpers::rememberTolerantAtVersion(const nsACString& hostName,
   mTLSIntoleranceInfo.Put(key, entry);
 }
 
-uint16_t
+void
 nsSSLIOLayerHelpers::forgetIntolerance(const nsACString& hostName,
                                        int16_t port)
 {
@@ -703,12 +777,10 @@ nsSSLIOLayerHelpers::forgetIntolerance(const nsACString& hostName,
 
   MutexAutoLock lock(mutex);
 
-  uint16_t tolerant = 0;
   IntoleranceEntry entry;
   if (mTLSIntoleranceInfo.Get(key, &entry)) {
     entry.AssertInvariant();
 
-    tolerant = entry.tolerant;
     entry.intolerant = 0;
     entry.intoleranceReason = 0;
     if (entry.strongCipherStatus != StrongCiphersWorked) {
@@ -718,8 +790,6 @@ nsSSLIOLayerHelpers::forgetIntolerance(const nsACString& hostName,
     entry.AssertInvariant();
     mTLSIntoleranceInfo.Put(key, entry);
   }
-
-  return tolerant;
 }
 
 bool
@@ -742,49 +812,7 @@ nsSSLIOLayerHelpers::rememberIntolerantAtVersion(const nsACString& hostName,
 {
   if (intolerant <= minVersion || fallbackLimitReached(hostName, intolerant)) {
     // We can't fall back any further. Assume that intolerance isn't the issue.
-    uint32_t tolerant = forgetIntolerance(hostName, port);
-    // If we know the server is tolerant at the version, we don't have to
-    // gather the telemetry.
-    if (intolerant <= tolerant) {
-      return false;
-    }
-
-    // This telemetry doesn't support TLS 1.3
-    // See bug 1250582
-    uint32_t fallbackLimitBucket = 0;
-    // added if the version has reached the min version.
-    if (intolerant <= minVersion) {
-      switch (minVersion) {
-        case SSL_LIBRARY_VERSION_TLS_1_0:
-          fallbackLimitBucket += 1;
-          break;
-        case SSL_LIBRARY_VERSION_TLS_1_1:
-          fallbackLimitBucket += 2;
-          break;
-        case SSL_LIBRARY_VERSION_TLS_1_2:
-          fallbackLimitBucket += 3;
-          break;
-      }
-    }
-    // added if the version has reached the fallback limit.
-    if (intolerant <= mVersionFallbackLimit) {
-      switch (mVersionFallbackLimit) {
-        case SSL_LIBRARY_VERSION_TLS_1_0:
-          fallbackLimitBucket += 4;
-          break;
-        case SSL_LIBRARY_VERSION_TLS_1_1:
-          fallbackLimitBucket += 8;
-          break;
-        case SSL_LIBRARY_VERSION_TLS_1_2:
-          fallbackLimitBucket += 12;
-          break;
-      }
-    }
-    if (fallbackLimitBucket) {
-      Telemetry::Accumulate(Telemetry::SSL_FALLBACK_LIMIT_REACHED,
-                            fallbackLimitBucket);
-    }
-
+    forgetIntolerance(hostName, port);
     return false;
   }
 
@@ -1098,12 +1126,25 @@ retryDueToTLSIntolerance(PRErrorCode err, nsNSSSocketInfo* socketInfo)
     return false;
   }
 
+  // Disallow PR_CONNECT_RESET_ERROR if fallback limit reached.
+  bool fallbackLimitReached =
+    helpers.fallbackLimitReached(socketInfo->GetHostName(), range.max);
+  if (err == PR_CONNECT_RESET_ERROR && fallbackLimitReached) {
+    return false;
+  }
+
   if ((err == SSL_ERROR_NO_CYPHER_OVERLAP || err == PR_END_OF_FILE_ERROR ||
        err == PR_CONNECT_RESET_ERROR) &&
-      nsNSSComponent::AreAnyFallbackCiphersEnabled()) {
-    if (helpers.rememberStrongCiphersFailed(socketInfo->GetHostName(),
-                                            socketInfo->GetPort(), err)) {
-      return true;
+       nsNSSComponent::AreAnyWeakCiphersEnabled()) {
+    if (helpers.isInsecureFallbackSite(socketInfo->GetHostName()) ||
+        helpers.mUnrestrictedRC4Fallback) {
+      if (helpers.rememberStrongCiphersFailed(socketInfo->GetHostName(),
+                                              socketInfo->GetPort(), err)) {
+        Telemetry::Accumulate(Telemetry::SSL_WEAK_CIPHERS_FALLBACK,
+                              tlsIntoleranceTelemetryBucket(err));
+        return true;
+      }
+      Telemetry::Accumulate(Telemetry::SSL_WEAK_CIPHERS_FALLBACK, 0);
     }
   }
 
@@ -2261,31 +2302,14 @@ ClientAuthDataRunnable::RunOnTargetThread()
         goto loser;
       }
 
-      // Get CN and O of the subject and O of the issuer
-      UniquePORTString ccn(CERT_GetCommonName(&mServerCert->subject));
-      NS_ConvertUTF8toUTF16 cn(ccn.get());
-
       int32_t port;
       mSocketInfo->GetPort(&port);
 
-      nsAutoString cn_host_port;
-      if (ccn && strcmp(ccn.get(), hostname) == 0) {
-        cn_host_port.Append(cn);
-        cn_host_port.Append(':');
-        cn_host_port.AppendInt(port);
-      } else {
-        cn_host_port.Append(cn);
-        cn_host_port.AppendLiteral(" (");
-        cn_host_port.Append(':');
-        cn_host_port.AppendInt(port);
-        cn_host_port.Append(')');
-      }
-
       UniquePORTString corg(CERT_GetOrgName(&mServerCert->subject));
-      NS_ConvertUTF8toUTF16 org(corg.get());
+      nsAutoCString org(corg.get());
 
       UniquePORTString cissuer(CERT_GetOrgName(&mServerCert->issuer));
-      NS_ConvertUTF8toUTF16 issuer(cissuer.get());
+      nsAutoCString issuer(cissuer.get());
 
       nsCOMPtr<nsIMutableArray> certArray = nsArrayBase::Create();
       if (!certArray) {
@@ -2317,7 +2341,7 @@ ClientAuthDataRunnable::RunOnTargetThread()
 
       uint32_t selectedIndex = 0;
       bool certChosen = false;
-      rv = dialogs->ChooseCertificate(mSocketInfo, cn_host_port, org, issuer,
+      rv = dialogs->ChooseCertificate(mSocketInfo, hostname, port, org, issuer,
                                       certArray, &selectedIndex, &certChosen);
       if (NS_FAILED(rv)) {
         goto loser;
@@ -2455,7 +2479,7 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
          ("[%p] nsSSLIOLayerSetOptions: using TLS version range (0x%04x,0x%04x)%s\n",
           fd, static_cast<unsigned int>(range.min),
               static_cast<unsigned int>(range.max),
-          strongCiphersStatus == StrongCiphersFailed ? " with fallback ciphers" : ""));
+          strongCiphersStatus == StrongCiphersFailed ? " with weak ciphers" : ""));
 
   if (SSL_VersionRangeSet(fd, &range) != SECSuccess) {
     return NS_ERROR_FAILURE;
@@ -2463,7 +2487,7 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   infoObject->SetTLSVersionRange(range);
 
   if (strongCiphersStatus == StrongCiphersFailed) {
-    nsNSSComponent::UseFallbackCiphersOnSocket(fd);
+    nsNSSComponent::UseWeakCiphersOnSocket(fd);
   }
 
   // when adjustForTLSIntolerance tweaks the maximum version downward,
@@ -2483,8 +2507,29 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
     }
   }
 
+  // Include a modest set of named groups.
+  const SSLNamedGroup namedGroups[] = {
+    ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1, ssl_grp_ec_secp384r1,
+    ssl_grp_ec_secp521r1, ssl_grp_ffdhe_2048, ssl_grp_ffdhe_3072
+  };
+  if (SECSuccess != SSL_NamedGroupConfig(fd, namedGroups,
+                                         mozilla::ArrayLength(namedGroups))) {
+    return NS_ERROR_FAILURE;
+  }
+  // This ensures that we send key shares for X25519 and P-256 in TLS 1.3, so
+  // that servers are less likely to use HelloRetryRequest.
+  if (SECSuccess != SSL_SendAdditionalKeyShares(fd, 2)) {
+    return NS_ERROR_FAILURE;
+  }
+
   bool enabled = infoObject->SharedState().IsOCSPStaplingEnabled();
   if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_OCSP_STAPLING, enabled)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  bool sctsEnabled = infoObject->SharedState().IsSignedCertTimestampsEnabled();
+  if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_SIGNED_CERT_TIMESTAMPS,
+      sctsEnabled)) {
     return NS_ERROR_FAILURE;
   }
 

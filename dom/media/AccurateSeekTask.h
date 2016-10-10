@@ -8,7 +8,6 @@
 #define ACCURATE_SEEK_TASK_H
 
 #include "SeekTask.h"
-#include "MediaCallbackID.h"
 #include "MediaDecoderReader.h"
 #include "SeekJob.h"
 
@@ -19,7 +18,7 @@ public:
   AccurateSeekTask(const void* aDecoderID,
                    AbstractThread* aThread,
                    MediaDecoderReaderWrapper* aReader,
-                   SeekJob&& aSeekJob,
+                   const SeekTarget& aTarget,
                    const MediaInfo& aInfo,
                    const media::TimeUnit& aEnd,
                    int64_t aCurrentMediaTime);
@@ -51,7 +50,7 @@ private:
 
   void OnVideoDecoded(MediaData* aVideoSample);
 
-  void OnNotDecoded(MediaData::Type, MediaDecoderReader::NotDecodedReason);
+  void OnNotDecoded(MediaData::Type, const MediaResult&);
 
   void SetCallbacks();
 
@@ -66,8 +65,6 @@ private:
   const uint32_t mAudioRate;  // Audio sample rate.
   bool mDoneAudioSeeking;
   bool mDoneVideoSeeking;
-  bool mFirstAudioSample = true;
-  bool mFirstVideoSample = true;
 
   // This temporarily stores the first frame we decode after we seek.
   // This is so that if we hit end of stream while we're decoding to reach

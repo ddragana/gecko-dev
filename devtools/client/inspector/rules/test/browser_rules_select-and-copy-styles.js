@@ -6,9 +6,7 @@
 
 // Tests that properties can be selected and copied from the rule view
 
-XPCOMUtils.defineLazyGetter(this, "osString", function () {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
+const osString = Services.appinfo.OS;
 
 const TEST_URI = `
   <style type="text/css">
@@ -71,13 +69,13 @@ function* checkCopySelection(view) {
 
   let allMenuItems = openStyleContextMenuAndGetAllItems(view, prop);
   let menuitemCopy = allMenuItems.find(item => item.label ===
-    _STRINGS.GetStringFromName("styleinspector.contextmenu.copy"));
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
   ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => menuitemCopy.click(),
+    yield waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
@@ -105,13 +103,13 @@ function* checkSelectAll(view) {
 
   let allMenuItems = openStyleContextMenuAndGetAllItems(view, prop);
   let menuitemCopy = allMenuItems.find(item => item.label ===
-    _STRINGS.GetStringFromName("styleinspector.contextmenu.copy"));
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
   ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => menuitemCopy.click(),
+    yield waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);
@@ -133,13 +131,13 @@ function* checkCopyEditorValue(view) {
 
   let allMenuItems = openStyleContextMenuAndGetAllItems(view, editor.input);
   let menuitemCopy = allMenuItems.find(item => item.label ===
-    _STRINGS.GetStringFromName("styleinspector.contextmenu.copy"));
+    STYLE_INSPECTOR_L10N.getStr("styleinspector.contextmenu.copy"));
 
   ok(menuitemCopy.visible,
     "Copy menu item is displayed as expected");
 
   try {
-    yield waitForClipboard(() => menuitemCopy.click(),
+    yield waitForClipboardPromise(() => menuitemCopy.click(),
       () => checkClipboardData(expectedPattern));
   } catch (e) {
     failedClipboard(expectedPattern);

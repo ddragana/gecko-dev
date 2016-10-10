@@ -43,6 +43,7 @@
 #include "nsISecurityConsoleMessage.h"
 #include "nsCOMArray.h"
 #include "mozilla/net/ChannelEventQueue.h"
+#include "nsIThrottledInputChannel.h"
 
 class nsISecurityConsoleMessage;
 class nsIPrincipal;
@@ -79,6 +80,7 @@ class HttpBaseChannel : public nsHashPropertyBag
                       , public nsITimedChannel
                       , public nsIForcePendingChannel
                       , public nsIConsoleReportCollector
+                      , public nsIThrottledInputChannel
 {
 protected:
   virtual ~HttpBaseChannel();
@@ -90,6 +92,7 @@ public:
   NS_DECL_NSIUPLOADCHANNEL2
   NS_DECL_NSITRACEABLECHANNEL
   NS_DECL_NSITIMEDCHANNEL
+  NS_DECL_NSITHROTTLEDINPUTCHANNEL
 
   HttpBaseChannel();
 
@@ -230,6 +233,9 @@ public:
   NS_IMETHOD GetTopWindowURI(nsIURI **aTopWindowURI) override;
   NS_IMETHOD GetProxyURI(nsIURI **proxyURI) override;
   virtual void SetCorsPreflightParameters(const nsTArray<nsCString>& unsafeHeaders) override;
+  NS_IMETHOD GetConnectionInfoHashKey(nsACString& aConnectionInfoHashKey) override;
+  NS_IMETHOD GetIntegrityMetadata(nsAString& aIntegrityMetadata) override;
+  NS_IMETHOD SetIntegrityMetadata(const nsAString& aIntegrityMetadata) override;
 
   inline void CleanRedirectCacheChainIfNecessary()
   {
@@ -259,10 +265,18 @@ public:
                    const nsTArray<nsString>& aStringParams) override;
 
   void
-  FlushConsoleReports(nsIDocument* aDocument) override;
+  FlushConsoleReports(nsIDocument* aDocument,
+                      ReportAction aAction = ReportAction::Forget) override;
 
   void
   FlushConsoleReports(nsIConsoleReportCollector* aCollector) override;
+
+  void
+  FlushReportsByWindowId(uint64_t aWindowId,
+                         ReportAction aAction = ReportAction::Forget) override;
+
+  void
+  ClearConsoleReports() override;
 
   class nsContentEncodings : public nsIUTF8StringEnumerator
     {
@@ -324,6 +338,12 @@ protected:
   // drop reference to listener, its callbacks, and the progress sink
   void ReleaseListeners();
 
+  // This is fired only when a cookie is created due to the presence of
+  // Set-Cookie header in the response header of any network request.
+  // This notification will come only after the "http-on-examine-response"
+  // was fired.
+  void NotifySetCookie(char const *aCookie);
+
   mozilla::dom::Performance* GetPerformance();
   nsIURI* GetReferringPage();
   nsPIDOMWindowInner* GetInnerDOMWindow();
@@ -362,6 +382,9 @@ protected:
   // for a possible synthesized response instead.
   bool ShouldIntercept(nsIURI* aURI = nullptr);
 
+  // Check if mPrivateBrowsingId matches between LoadInfo and LoadContext.
+  void CheckPrivateBrowsing();
+
   friend class PrivateBrowsingChannel<HttpBaseChannel>;
   friend class InterceptFailedOnStop;
 
@@ -382,10 +405,12 @@ protected:
   nsCOMPtr<nsIStreamListener>       mCompressListener;
 
   nsHttpRequestHead                 mRequestHead;
+  // Upload throttling.
+  nsCOMPtr<nsIInputChannelThrottleQueue> mThrottleQueue;
   nsCOMPtr<nsIInputStream>          mUploadStream;
   nsCOMPtr<nsIRunnable>             mUploadCloneableCallback;
   nsAutoPtr<nsHttpResponseHead>     mResponseHead;
-  RefPtr<nsHttpConnectionInfo>    mConnectionInfo;
+  RefPtr<nsHttpConnectionInfo>      mConnectionInfo;
   nsCOMPtr<nsIProxyInfo>            mProxyInfo;
   nsCOMPtr<nsISupports>             mSecurityInfo;
 
@@ -505,6 +530,10 @@ protected:
   bool mOnStartRequestCalled;
   bool mOnStopRequestCalled;
 
+  // Defaults to false. Is set to true at the begining of OnStartRequest.
+  // Used to ensure methods can't be called before OnStartRequest.
+  bool mAfterOnStartRequestBegun;
+
   uint64_t mTransferSize;
   uint64_t mDecodedBodySize;
   uint64_t mEncodedBodySize;
@@ -520,9 +549,16 @@ protected:
 
   nsCOMPtr<nsIConsoleReportCollector> mReportCollector;
 
+  // Holds the name of the preferred alt-data type.
+  nsCString mPreferredCachedAltDataType;
+  // Holds the name of the alternative data type the channel returned.
+  nsCString mAvailableCachedAltDataType;
+
   bool mForceMainDocumentChannel;
 
   nsID mChannelId;
+
+  nsString mIntegrityMetadata;
 };
 
 // Share some code while working around C++'s absurd inability to handle casting

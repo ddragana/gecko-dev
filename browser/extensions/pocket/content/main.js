@@ -129,18 +129,13 @@ var pktUI = (function() {
      */
     function showSignUp() {
         // AB test: Direct logged-out users to tab vs panel
-        if (pktApi.getSignupPanelTabTestVariant() == 'tab')
+        if (pktApi.getSignupPanelTabTestVariant() == 'v2')
         {
             let site = Services.prefs.getCharPref("extensions.pocket.site");
-            openTabWithUrl('https://' + site + '/firefox_learnmore?src=ff_ext&s=ffi&t=buttonclick', true);
+            openTabWithUrl('https://' + site + '/firefox_learnmore?s=ffi&t=autoredirect&tv=page_learnmore&src=ff_ext', true);
 
             // force the panel closed before it opens
-            // wrapped in setTimeout to avoid race condition after logging out
-            // if this test goes to 100%, we should move this logic up before
-            // the panel is actually opened
-            setTimeout(function() {
-                getPanel().hidePopup();
-            }, 0);
+            getPanel().hidePopup();
 
             return;
         }
@@ -151,6 +146,7 @@ var pktUI = (function() {
             var fxasignedin = (typeof userdata == 'object' && userdata !== null) ? '1' : '0';
             var startheight = 490;
             var inOverflowMenu = isInOverflowMenu();
+            var controlvariant = pktApi.getSignupPanelTabTestVariant() == 'control';
 
             if (inOverflowMenu)
             {
@@ -164,6 +160,9 @@ var pktUI = (function() {
                     startheight = 406;
                 }
             }
+            if (!controlvariant) {
+                startheight = 427;
+            }
             var variant;
             if (inOverflowMenu)
             {
@@ -174,7 +173,18 @@ var pktUI = (function() {
                 variant = 'storyboard_lm';
             }
 
-            var panelId = showPanel("about:pocket-signup?pockethost=" + Services.prefs.getCharPref("extensions.pocket.site") + "&fxasignedin=" + fxasignedin + "&variant=" + variant + '&inoverflowmenu=' + inOverflowMenu + "&locale=" + getUILocale(), {
+            var panelId = showPanel("about:pocket-signup?pockethost="
+                + Services.prefs.getCharPref("extensions.pocket.site")
+                + "&fxasignedin="
+                + fxasignedin
+                + "&variant="
+                + variant
+                + '&controlvariant='
+                + controlvariant
+                + '&inoverflowmenu='
+                + inOverflowMenu
+                + "&locale="
+                + getUILocale(), {
                     onShow: function() {
                     },
                     onHide: panelDidHide,
@@ -332,7 +342,9 @@ var pktUI = (function() {
      * Called when the signup and saved panel was hidden
      */
     function panelDidHide() {
-
+        // clear the onShow and onHide values
+        _currentPanelDidShow = null;
+        _currentPanelDidHide = null;
     }
 
     /**
@@ -470,9 +482,13 @@ var pktUI = (function() {
             var strings = {};
             var bundle = Services.strings.createBundle("chrome://pocket/locale/pocket.properties");
             var e = bundle.getSimpleEnumeration();
-            while(e.hasMoreElements()) {
+            while (e.hasMoreElements()) {
                 var str = e.getNext().QueryInterface(Components.interfaces.nsIPropertyElement);
-                strings[str.key] = str.value;
+                if (str.key in data) {
+                    strings[str.key] = bundle.formatStringFromName(str.key, data[str.key], data[str.key].length);
+                } else {
+                    strings[str.key] = str.value;
+                }
             }
             pktUIMessaging.sendResponseMessageToPanel(panelId, _initL10NMessageId, { strings: strings });
         });

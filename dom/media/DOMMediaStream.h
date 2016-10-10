@@ -14,6 +14,7 @@
 #include "StreamTracks.h"
 #include "nsIDOMWindow.h"
 #include "nsIPrincipal.h"
+#include "MediaTrackConstraints.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "PrincipalChangeObserver.h"
 
@@ -48,7 +49,6 @@ class VideoTrack;
 class AudioTrackList;
 class VideoTrackList;
 class MediaTrackListListener;
-struct MediaTrackConstraints;
 } // namespace dom
 
 namespace layers {
@@ -511,18 +511,25 @@ public:
   }
 
   /**
-   * Called for each track in our owned stream to indicate to JS that we
-   * are carrying that track.
-   *
-   * Creates a MediaStreamTrack, adds it to mTracks, raises "addtrack" and
-   * returns it.
+   * Adds a MediaStreamTrack to mTracks and raises "addtrack".
    *
    * Note that "addtrack" is raised synchronously and only has an effect if
    * this MediaStream is already exposed to script. For spec compliance this is
    * to be called from an async task.
    */
-  MediaStreamTrack* CreateDOMTrack(TrackID aTrackID, MediaSegment::Type aType,
-                                   MediaStreamTrackSource* aSource);
+  void AddTrackInternal(MediaStreamTrack* aTrack);
+
+  /**
+   * Called for each track in our owned stream to indicate to JS that we
+   * are carrying that track.
+   *
+   * Pre-creates a MediaStreamTrack and returns it.
+   * It is up to the caller to make sure it is added through AddTrackInternal.
+   */
+  already_AddRefed<MediaStreamTrack> CreateDOMTrack(TrackID aTrackID,
+                                                    MediaSegment::Type aType,
+                                                    MediaStreamTrackSource* aSource,
+                                                    const MediaTrackConstraints& aConstraints = MediaTrackConstraints());
 
   /**
    * Creates a MediaStreamTrack cloned from aTrack, adds it to mTracks and

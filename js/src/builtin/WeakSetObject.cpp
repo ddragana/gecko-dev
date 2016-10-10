@@ -51,6 +51,7 @@ WeakSetObject::initClass(JSContext* cx, JSObject* obj)
     if (!ctor ||
         !LinkConstructorAndPrototype(cx, ctor, proto) ||
         !DefinePropertiesAndFunctions(cx, proto, properties, methods) ||
+        !DefineToStringTag(cx, proto, cx->names().WeakSet) ||
         !GlobalObject::initBuiltinConstructor(cx, global, JSProto_WeakSet, ctor, proto))
     {
         return nullptr;
@@ -129,7 +130,9 @@ WeakSetObject::construct(JSContext* cx, unsigned argc, Value* vp)
                         DecompileValueGenerator(cx, JSDVG_SEARCH_STACK, keyVal, nullptr);
                     if (!bytes)
                         return false;
-                    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT, bytes.get());
+                    JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr,
+                                               JSMSG_NOT_NONNULL_OBJECT,
+                                               bytes.get());
                     return false;
                 }
 

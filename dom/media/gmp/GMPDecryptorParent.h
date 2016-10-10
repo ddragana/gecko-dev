@@ -33,7 +33,9 @@ public:
 
   uint32_t GetPluginId() const override { return mPluginId; }
 
-  nsresult Init(GMPDecryptorProxyCallback* aCallback) override;
+  nsresult Init(GMPDecryptorProxyCallback* aCallback,
+                bool aDistinctiveIdentifierRequired,
+                bool aPersistentStateRequired) override;
 
   void CreateSession(uint32_t aCreateSessionToken,
                      uint32_t aPromiseId,
@@ -96,13 +98,12 @@ private:
                         const uint32_t& aSystemCode,
                         const nsCString& aMessage) override;
 
-  bool RecvKeyStatusChanged(const nsCString& aSessionId,
-                            InfallibleTArray<uint8_t>&& aKeyId,
-                            const GMPMediaKeyStatus& aStatus) override;
-
   bool RecvDecrypted(const uint32_t& aId,
                      const GMPErr& aErr,
                      InfallibleTArray<uint8_t>&& aBuffer) override;
+
+  bool RecvBatchedKeyStatusChanged(const nsCString& aSessionId,
+                                   InfallibleTArray<GMPKeyInformation>&& aKeyInfos) override;
 
   bool RecvShutdown() override;
 

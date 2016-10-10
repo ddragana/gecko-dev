@@ -13,6 +13,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/fallible.h"
+#include "mozilla/Function.h"
 #include "mozilla/InitializerList.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
@@ -42,6 +43,33 @@ namespace layers {
 struct TileClient;
 } // namespace layers
 } // namespace mozilla
+
+namespace mozilla {
+struct SerializedStructuredCloneBuffer;
+} // namespace mozilla
+
+namespace mozilla {
+namespace dom {
+namespace ipc {
+class StructuredCloneData;
+} // namespace ipc
+} // namespace dom
+} // namespace mozilla
+
+namespace mozilla {
+namespace dom {
+class ClonedMessageData;
+class MessagePortMessage;
+namespace indexedDB {
+struct StructuredCloneReadInfo;
+class SerializedStructuredCloneReadInfo;
+class ObjectStoreCursorResponse;
+} // namespace indexedDB
+} // namespace dom
+} // namespace mozilla
+
+class JSStructuredCloneData;
+
 //
 // nsTArray is a resizable array class, like std::vector.
 //
@@ -158,9 +186,6 @@ struct nsTArrayInfallibleAllocatorBase
   }
 };
 
-#if defined(MOZALLOC_HAVE_XMALLOC)
-#include "mozilla/mozalloc_abort.h"
-
 struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
 {
   static void* Malloc(size_t aSize) { return malloc(aSize); }
@@ -172,6 +197,9 @@ struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
   static void Free(void* aPtr) { free(aPtr); }
   static void SizeTooBig(size_t) {}
 };
+
+#if defined(MOZALLOC_HAVE_XMALLOC)
+#include "mozilla/mozalloc_abort.h"
 
 struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 {
@@ -187,15 +215,6 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 
 #else
 #include <stdlib.h>
-
-struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
-{
-  static void* Malloc(size_t aSize) { return malloc(aSize); }
-  static void* Realloc(void* aPtr, size_t aSize) { return realloc(aPtr, aSize); }
-
-  static void Free(void* aPtr) { free(aPtr); }
-  static void SizeTooBig(size_t) {}
-};
 
 struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 {
@@ -336,6 +355,17 @@ struct nsTArray_SafeElementAtHelper<mozilla::OwningNonNull<E>, Derived>
   }
 };
 
+// Servo bindings.
+extern "C" void Gecko_EnsureTArrayCapacity(void* aArray,
+                                           size_t aCapacity,
+                                           size_t aElementSize);
+extern "C" void Gecko_ClearPODTArray(void* aArray,
+                                     size_t aElementSize,
+                                     size_t aElementAlign);
+
+MOZ_NORETURN MOZ_COLD void
+InvalidArrayIndex_CRASH(size_t aIndex, size_t aLength);
+
 //
 // This class serves as a base class for nsTArray.  It shouldn't be used
 // directly.  It holds common implementation code that does not depend on the
@@ -349,6 +379,10 @@ class nsTArray_base
   // the same free().
   template<class Allocator, class Copier>
   friend class nsTArray_base;
+  friend void Gecko_EnsureTArrayCapacity(void* aArray, size_t aCapacity,
+                                         size_t aElemSize);
+  friend void Gecko_ClearPODTArray(void* aTArray, size_t aElementSize,
+                                   size_t aElementAlign);
 
 protected:
   typedef nsTArrayHeader Header;
@@ -532,9 +566,6 @@ public:
   bool LessThan(const A& aA, const B& aB) const { return aA < aB; }
 };
 
-template<class E> class InfallibleTArray;
-template<class E> class FallibleTArray;
-
 template<bool IsPod, bool IsSameType>
 struct AssignRangeAlgorithm
 {
@@ -681,29 +712,30 @@ struct MOZ_NEEDS_MEMMOVABLE_TYPE nsTArray_CopyChooser
 // Some classes require constructors/destructors to be called, so they are
 // specialized here.
 //
+#define DECLARE_USE_COPY_CONSTRUCTORS(T)                \
+  template<>                                            \
+  struct nsTArray_CopyChooser<T>                        \
+  {                                                     \
+    typedef nsTArray_CopyWithConstructors<T> Type;      \
+  };
+
 template<class E>
 struct nsTArray_CopyChooser<JS::Heap<E>>
 {
   typedef nsTArray_CopyWithConstructors<JS::Heap<E>> Type;
 };
 
-template<>
-struct nsTArray_CopyChooser<nsRegion>
-{
-  typedef nsTArray_CopyWithConstructors<nsRegion> Type;
-};
-
-template<>
-struct nsTArray_CopyChooser<nsIntRegion>
-{
-  typedef nsTArray_CopyWithConstructors<nsIntRegion> Type;
-};
-
-template<>
-struct nsTArray_CopyChooser<mozilla::layers::TileClient>
-{
-  typedef nsTArray_CopyWithConstructors<mozilla::layers::TileClient> Type;
-};
+DECLARE_USE_COPY_CONSTRUCTORS(nsRegion)
+DECLARE_USE_COPY_CONSTRUCTORS(nsIntRegion)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::layers::TileClient)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::SerializedStructuredCloneBuffer)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::ipc::StructuredCloneData)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::ClonedMessageData)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::indexedDB::StructuredCloneReadInfo);
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::indexedDB::ObjectStoreCursorResponse)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::indexedDB::SerializedStructuredCloneReadInfo);
+DECLARE_USE_COPY_CONSTRUCTORS(JSStructuredCloneData)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::MessagePortMessage)
 
 
 //
@@ -997,7 +1029,9 @@ public:
   // @return A reference to the i'th element of the array.
   elem_type& ElementAt(index_type aIndex)
   {
-    MOZ_ASSERT(aIndex < Length(), "invalid array index");
+    if (MOZ_UNLIKELY(aIndex >= Length())) {
+      InvalidArrayIndex_CRASH(aIndex, Length());
+    }
     return Elements()[aIndex];
   }
 
@@ -1007,7 +1041,9 @@ public:
   // @return A const reference to the i'th element of the array.
   const elem_type& ElementAt(index_type aIndex) const
   {
-    MOZ_ASSERT(aIndex < Length(), "invalid array index");
+    if (MOZ_UNLIKELY(aIndex >= Length())) {
+      InvalidArrayIndex_CRASH(aIndex, Length());
+    }
     return Elements()[aIndex];
   }
 
@@ -1598,6 +1634,14 @@ public:
   // A variation on the RemoveElementsAt method defined above.
   void Clear() { RemoveElementsAt(0, Length()); }
 
+  // This method removes elements based on the return value of the
+  // callback function aPredicate. If the function returns true for
+  // an element, the element is removed. aPredicate will be called
+  // for each element in order. It is not safe to access the array
+  // inside aPredicate.
+  template<typename Predicate>
+  void RemoveElementsBy(Predicate aPredicate);
+
   // This helper function combines IndexOf with RemoveElementAt to "search
   // and destroy" the first element that is equal to the given element.
   // @param aItem The item to search for.
@@ -1873,7 +1917,7 @@ template<typename E, class Alloc>
 template<class Item, typename ActualAlloc>
 auto
 nsTArray_Impl<E, Alloc>::ReplaceElementsAt(index_type aStart, size_type aCount,
-                                           const Item* aArray, size_type aArrayLen) -> elem_type* 
+                                           const Item* aArray, size_type aArrayLen) -> elem_type*
 {
   // Adjust memory allocation up-front to catch errors.
   if (!ActualAlloc::Successful(this->template EnsureCapacity<ActualAlloc>(
@@ -1900,6 +1944,31 @@ nsTArray_Impl<E, Alloc>::RemoveElementsAt(index_type aStart, size_type aCount)
   this->template ShiftData<InfallibleAlloc>(aStart, aCount, 0,
                                             sizeof(elem_type),
                                             MOZ_ALIGNOF(elem_type));
+}
+
+template<typename E, class Alloc>
+template<typename Predicate>
+void
+nsTArray_Impl<E, Alloc>::RemoveElementsBy(Predicate aPredicate)
+{
+  if (base_type::mHdr == EmptyHdr()) {
+    return;
+  }
+
+  index_type j = 0;
+  index_type len = Length();
+  for (index_type i = 0; i < len; ++i) {
+    if (aPredicate(Elements()[i])) {
+      elem_traits::Destruct(Elements() + i);
+    } else {
+      if (j < i) {
+        copy_type::MoveNonOverlappingRegion(Elements() + j, Elements() + i,
+                                            1, sizeof(elem_type));
+      }
+      ++j;
+    }
+  }
+  base_type::mHdr->mLength = j;
 }
 
 template<typename E, class Alloc>
@@ -2191,6 +2260,12 @@ public:
   {
     Init();
     this->SwapElements(aOther);
+  }
+
+  MOZ_IMPLICIT AutoTArray(std::initializer_list<E> aIL)
+  {
+    Init();
+    this->AppendElements(aIL.begin(), aIL.size());
   }
 
   self_type& operator=(const self_type& aOther)

@@ -10,12 +10,14 @@
 #include "GMPVideoDecoder.h"
 #include "MediaDataDecoderProxy.h"
 #include "MediaPrefs.h"
+#include "VideoUtils.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/StaticMutex.h"
-#include "mozilla/SyncRunnable.h"
 #include "gmp-audio-decode.h"
 #include "gmp-video-decode.h"
+#include "MP4Decoder.h"
+#include "VPXDecoder.h"
 #ifdef XP_WIN
 #include "WMFDecoderModule.h"
 #endif
@@ -48,7 +50,9 @@ CreateDecoderWrapper(MediaDataDecoderCallback* aCallback)
 already_AddRefed<MediaDataDecoder>
 GMPDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
-  if (!aParams.mConfig.mMimeType.EqualsLiteral("video/avc")) {
+  if (!MP4Decoder::IsH264(aParams.mConfig.mMimeType) &&
+      !VPXDecoder::IsVP8(aParams.mConfig.mMimeType) &&
+      !VPXDecoder::IsVP9(aParams.mConfig.mMimeType)) {
     return nullptr;
   }
 
@@ -89,10 +93,10 @@ PlatformDecoderModule::ConversionRequired
 GMPDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 {
   // GMPVideoCodecType::kGMPVideoCodecH264 specifies that encoded frames must be in AVCC format.
-  if (aConfig.IsVideo()) {
-    return kNeedAVCC;
+  if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
+    return ConversionRequired::kNeedAVCC;
   } else {
-    return kNeedNone;
+    return ConversionRequired::kNeedNone;
   }
 }
 
@@ -104,7 +108,7 @@ HasGMPFor(const nsACString& aAPI,
 #ifdef XP_WIN
   // gmp-clearkey uses WMF for decoding, so if we're using clearkey we must
   // verify that WMF works before continuing.
-  if (aGMP.EqualsLiteral("org.w3.clearkey")) {
+  if (aGMP.Equals(kEMEKeySystemClearkey)) {
     RefPtr<WMFDecoderModule> pdm(new WMFDecoderModule());
     if (aCodec.EqualsLiteral("aac") &&
         !pdm->SupportsMimeType(NS_LITERAL_CSTRING("audio/mp4a-latm"),
@@ -138,15 +142,17 @@ HasGMPFor(const nsACString& aAPI,
 StaticMutex sGMPCodecsMutex;
 
 struct GMPCodecs {
-  const char* mKeySystem;
+  const nsLiteralCString mKeySystem;
   bool mHasAAC;
   bool mHasH264;
+  bool mHasVP8;
+  bool mHasVP9;
 };
 
 static GMPCodecs sGMPCodecs[] = {
-  { "org.w3.clearkey", false, false },
-  { "com.adobe.primetime", false, false },
-  { "com.widevine.alpha", false, false },
+  { kEMEKeySystemClearkey, false, false, false, false },
+  { kEMEKeySystemWidevine, false, false, false, false },
+  { kEMEKeySystemPrimetime, false, false, false, false },
 };
 
 void
@@ -158,10 +164,16 @@ GMPDecoderModule::UpdateUsableCodecs()
   for (GMPCodecs& gmp : sGMPCodecs) {
     gmp.mHasAAC = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_AUDIO_DECODER),
                             NS_LITERAL_CSTRING("aac"),
-                            nsDependentCString(gmp.mKeySystem));
+                            gmp.mKeySystem);
     gmp.mHasH264 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
                              NS_LITERAL_CSTRING("h264"),
-                             nsDependentCString(gmp.mKeySystem));
+                             gmp.mKeySystem);
+    gmp.mHasVP8 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
+                            NS_LITERAL_CSTRING("vp8"),
+                            gmp.mKeySystem);
+    gmp.mHasVP9 = HasGMPFor(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER),
+                            NS_LITERAL_CSTRING("vp9"),
+                            gmp.mKeySystem);
   }
 }
 
@@ -169,13 +181,7 @@ GMPDecoderModule::UpdateUsableCodecs()
 void
 GMPDecoderModule::Init()
 {
-  if (!NS_IsMainThread()) {
-    nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableFunction([]() { Init(); });
-    SyncRunnable::DispatchToThread(mainThread, runnable);
-    return;
-  }
+  MOZ_ASSERT(NS_IsMainThread());
   // GMPService::HasPluginForAPI is main thread only, so to implement
   // SupportsMimeType() we build a table of the codecs which each whitelisted
   // GMP has and update it when any GMPs are removed or added at runtime.
@@ -189,17 +195,16 @@ GMPDecoderModule::PreferredGMP(const nsACString& aMimeType)
   Maybe<nsCString> rv;
   if (aMimeType.EqualsLiteral("audio/mp4a-latm")) {
     switch (MediaPrefs::GMPAACPreferred()) {
-      case 1: rv.emplace(NS_LITERAL_CSTRING("org.w3.clearkey")); break;
-      case 2: rv.emplace(NS_LITERAL_CSTRING("com.adobe.primetime")); break;
+      case 1: rv.emplace(kEMEKeySystemClearkey); break;
+      case 2: rv.emplace(kEMEKeySystemPrimetime); break;
       default: break;
     }
   }
 
-  if (aMimeType.EqualsLiteral("video/avc") ||
-      aMimeType.EqualsLiteral("video/mp4")) {
+  if (MP4Decoder::IsH264(aMimeType)) {
     switch (MediaPrefs::GMPH264Preferred()) {
-      case 1: rv.emplace(NS_LITERAL_CSTRING("org.w3.clearkey")); break;
-      case 2: rv.emplace(NS_LITERAL_CSTRING("com.adobe.primetime")); break;
+      case 1: rv.emplace(kEMEKeySystemClearkey); break;
+      case 2: rv.emplace(kEMEKeySystemPrimetime); break;
       default: break;
     }
   }
@@ -212,18 +217,13 @@ bool
 GMPDecoderModule::SupportsMimeType(const nsACString& aMimeType,
                                    const Maybe<nsCString>& aGMP)
 {
-  const bool isAAC = aMimeType.EqualsLiteral("audio/mp4a-latm");
-  const bool isH264 = aMimeType.EqualsLiteral("video/avc") ||
-                      aMimeType.EqualsLiteral("video/mp4");
-
   StaticMutexAutoLock lock(sGMPCodecsMutex);
   for (GMPCodecs& gmp : sGMPCodecs) {
-    if (isAAC && gmp.mHasAAC &&
-        (aGMP.isNothing() || aGMP.value().EqualsASCII(gmp.mKeySystem))) {
-      return true;
-    }
-    if (isH264 && gmp.mHasH264 &&
-        (aGMP.isNothing() || aGMP.value().EqualsASCII(gmp.mKeySystem))) {
+    if (((aMimeType.EqualsLiteral("audio/mp4a-latm") && gmp.mHasAAC) ||
+         (MP4Decoder::IsH264(aMimeType) && gmp.mHasH264) ||
+         (VPXDecoder::IsVP8(aMimeType) && gmp.mHasVP8) ||
+         (VPXDecoder::IsVP9(aMimeType) && gmp.mHasVP9)) &&
+        (aGMP.isNothing() || aGMP.value().Equals(gmp.mKeySystem))) {
       return true;
     }
   }

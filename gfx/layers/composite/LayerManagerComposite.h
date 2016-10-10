@@ -33,7 +33,6 @@
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nscore.h"                     // for nsAString, etc
 #include "LayerTreeInvalidation.h"
-#include "Visibility.h"
 
 class gfxContext;
 
@@ -62,6 +61,7 @@ class PaintedLayerComposite;
 class TextRenderer;
 class CompositingRenderTarget;
 struct FPSState;
+class PaintCounter;
 
 static const int kVisualWarningDuration = 150; // ms
 
@@ -199,15 +199,6 @@ public:
   };
 
   /**
-   * Calculates the 'completeness' of the rendering that intersected with the
-   * screen on the last render. This is only useful when progressive tile
-   * drawing is enabled, otherwise this will always return 1.0.
-   * This function's expense scales with the size of the layer tree and the
-   * complexity of individual layers' valid regions.
-   */
-  float ComputeRenderIntegrity();
-
-  /**
    * returns true if PlatformAllocBuffer will return a buffer that supports
    * direct texturing
    */
@@ -220,17 +211,10 @@ public:
     mInvalidRegion.Or(mInvalidRegion, aRegion);
   }
 
-  void ClearVisibleRegions(uint64_t aLayersId,
-                           const Maybe<uint32_t>& aPresShellId)
+  void ClearApproximatelyVisibleRegions(uint64_t aLayersId,
+                                        const Maybe<uint32_t>& aPresShellId)
   {
-    for (auto iter = mApproximatelyVisibleRegions.Iter(); !iter.Done(); iter.Next()) {
-      if (iter.Key().mLayersId == aLayersId &&
-          (!aPresShellId || iter.Key().mPresShellId == *aPresShellId)) {
-        iter.Remove();
-      }
-    }
-
-    for (auto iter = mInDisplayPortVisibleRegions.Iter(); !iter.Done(); iter.Next()) {
+    for (auto iter = mVisibleRegions.Iter(); !iter.Done(); iter.Next()) {
       if (iter.Key().mLayersId == aLayersId &&
           (!aPresShellId || iter.Key().mPresShellId == *aPresShellId)) {
         iter.Remove();
@@ -238,35 +222,18 @@ public:
     }
   }
 
-  void UpdateVisibleRegion(VisibilityCounter aCounter,
-                           const ScrollableLayerGuid& aGuid,
-                           const CSSIntRegion& aRegion)
+  void UpdateApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid,
+                                        const CSSIntRegion& aRegion)
   {
-    VisibleRegions& regions = aCounter == VisibilityCounter::MAY_BECOME_VISIBLE
-                            ? mApproximatelyVisibleRegions
-                            : mInDisplayPortVisibleRegions;
-
-    CSSIntRegion* regionForScrollFrame = regions.LookupOrAdd(aGuid);
+    CSSIntRegion* regionForScrollFrame = mVisibleRegions.LookupOrAdd(aGuid);
     MOZ_ASSERT(regionForScrollFrame);
 
     *regionForScrollFrame = aRegion;
   }
 
-  CSSIntRegion* GetVisibleRegion(VisibilityCounter aCounter,
-                                 const ScrollableLayerGuid& aGuid)
+  CSSIntRegion* GetApproximatelyVisibleRegion(const ScrollableLayerGuid& aGuid)
   {
-    static CSSIntRegion emptyRegion;
-
-    VisibleRegions& regions = aCounter == VisibilityCounter::MAY_BECOME_VISIBLE
-                            ? mApproximatelyVisibleRegions
-                            : mInDisplayPortVisibleRegions;
-
-    CSSIntRegion* region = regions.Get(aGuid);
-    if (!region) {
-      region = &emptyRegion;
-    }
-
-    return region;
+    return mVisibleRegions.Get(aGuid);
   }
 
   Compositor* GetCompositor() const
@@ -340,6 +307,8 @@ public:
 
   void ForcePresent() { mCompositor->ForcePresent(); }
 
+  void SetPaintTime(const TimeDuration& aPaintTime) { mLastPaintTime = aPaintTime; }
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -347,17 +316,6 @@ private:
 
   /** Current root layer. */
   LayerComposite* RootLayer() const;
-
-  /**
-   * Recursive helper method for use by ComputeRenderIntegrity. Subtracts
-   * any incomplete rendering on aLayer from aScreenRegion. Any low-precision
-   * rendering is included in aLowPrecisionScreenRegion. aTransform is the
-   * accumulated transform of intermediate surfaces beneath aLayer.
-   */
-  static void ComputeRenderIntegrityInternal(Layer* aLayer,
-                                             nsIntRegion& aScreenRegion,
-                                             nsIntRegion& aLowPrecisionScreenRegion,
-                                             const gfx::Matrix4x4& aTransform);
 
   /**
    * Update the invalid region and render it.
@@ -371,6 +329,11 @@ private:
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
   void RenderToPresentationSurface();
 #endif
+
+  /**
+   * Render paint and composite times above the frame.
+   */
+  void DrawPaintTimes(Compositor* aCompositor);
 
   /**
    * We need to know our invalid region before we're ready to render.
@@ -411,8 +374,7 @@ private:
 
   typedef nsClassHashtable<nsGenericHashKey<ScrollableLayerGuid>,
                            CSSIntRegion> VisibleRegions;
-  VisibleRegions mApproximatelyVisibleRegions;
-  VisibleRegions mInDisplayPortVisibleRegions;
+  VisibleRegions mVisibleRegions;
 
   UniquePtr<FPSState> mFPS;
 
@@ -429,6 +391,9 @@ private:
   bool mLastFrameMissedHWC;
 
   bool mWindowOverlayChanged;
+  RefPtr<PaintCounter> mPaintCounter;
+  TimeDuration mLastPaintTime;
+  TimeStamp mRenderStartTime;
 };
 
 /**
@@ -515,6 +480,10 @@ public:
   {
     mShadowOpacity = aOpacity;
   }
+  void SetShadowOpacitySetByAnimation(bool aSetByAnimation)
+  {
+    mShadowOpacitySetByAnimation = aSetByAnimation;
+  }
 
   void SetShadowClipRect(const Maybe<ParentLayerIntRect>& aRect)
   {
@@ -547,6 +516,7 @@ public:
   const gfx::Matrix4x4& GetShadowBaseTransform() { return mShadowTransform; }
   gfx::Matrix4x4 GetShadowTransform();
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
+  bool GetShadowOpacitySetByAnimation() { return mShadowOpacitySetByAnimation; }
   bool HasLayerBeenComposited() { return mLayerComposited; }
   gfx::IntRect GetClearRect() { return mClearRect; }
 
@@ -574,6 +544,7 @@ protected:
   RefPtr<Compositor> mCompositor;
   float mShadowOpacity;
   bool mShadowTransformSetByAnimation;
+  bool mShadowOpacitySetByAnimation;
   bool mDestroyed;
   bool mLayerComposited;
   gfx::IntRect mClearRect;

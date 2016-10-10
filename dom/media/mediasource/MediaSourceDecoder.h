@@ -64,8 +64,7 @@ public:
   double GetDuration() override;
 
   void SetInitialDuration(int64_t aDuration);
-  void SetMediaSourceDuration(double aDuration, MSRangeRemovalAction aAction);
-  double GetMediaSourceDuration();
+  void SetMediaSourceDuration(double aDuration);
 
   MediaSourceDemuxer* GetDemuxer()
   {
@@ -81,6 +80,10 @@ public:
   MediaDecoderOwner::NextFrameStatus NextFrameBufferedStatus() override;
   bool CanPlayThrough() override;
 
+  void NotifyWaitingForKey() override;
+
+  MediaEventSource<void>* WaitingForKeyEvent() override;
+
 private:
   void DoSetMediaSourceDuration(double aDuration);
   media::TimeInterval ClampIntervalToEnd(const media::TimeInterval& aInterval);
@@ -91,8 +94,9 @@ private:
   dom::MediaSource* mMediaSource;
   RefPtr<MediaSourceDemuxer> mDemuxer;
   RefPtr<MediaFormatReader> mReader;
+  MediaEventProducer<void> mWaitingForKeyEvent;
 
-  Atomic<bool> mEnded;
+  bool mEnded;
 };
 
 } // namespace mozilla

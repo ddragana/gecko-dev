@@ -153,54 +153,6 @@ this.UITour = {
       query: "#panic-button",
       widgetName: "panic-button",
     }],
-    ["loop",        {
-      allowAdd: true,
-      query: "#loop-button",
-      widgetName: "loop-button",
-    }],
-    ["loop-newRoom", {
-      infoPanelPosition: "leftcenter topright",
-      query: (aDocument) => {
-        let loopUI = aDocument.defaultView.LoopUI;
-        // Use the parentElement full-width container of the button so our arrow
-        // doesn't overlap the panel contents much.
-        return loopUI.browser.contentDocument.querySelector(".new-room-button").parentElement;
-      },
-    }],
-    ["loop-roomList", {
-      infoPanelPosition: "leftcenter topright",
-      query: (aDocument) => {
-        let loopUI = aDocument.defaultView.LoopUI;
-        return loopUI.browser.contentDocument.querySelector(".room-list");
-      },
-    }],
-    ["loop-selectedRoomButtons", {
-      infoPanelOffsetY: -20,
-      infoPanelPosition: "start_after",
-      query: (aDocument) => {
-        let chatbox = aDocument.querySelector("chatbox[src^='about\:loopconversation'][selected]");
-
-        // Check that the real target actually exists
-        if (!chatbox || !chatbox.contentDocument ||
-            !chatbox.contentDocument.querySelector(".call-action-group")) {
-          return null;
-        }
-
-        // But anchor on the <browser> in the chatbox so the panel doesn't jump to undefined
-        // positions when the copy/email buttons disappear e.g. when the feedback form opens or
-        // somebody else joins the room.
-        return chatbox.content;
-      },
-    }],
-    ["loop-signInUpLink", {
-      query: (aDocument) => {
-        let loopBrowser = aDocument.defaultView.LoopUI.browser;
-        if (!loopBrowser) {
-          return null;
-        }
-        return loopBrowser.contentDocument.querySelector(".signin-link");
-      },
-    }],
     ["pocket", {
       allowAdd: true,
       query: "#pocket-button",
@@ -364,7 +316,7 @@ this.UITour = {
 
   onPageEvent: function(aMessage, aEvent) {
     let browser = aMessage.target;
-    let window = browser.ownerDocument.defaultView;
+    let window = browser.ownerGlobal;
 
     // Does the window have tabs? We need to make sure since windowless browsers do
     // not have tabs.
@@ -721,7 +673,7 @@ this.UITour = {
         // was generated originally. If the browser where the UI tour is loaded
         // is windowless, just ignore the request to close the tab. The request
         // is also ignored if this is the only tab in the window.
-        let tabBrowser = browser.ownerDocument.defaultView.gBrowser;
+        let tabBrowser = browser.ownerGlobal.gBrowser;
         if (tabBrowser && tabBrowser.browsers.length > 1) {
           tabBrowser.removeTab(tabBrowser.getTabForBrowser(browser));
         }
@@ -755,7 +707,7 @@ this.UITour = {
     log.debug("handleEvent: type =", aEvent.type, "event =", aEvent);
     switch (aEvent.type) {
       case "TabSelect": {
-        let window = aEvent.target.ownerDocument.defaultView;
+        let window = aEvent.target.ownerGlobal;
 
         // Teardown the browser of the tab we just switched away from.
         if (aEvent.detail && aEvent.detail.previousTab) {
@@ -895,16 +847,12 @@ this.UITour = {
     this.hideInfo(aWindow);
     // Ensure the menu panel is hidden before calling recreatePopup so popup events occur.
     this.hideMenu(aWindow, "appMenu");
-    this.hideMenu(aWindow, "loop");
     this.hideMenu(aWindow, "controlCenter");
 
     // Clean up panel listeners after calling hideMenu above.
     aWindow.PanelUI.panel.removeEventListener("popuphiding", this.hideAppMenuAnnotations);
     aWindow.PanelUI.panel.removeEventListener("ViewShowing", this.hideAppMenuAnnotations);
     aWindow.PanelUI.panel.removeEventListener("popuphidden", this.onPanelHidden);
-    let loopPanel = aWindow.document.getElementById("loop-notification-panel");
-    loopPanel.removeEventListener("popuphidden", this.onPanelHidden);
-    loopPanel.removeEventListener("popuphiding", this.hideLoopPanelAnnotations);
     let controlCenterPanel = aWindow.gIdentityHandler._identityPopup;
     controlCenterPanel.removeEventListener("popuphidden", this.onPanelHidden);
     controlCenterPanel.removeEventListener("popuphiding", this.hideControlCenterAnnotations);
@@ -972,7 +920,7 @@ this.UITour = {
   },
 
   isElementVisible: function(aElement) {
-    let targetStyle = aElement.ownerDocument.defaultView.getComputedStyle(aElement);
+    let targetStyle = aElement.ownerGlobal.getComputedStyle(aElement);
     return !aElement.ownerDocument.hidden &&
              targetStyle.display != "none" &&
              targetStyle.visibility == "visible";
@@ -1735,31 +1683,6 @@ this.UITour = {
         popup.addEventListener("popupshown", onPopupShown);
       }
       aWindow.document.getElementById("identity-box").click();
-    } else if (aMenuName == "loop") {
-      let toolbarButton = aWindow.LoopUI.toolbarButton;
-      // It's possible to have a node that isn't placed anywhere
-      if (!toolbarButton || !toolbarButton.node ||
-          !CustomizableUI.getPlacementOfWidget(toolbarButton.node.id)) {
-        log.debug("Can't show the Loop menu since the toolbarButton isn't placed");
-        return;
-      }
-
-      let panel = aWindow.document.getElementById("loop-notification-panel");
-      panel.setAttribute("noautohide", true);
-      if (panel.state != "open") {
-        this.recreatePopup(panel);
-        this.clearAvailableTargetsCache();
-      }
-
-      // An event object is expected but we don't want to toggle the panel with a click if the panel
-      // is already open.
-      aWindow.LoopUI.openPanel({ target: toolbarButton.node, }, "rooms").then(() => {
-        if (aOpenCallback) {
-          aOpenCallback();
-        }
-      });
-      panel.addEventListener("popuphidden", this.onPanelHidden);
-      panel.addEventListener("popuphiding", this.hideLoopPanelAnnotations);
     } else if (aMenuName == "pocket") {
       this.getTarget(aWindow, "pocket").then(Task.async(function* onPocketTarget(target) {
         let widgetGroupWrapper = CustomizableUI.getWidget(target.widgetName);
@@ -1818,14 +1741,11 @@ this.UITour = {
     } else if (aMenuName == "controlCenter") {
       let panel = aWindow.gIdentityHandler._identityPopup;
       panel.hidePopup();
-    } else if (aMenuName == "loop") {
-      let panel = aWindow.document.getElementById("loop-notification-panel");
-      panel.hidePopup();
     }
   },
 
   hideAnnotationsForPanel: function(aEvent, aTargetPositionCallback) {
-    let win = aEvent.target.ownerDocument.defaultView;
+    let win = aEvent.target.ownerGlobal;
     let annotationElements = new Map([
       // [annotationElement (panel), method to hide the annotation]
       [win.document.getElementById("UITourHighlightContainer"), UITour.hideHighlight.bind(UITour)],
@@ -1851,12 +1771,6 @@ this.UITour = {
 
   hideAppMenuAnnotations: function(aEvent) {
     UITour.hideAnnotationsForPanel(aEvent, UITour.targetIsInAppMenu);
-  },
-
-  hideLoopPanelAnnotations: function(aEvent) {
-    UITour.hideAnnotationsForPanel(aEvent, (aTarget) => {
-      return aTarget.targetName.startsWith("loop-") && aTarget.targetName != "loop-selectedRoomButtons";
-    });
   },
 
   hideControlCenterAnnotations(aEvent) {
@@ -1898,7 +1812,7 @@ this.UITour = {
         let distribution = "default";
         try {
           distribution = Services.prefs.getDefaultBranch("distribution.").getCharPref("id");
-        } catch(e) {}
+        } catch (e) {}
         appinfo["distribution"] = distribution;
 
         let isDefaultBrowser = null;
@@ -1930,12 +1844,6 @@ this.UITour = {
         break;
       case "availableTargets":
         this.getAvailableTargets(aMessageManager, aWindow, aCallbackID);
-        break;
-      case "loop":
-        const FTU_VERSION = 1;
-        this.sendPageCallback(aMessageManager, aCallbackID, {
-          gettingStartedSeen: (Services.prefs.getIntPref("loop.gettingStarted.latestFTUVersion") >= FTU_VERSION),
-        });
         break;
       case "search":
       case "selectedSearchEngine":
@@ -1979,10 +1887,6 @@ this.UITour = {
             shell.setDefaultBrowser(true, false);
           }
         } catch (e) {}
-        break;
-      case "Loop:ResumeTourOnFirstJoin":
-        // Ignore aValue in this case to avoid accidentally setting it to false.
-        Services.prefs.setBoolPref("loop.gettingStarted.resumeOnFirstJoin", true);
         break;
       default:
         log.error("setConfiguration: Unknown configuration requested: " + aConfiguration);
@@ -2063,7 +1967,7 @@ this.UITour = {
       if (observer) {
         return;
       }
-      let win = aPanelEl.ownerDocument.defaultView;
+      let win = aPanelEl.ownerGlobal;
       observer = new win.MutationObserver(this._annotationMutationCallback);
       this._annotationPanelMutationObservers.set(aPanelEl, observer);
       let observerOptions = {

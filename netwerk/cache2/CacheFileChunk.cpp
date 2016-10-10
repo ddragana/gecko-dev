@@ -255,7 +255,7 @@ protected:
   }
 
 public:
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     LOG(("NotifyUpdateListenerEvent::Run() [this=%p]", this));
 
@@ -328,8 +328,9 @@ CacheFileChunk::CacheFileChunk(CacheFile *aFile, uint32_t aIndex,
   , mIndex(aIndex)
   , mState(INITIAL)
   , mStatus(NS_OK)
-  , mIsDirty(false)
   , mActiveChunk(false)
+  , mIsDirty(false)
+  , mDiscardedChunk(false)
   , mBuffersSize(0)
   , mLimitAllocation(!aFile->mOpenAsMemoryOnly && aInitByWriter)
   , mIsPriority(aFile->mPriority)
@@ -587,7 +588,7 @@ CacheFileChunk::UpdateDataSize(uint32_t aOffset, uint32_t aLen)
 
   mIsDirty = true;
 
-  int64_t fileSize = kChunkSize * mIndex + aOffset + aLen;
+  int64_t fileSize = static_cast<int64_t>(kChunkSize) * mIndex + aOffset + aLen;
   bool notify = false;
 
   if (fileSize > mFile->mDataSize) {
@@ -615,6 +616,13 @@ CacheFileChunk::UpdateDataSize(uint32_t aOffset, uint32_t aLen)
 
   mValidityMap.AddPair(aOffset, aLen);
   mValidityMap.Log();
+}
+
+nsresult
+CacheFileChunk::Truncate(uint32_t aOffset)
+{
+  mBuf->SetDataSize(aOffset);
+  return NS_OK;
 }
 
 nsresult

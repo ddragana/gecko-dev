@@ -46,6 +46,8 @@ XPCOMUtils.defineLazyGetter(this, "PageMenuChild", function() {
 XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
   "resource:///modules/Feeds.jsm");
 
+Cu.importGlobalProperties(["URL"]);
+
 // TabChildGlobal
 var global = this;
 
@@ -81,9 +83,7 @@ addEventListener("blur", function(event) {
   LoginManagerContent.onUsernameInput(event);
 });
 
-var gLastContextMenuEvent = null; // null or a WeakReference to a contextmenu event
 var handleContentContextMenu = function (event) {
-  gLastContextMenuEvent = null;
   let defaultPrevented = event.defaultPrevented;
   if (!Services.prefs.getBoolPref("dom.event.contextmenu.enabled")) {
     let plugin = null;
@@ -98,36 +98,8 @@ var handleContentContextMenu = function (event) {
     defaultPrevented = false;
   }
 
-  if (defaultPrevented) {
+  if (defaultPrevented)
     return;
-  }
-
-  if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-    // If this was triggered by touch, then we don't want to show the actual
-    // context menu until we get the APZ:LongTapUp notification. However, we
-    // will need the |event| object when we get that notification, so we save
-    // it in a WeakReference. That way it won't leak things if we never get
-    // the APZ:LongTapUp notification (which is quite possible).
-    gLastContextMenuEvent = Cu.getWeakReference(event);
-    return;
-  }
-
-  // For non-touch-derived contextmenu events, we can handle it right away.
-  showContentContextMenu(event);
-}
-
-var showContentContextMenu = function (event) {
-  if (event == null) {
-    // If we weren't given an event, then this is being invoked from the
-    // APZ:LongTapUp observer, and the contextmenu event is stashed in
-    // gLastContextMenuEvent.
-    event = (gLastContextMenuEvent ? gLastContextMenuEvent.get() : null);
-    gLastContextMenuEvent = null;
-    if (event == null) {
-      // Still no event? We can't do anything, bail out.
-      return;
-    }
-  }
 
   let addonInfo = {};
   let subject = {
@@ -180,15 +152,18 @@ var showContentContextMenu = function (event) {
         imageCache.findEntryProperties(event.target.currentURI, doc);
       try {
         contentType = props.get("type", Ci.nsISupportsCString).data;
-      } catch(e) {}
+      } catch (e) {}
       try {
         contentDisposition =
           props.get("content-disposition", Ci.nsISupportsCString).data;
-      } catch(e) {}
-    } catch(e) {}
+      } catch (e) {}
+    } catch (e) {}
   }
 
   let selectionInfo = BrowserUtils.getSelectionDetails(content);
+
+  let loadContext = docShell.QueryInterface(Ci.nsILoadContext);
+  let userContextId = loadContext.originAttributes.userContextId;
 
   if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
     let editFlags = SpellCheckHelper.isEditable(event.target, content);
@@ -204,7 +179,7 @@ var showContentContextMenu = function (event) {
     // commands on the context menu.
     docShell.contentViewer.QueryInterface(Ci.nsIContentViewerEdit)
             .setCommandNode(event.target);
-    event.target.ownerDocument.defaultView.updateCommands("contentcontextmenu");
+    event.target.ownerGlobal.updateCommands("contentcontextmenu");
 
     let customMenuItems = PageMenuChild.build(event.target);
     let principal = doc.nodePrincipal;
@@ -213,13 +188,13 @@ var showContentContextMenu = function (event) {
                      principal, docLocation, charSet, baseURI, referrer,
                      referrerPolicy, contentType, contentDisposition,
                      frameOuterWindowID, selectionInfo, disableSetDesktopBg,
-                     loginFillInfo, parentAllowsMixedContent },
+                     loginFillInfo, parentAllowsMixedContent, userContextId },
                    { event, popupNode: event.target });
   }
   else {
     // Break out to the parent window and pass the add-on info along
     let browser = docShell.chromeEventHandler;
-    let mainWin = browser.ownerDocument.defaultView;
+    let mainWin = browser.ownerGlobal;
     mainWin.gContextMenuContentData = {
       isRemote: false,
       event: event,
@@ -237,6 +212,7 @@ var showContentContextMenu = function (event) {
       disableSetDesktopBackground: disableSetDesktopBg,
       loginFillInfo,
       parentAllowsMixedContent,
+      userContextId,
     };
   }
 }
@@ -244,11 +220,6 @@ var showContentContextMenu = function (event) {
 Cc["@mozilla.org/eventlistenerservice;1"]
   .getService(Ci.nsIEventListenerService)
   .addSystemEventListener(global, "contextmenu", handleContentContextMenu, false);
-
-Services.obs.addObserver(showContentContextMenu, "APZ:LongTapUp", false);
-addEventListener("unload", () => {
-  Services.obs.removeObserver(showContentContextMenu, "APZ:LongTapUp")
-}, false);
 
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
@@ -498,7 +469,8 @@ var ClickEventHandler = {
                  ctrlKey: event.ctrlKey, metaKey: event.metaKey,
                  altKey: event.altKey, href: null, title: null,
                  bookmark: false, referrerPolicy: referrerPolicy,
-                 originAttributes: principal ? principal.originAttributes : {} };
+                 originAttributes: principal ? principal.originAttributes : {},
+                 isContentWindowPrivate: PrivateBrowsingUtils.isContentWindowPrivate(ownerDoc.defaultView)};
 
     if (href) {
       try {
@@ -535,6 +507,7 @@ var ClickEventHandler = {
           json.allowMixedContent = true;
         } catch (e) {}
       }
+      json.originPrincipal = ownerDoc.nodePrincipal;
 
       sendAsyncMessage("Content:Click", json);
       return;
@@ -625,7 +598,8 @@ var ClickEventHandler = {
       if (node.nodeType == content.Node.ELEMENT_NODE &&
           (node.localName == "a" ||
            node.namespaceURI == "http://www.w3.org/1998/Math/MathML")) {
-        href = node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+        href = node.getAttribute("href") ||
+               node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
         if (href) {
           baseURI = node.ownerDocument.baseURIObject;
           break;
@@ -691,7 +665,7 @@ var PageMetadataMessenger = {
     addMessageListener("PageMetadata:GetMicroformats", this);
   },
   receiveMessage(message) {
-    switch(message.name) {
+    switch (message.name) {
       case "PageMetadata:GetPageData": {
         let target = message.objects.target;
         let result = PageMetadata.getData(content.document, target);
@@ -711,10 +685,6 @@ PageMetadataMessenger.init();
 
 addEventListener("ActivateSocialFeature", function (aEvent) {
   let document = content.document;
-  if (PrivateBrowsingUtils.isContentWindowPrivate(content)) {
-    Cu.reportError("cannot use social providers in private windows");
-    return;
-  }
   let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIDOMWindowUtils);
   if (!dwu.isHandlingUserInput) {
@@ -728,7 +698,7 @@ addEventListener("ActivateSocialFeature", function (aEvent) {
   if (data) {
     try {
       data = JSON.parse(data);
-    } catch(e) {
+    } catch (e) {
       Cu.reportError("Social Service manifest parse error: " + e);
       return;
     }
@@ -792,9 +762,11 @@ addMessageListener("ContextMenu:MediaCommand", (message) => {
   }
 });
 
-addMessageListener("ContextMenu:Canvas:ToDataURL", (message) => {
-  let dataURL = message.objects.target.toDataURL();
-  sendAsyncMessage("ContextMenu:Canvas:ToDataURL:Result", { dataURL });
+addMessageListener("ContextMenu:Canvas:ToBlobURL", (message) => {
+  message.objects.target.toBlob((blob) => {
+    let blobURL = URL.createObjectURL(blob);
+    sendAsyncMessage("ContextMenu:Canvas:ToBlobURL:Result", { blobURL });
+  });
 });
 
 addMessageListener("ContextMenu:ReloadFrame", (message) => {
@@ -839,10 +811,10 @@ addMessageListener("ContextMenu:SearchFieldBookmarkData", (message) => {
   let formData = [];
 
   function escapeNameValuePair(aName, aValue, aIsFormUrlEncoded) {
-    if (aIsFormUrlEncoded)
+    if (aIsFormUrlEncoded) {
       return escape(aName + "=" + aValue);
-    else
-      return escape(aName) + "=" + escape(aValue);
+    }
+    return escape(aName) + "=" + escape(aValue);
   }
 
   for (let el of node.form.elements) {
@@ -915,7 +887,7 @@ var LightWeightThemeWebInstallListener = {
           baseURI: event.target.baseURI,
           themeData: event.target.getAttribute("data-browsertheme"),
         });
-        this._previewWindow = event.target.ownerDocument.defaultView;
+        this._previewWindow = event.target.ownerGlobal;
         this._previewWindow.addEventListener("pagehide", this, true);
         break;
       }
@@ -1170,7 +1142,7 @@ var PageInfoListener = {
   getMediaItems: function(document, strings, elem)
   {
     // Check for images defined in CSS (e.g. background, borders)
-    let computedStyle = elem.ownerDocument.defaultView.getComputedStyle(elem, "");
+    let computedStyle = elem.ownerGlobal.getComputedStyle(elem);
     // A node can have multiple media items associated with it - for example,
     // multiple background images.
     let mediaItems = [];
@@ -1190,7 +1162,7 @@ var PageInfoListener = {
           // TODO: Reimplement once bug 714757 is fixed.
           let strVal = val.getStringValue();
           if (strVal.search(/^.*url\(\"?/) > -1) {
-            let url = strVal.replace(/^.*url\(\"?/,"").replace(/\"?\).*$/,"");
+            let url = strVal.replace(/^.*url\(\"?/, "").replace(/\"?\).*$/, "");
             addImage(url, label, strings.notSet, elem, true);
           }
         }
@@ -1457,7 +1429,7 @@ let OfflineApps = {
         // all pages can use offline capabilities, no need to ask the user
         return;
       }
-    } catch(e) {
+    } catch (e) {
       // this pref isn't set by default, ignore failures
     }
     let docId = ++this._docId;

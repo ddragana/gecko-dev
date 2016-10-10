@@ -283,11 +283,6 @@ this.PermissionsTable =  { geolocation: {
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            },
-                           cellbroadcast: {
-                             app: DENY_ACTION,
-                             privileged: DENY_ACTION,
-                             certified: ALLOW_ACTION
-                           },
                            "audio-channel-normal": {
                              app: ALLOW_ACTION,
                              privileged: ALLOW_ACTION,
@@ -415,11 +410,6 @@ this.PermissionsTable =  { geolocation: {
                              privileged: ALLOW_ACTION,
                              certified: ALLOW_ACTION
                            },
-                           "mobileid": {
-                             app: DENY_ACTION,
-                             privileged: PROMPT_ACTION,
-                             certified: PROMPT_ACTION
-                           },
                            // This permission doesn't actually grant access to
                            // anything. It exists only to check the correctness
                            // of web prompt composed permissions in tests.
@@ -482,11 +472,6 @@ this.PermissionsTable =  { geolocation: {
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            },
-                           "presentation": {
-                             app: DENY_ACTION,
-                             privileged: ALLOW_ACTION,
-                             certified: ALLOW_ACTION
-                           },
                            "open-hidden-window": {
                              app: DENY_ACTION,
                              privileged: DENY_ACTION,
@@ -500,6 +485,12 @@ this.PermissionsTable =  { geolocation: {
                            },
                            "system-app-only-audio-channels-in-app": {
                              app: DENY_ACTION,
+                             privileged: DENY_ACTION,
+                             certified: ALLOW_ACTION
+                           },
+                           "previously-certified-app": {
+                             app: DENY_ACTION,
+                             trusted: DENY_ACTION,
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            }

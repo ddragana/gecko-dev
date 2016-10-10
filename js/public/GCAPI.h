@@ -26,12 +26,12 @@ typedef enum JSGCMode {
     /** Perform only global GCs. */
     JSGC_MODE_GLOBAL = 0,
 
-    /** Perform per-compartment GCs until too much garbage has accumulated. */
-    JSGC_MODE_COMPARTMENT = 1,
+    /** Perform per-zone GCs until too much garbage has accumulated. */
+    JSGC_MODE_ZONE = 1,
 
     /**
      * Collect in short time slices rather than all at once. Implies
-     * JSGC_MODE_COMPARTMENT.
+     * JSGC_MODE_ZONE.
      */
     JSGC_MODE_INCREMENTAL = 2
 } JSGCMode;
@@ -65,7 +65,7 @@ namespace JS {
     D(EVICT_NURSERY)                            \
     D(FULL_STORE_BUFFER)                        \
     D(SHARED_MEMORY_LIMIT)                      \
-    D(PERIODIC_FULL_GC)                         \
+    D(UNUSED1)                                  \
     D(INCREMENTAL_TOO_SLOW)                     \
     D(ABORT_GC)                                 \
                                                 \
@@ -333,22 +333,22 @@ enum GCProgress {
 };
 
 struct JS_PUBLIC_API(GCDescription) {
-    bool isCompartment_;
+    bool isZone_;
     JSGCInvocationKind invocationKind_;
     gcreason::Reason reason_;
 
-    GCDescription(bool isCompartment, JSGCInvocationKind kind, gcreason::Reason reason)
-      : isCompartment_(isCompartment), invocationKind_(kind), reason_(reason) {}
+    GCDescription(bool isZone, JSGCInvocationKind kind, gcreason::Reason reason)
+      : isZone_(isZone), invocationKind_(kind), reason_(reason) {}
 
-    char16_t* formatSliceMessage(JSRuntime* rt) const;
-    char16_t* formatSummaryMessage(JSRuntime* rt) const;
-    char16_t* formatJSON(JSRuntime* rt, uint64_t timestamp) const;
+    char16_t* formatSliceMessage(JSContext* cx) const;
+    char16_t* formatSummaryMessage(JSContext* cx) const;
+    char16_t* formatJSON(JSContext* cx, uint64_t timestamp) const;
 
-    JS::dbg::GarbageCollectionEvent::Ptr toGCEvent(JSRuntime* rt) const;
+    JS::dbg::GarbageCollectionEvent::Ptr toGCEvent(JSContext* cx) const;
 };
 
 typedef void
-(* GCSliceCallback)(JSRuntime* rt, GCProgress progress, const GCDescription& desc);
+(* GCSliceCallback)(JSContext* cx, GCProgress progress, const GCDescription& desc);
 
 /**
  * The GC slice callback is called at the beginning and end of each slice. This
@@ -376,7 +376,7 @@ enum class GCNurseryProgress {
  * A nursery collection callback receives the progress of the nursery collection
  * and the reason for the collection.
  */
-using GCNurseryCollectionCallback = void(*)(JSRuntime* rt, GCNurseryProgress progress,
+using GCNurseryCollectionCallback = void(*)(JSContext* cx, GCNurseryProgress progress,
                                             gcreason::Reason reason);
 
 /**
@@ -385,6 +385,16 @@ using GCNurseryCollectionCallback = void(*)(JSRuntime* rt, GCNurseryProgress pro
  */
 extern JS_PUBLIC_API(GCNurseryCollectionCallback)
 SetGCNurseryCollectionCallback(JSContext* cx, GCNurseryCollectionCallback callback);
+
+typedef void
+(* DoCycleCollectionCallback)(JSContext* cx);
+
+/**
+ * The purge gray callback is called after any COMPARTMENT_REVIVED GC in which
+ * the majority of compartments have been marked gray.
+ */
+extern JS_PUBLIC_API(DoCycleCollectionCallback)
+SetDoCycleCollectionCallback(JSContext* cx, DoCycleCollectionCallback callback);
 
 /**
  * Incremental GC defaults to enabled, but may be disabled for testing or in
@@ -474,14 +484,6 @@ extern JS_PUBLIC_API(size_t)
 GetGCNumber();
 
 /**
- * The GC does not immediately return the unused memory freed by a collection
- * back to the system incase it is needed soon afterwards. This call forces the
- * GC to return this memory immediately.
- */
-extern JS_PUBLIC_API(void)
-ShrinkGCBuffers(JSContext* cx);
-
-/**
  * Assert if a GC occurs while this class is live. This class does not disable
  * the static rooting hazard analysis.
  */
@@ -493,14 +495,14 @@ class JS_PUBLIC_API(AutoAssertOnGC)
 
   public:
     AutoAssertOnGC();
-    explicit AutoAssertOnGC(JSRuntime* rt);
+    explicit AutoAssertOnGC(JSContext* cx);
     ~AutoAssertOnGC();
 
     static void VerifyIsSafeToGC(JSRuntime* rt);
 #else
   public:
     AutoAssertOnGC() {}
-    explicit AutoAssertOnGC(JSRuntime* rt) {}
+    explicit AutoAssertOnGC(JSContext* cx) {}
     ~AutoAssertOnGC() {}
 
     static void VerifyIsSafeToGC(JSRuntime* rt) {}
@@ -518,13 +520,13 @@ class JS_PUBLIC_API(AutoAssertNoAlloc)
 
   public:
     AutoAssertNoAlloc() : gc(nullptr) {}
-    explicit AutoAssertNoAlloc(JSRuntime* rt);
+    explicit AutoAssertNoAlloc(JSContext* cx);
     void disallowAlloc(JSRuntime* rt);
     ~AutoAssertNoAlloc();
 #else
   public:
     AutoAssertNoAlloc() {}
-    explicit AutoAssertNoAlloc(JSRuntime* rt) {}
+    explicit AutoAssertNoAlloc(JSContext* cx) {}
     void disallowAlloc(JSRuntime* rt) {}
 #endif
 };
@@ -547,7 +549,7 @@ class JS_PUBLIC_API(AutoSuppressGCAnalysis) : public AutoAssertNoAlloc
 {
   public:
     AutoSuppressGCAnalysis() : AutoAssertNoAlloc() {}
-    explicit AutoSuppressGCAnalysis(JSRuntime* rt) : AutoAssertNoAlloc(rt) {}
+    explicit AutoSuppressGCAnalysis(JSContext* cx) : AutoAssertNoAlloc(cx) {}
 } JS_HAZ_GC_SUPPRESSED;
 
 /**
@@ -578,7 +580,7 @@ class JS_PUBLIC_API(AutoCheckCannotGC) : public AutoAssertOnGC
 {
   public:
     AutoCheckCannotGC() : AutoAssertOnGC() {}
-    explicit AutoCheckCannotGC(JSRuntime* rt) : AutoAssertOnGC(rt) {}
+    explicit AutoCheckCannotGC(JSContext* cx) : AutoAssertOnGC(cx) {}
 } JS_HAZ_GC_INVALIDATED;
 
 /**
@@ -640,6 +642,7 @@ namespace JS {
 static MOZ_ALWAYS_INLINE void
 ExposeObjectToActiveJS(JSObject* obj)
 {
+    MOZ_ASSERT(obj);
     js::gc::ExposeGCThingToActiveJS(GCCellPtr(obj));
 }
 

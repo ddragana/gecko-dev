@@ -75,6 +75,15 @@ nsBrowserElement::InitBrowserElementAPI()
 }
 
 void
+nsBrowserElement::DestroyBrowserElementFrameScripts()
+{
+  if (!mBrowserElementAPI) {
+    return;
+  }
+  mBrowserElementAPI->DestroyFrameScripts();
+}
+
+void
 nsBrowserElement::SetVisible(bool aVisible, ErrorResult& aRv)
 {
   NS_ENSURE_TRUE_VOID(IsBrowserElementOrThrow(aRv));
@@ -261,7 +270,10 @@ nsBrowserElement::Download(const nsAString& aUrl,
   nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(mBrowserElementAPI);
   MOZ_ASSERT(wrappedObj, "Failed to get wrapped JS from XPCOM component.");
   AutoJSAPI jsapi;
-  jsapi.Init(wrappedObj->GetJSObject());
+  if (!jsapi.Init(wrappedObj->GetJSObject())) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
   JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> options(cx);
   aRv.MightThrowJSException();
@@ -714,7 +726,10 @@ nsBrowserElement::ExecuteScript(const nsAString& aScript,
   nsCOMPtr<nsIXPConnectWrappedJS> wrappedObj = do_QueryInterface(mBrowserElementAPI);
   MOZ_ASSERT(wrappedObj, "Failed to get wrapped JS from XPCOM component.");
   AutoJSAPI jsapi;
-  jsapi.Init(wrappedObj->GetJSObject());
+  if (!jsapi.Init(wrappedObj->GetJSObject())) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
   JSContext* cx = jsapi.cx();
   JS::Rooted<JS::Value> options(cx);
   aRv.MightThrowJSException();

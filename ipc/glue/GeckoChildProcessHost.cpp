@@ -19,9 +19,13 @@
 #endif
 
 #include "MainThreadUtils.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "prenv.h"
 #include "nsXPCOMPrivate.h"
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#include "nsAppDirectoryServiceDefs.h"
+#endif
 
 #include "nsExceptionHandler.h"
 
@@ -608,6 +612,20 @@ AddAppDirToCommandLine(std::vector<std::string>& aCmdLine)
         aCmdLine.push_back(path.get());
 #endif
       }
+
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+      // Full path to the profile dir
+      nsCOMPtr<nsIFile> profileDir;
+      rv = directoryService->Get(NS_APP_USER_PROFILE_50_DIR,
+                                 NS_GET_IID(nsIFile),
+                                 getter_AddRefs(profileDir));
+      if (NS_SUCCEEDED(rv)) {
+        nsAutoCString path;
+        MOZ_ALWAYS_SUCCEEDS(profileDir->GetNativePath(path));
+        aCmdLine.push_back("-profile");
+        aCmdLine.push_back(path.get());
+      }
+#endif
     }
   }
 }
@@ -688,10 +706,10 @@ AddContentSandboxAllowedFiles(int32_t aSandboxLevel,
 
   // Convert network share path to format for sandbox policy.
   if (Substring(binDirPath, 0, 2).Equals(L"\\\\")) {
-    binDirPath.InsertLiteral(MOZ_UTF16("??\\UNC"), 1);
+    binDirPath.InsertLiteral(u"??\\UNC", 1);
   }
 
-  binDirPath.AppendLiteral(MOZ_UTF16("\\*"));
+  binDirPath.AppendLiteral(u"\\*");
 
   aAllowedFilesRead.push_back(std::wstring(binDirPath.get()));
 }
@@ -711,7 +729,7 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   // send the child the PID so that it can open a ProcessHandle back to us.
   // probably don't want to do this in the long run
   char pidstring[32];
-  snprintf_literal(pidstring,"%d", base::Process::Current().pid());
+  SprintfLiteral(pidstring,"%d", base::Process::Current().pid());
 
   const char* const childProcessType =
       XRE_ChildProcessTypeToString(mProcessType);
@@ -730,6 +748,14 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   if (privs == base::PRIVILEGES_DEFAULT) {
     privs = DefaultChildPrivileges();
   }
+
+#if defined(MOZ_WIDGET_GTK)
+  if (mProcessType == GeckoProcessType_Content) {
+    // disable IM module to avoid sandbox violation
+    newEnvVars["GTK_IM_MODULE"] = "gtk-im-context-simple";
+  }
+#endif
+
   // XPCOM may not be initialized in some subprocesses.  We don't want
   // to initialize XPCOM just for the directory service, especially
   // since LD_LIBRARY_PATH is already set correctly in subprocesses
@@ -1117,9 +1143,11 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
     base::LaunchApp(cmdLine, false, false, &process);
 
 #ifdef MOZ_SANDBOX
-    // We need to be able to duplicate handles to non-sandboxed content
-    // processes, so add it as a target peer.
-    if (mProcessType == GeckoProcessType_Content) {
+    // We need to be able to duplicate handles to some types of non-sandboxed
+    // child processes.
+    if (mProcessType == GeckoProcessType_Content ||
+        mProcessType == GeckoProcessType_GPU ||
+        mProcessType == GeckoProcessType_GMPlugin) {
       if (!mSandboxBroker.AddTargetPeer(process)) {
         NS_WARNING("Failed to add content process as target peer.");
       }
@@ -1141,43 +1169,47 @@ GeckoChildProcessHost::PerformAsyncLaunchInternal(std::vector<std::string>& aExt
   mChildTask = child_task;
 #endif
 
-  OpenPrivilegedHandle(base::GetProcId(process));
-  {
-    MonitorAutoLock lock(mMonitor);
-    mProcessState = PROCESS_CREATED;
-    lock.Notify();
+  if (!OpenPrivilegedHandle(base::GetProcId(process))
+#ifdef XP_WIN
+      // If we failed in opening the process handle, try harder by duplicating
+      // one.
+      && !::DuplicateHandle(::GetCurrentProcess(), process,
+                            ::GetCurrentProcess(), &mChildProcessHandle,
+                            PROCESS_DUP_HANDLE | PROCESS_TERMINATE |
+                            PROCESS_QUERY_INFORMATION | PROCESS_VM_READ |
+                            SYNCHRONIZE,
+                            FALSE, 0)
+#endif
+     ) {
+    NS_RUNTIMEABORT("cannot open handle to child process");
   }
+  MonitorAutoLock lock(mMonitor);
+  mProcessState = PROCESS_CREATED;
+  lock.Notify();
 
   return true;
 }
 
-void
+bool
 GeckoChildProcessHost::OpenPrivilegedHandle(base::ProcessId aPid)
 {
   if (mChildProcessHandle) {
     MOZ_ASSERT(aPid == base::GetProcId(mChildProcessHandle));
-    return;
+    return true;
   }
-  int64_t error = 0;
-  if (!base::OpenPrivilegedProcessHandle(aPid, &mChildProcessHandle, &error)) {
-#ifdef MOZ_CRASHREPORTER
-    CrashReporter::
-      AnnotateCrashReport(NS_LITERAL_CSTRING("LastError"),
-                          nsPrintfCString ("%lld", error));
-#endif
-    NS_RUNTIMEABORT("can't open handle to child process");
-  }
+
+  return base::OpenPrivilegedProcessHandle(aPid, &mChildProcessHandle);
 }
 
 void
 GeckoChildProcessHost::OnChannelConnected(int32_t peer_pid)
 {
-  OpenPrivilegedHandle(peer_pid);
-  {
-    MonitorAutoLock lock(mMonitor);
-    mProcessState = PROCESS_CONNECTED;
-    lock.Notify();
+  if (!OpenPrivilegedHandle(peer_pid)) {
+    NS_RUNTIMEABORT("can't open handle to child process");
   }
+  MonitorAutoLock lock(mMonitor);
+  mProcessState = PROCESS_CONNECTED;
+  lock.Notify();
 }
 
 void
@@ -1213,54 +1245,3 @@ GeckoChildProcessHost::GetQueuedMessages(std::queue<IPC::Message>& queue)
 }
 
 bool GeckoChildProcessHost::sRunSelfAsContentProc(false);
-
-#ifdef MOZ_NUWA_PROCESS
-
-using mozilla::ipc::GeckoExistingProcessHost;
-using mozilla::ipc::FileDescriptor;
-
-GeckoExistingProcessHost::
-GeckoExistingProcessHost(GeckoProcessType aProcessType,
-                         base::ProcessHandle aProcess,
-                         const FileDescriptor& aFileDescriptor,
-                         ChildPrivileges aPrivileges)
-  : GeckoChildProcessHost(aProcessType, aPrivileges)
-  , mExistingProcessHandle(aProcess)
-  , mExistingFileDescriptor(aFileDescriptor)
-{
-  NS_ASSERTION(aFileDescriptor.IsValid(),
-               "Expected file descriptor to be valid");
-}
-
-GeckoExistingProcessHost::~GeckoExistingProcessHost()
-{
-  // Bug 943174: If we don't do this, ~GeckoChildProcessHost will try
-  // to wait on a process that isn't a direct child, and bad things
-  // will happen.
-  SetAlreadyDead();
-}
-
-bool
-GeckoExistingProcessHost::PerformAsyncLaunch(StringVector aExtraOpts,
-                                             base::ProcessArchitecture aArch)
-{
-  OpenPrivilegedHandle(base::GetProcId(mExistingProcessHandle));
-
-  MonitorAutoLock lock(mMonitor);
-  mProcessState = PROCESS_CREATED;
-  lock.Notify();
-
-  return true;
-}
-
-void
-GeckoExistingProcessHost::InitializeChannel()
-{
-  CreateChannel(mExistingFileDescriptor);
-
-  MonitorAutoLock lock(mMonitor);
-  mProcessState = CHANNEL_INITIALIZED;
-  lock.Notify();
-}
-
-#endif /* MOZ_NUWA_PROCESS */

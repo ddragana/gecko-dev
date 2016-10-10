@@ -18,6 +18,7 @@
 #include "nsSocketTransportService2.h"
 #include "nsThreadUtils.h"
 #include "nsURLHelper.h"
+#include "mozilla/Logging.h"
 
 using mozilla::AutoSafeJSContext;
 using mozilla::dom::Sequence;
@@ -195,7 +196,7 @@ ConnectionData::Notify(nsITimer *aTimer)
 
     mTimer = nullptr;
 
-    mStatus.AssignLiteral(MOZ_UTF16("NS_ERROR_NET_TIMEOUT"));
+    mStatus.AssignLiteral(u"NS_ERROR_NET_TIMEOUT");
     mThread->Dispatch(NewRunnableMethod<RefPtr<ConnectionData>>
 		      (mDashboard, &Dashboard::GetConnectionStatus, this),
 		      NS_DISPATCH_NORMAL);
@@ -758,31 +759,36 @@ HttpConnInfo::SetHTTP1ProtocolVersion(uint8_t pv)
 {
     switch (pv) {
     case NS_HTTP_VERSION_0_9:
-        protocolVersion.AssignLiteral(MOZ_UTF16("http/0.9"));
+        protocolVersion.AssignLiteral(u"http/0.9");
         break;
     case NS_HTTP_VERSION_1_0:
-        protocolVersion.AssignLiteral(MOZ_UTF16("http/1.0"));
+        protocolVersion.AssignLiteral(u"http/1.0");
         break;
     case NS_HTTP_VERSION_1_1:
-        protocolVersion.AssignLiteral(MOZ_UTF16("http/1.1"));
+        protocolVersion.AssignLiteral(u"http/1.1");
         break;
     case NS_HTTP_VERSION_2_0:
-        protocolVersion.AssignLiteral(MOZ_UTF16("http/2.0"));
+        protocolVersion.AssignLiteral(u"http/2.0");
         break;
     default:
-        protocolVersion.AssignLiteral(MOZ_UTF16("unknown protocol version"));
+        protocolVersion.AssignLiteral(u"unknown protocol version");
     }
 }
 
 void
 HttpConnInfo::SetHTTP2ProtocolVersion(uint8_t pv)
 {
-    if (pv == SPDY_VERSION_31) {
-        protocolVersion.AssignLiteral(MOZ_UTF16("spdy/3.1"));
-    } else {
-        MOZ_ASSERT (pv == HTTP_VERSION_2);
-        protocolVersion.Assign(MOZ_UTF16("h2"));
-    }
+    MOZ_ASSERT (pv == HTTP_VERSION_2);
+    protocolVersion.Assign(u"h2");
+}
+
+NS_IMETHODIMP
+Dashboard::GetLogPath(nsACString &aLogPath)
+{
+    aLogPath.SetCapacity(2048);
+    uint32_t len = LogModule::GetLogFile(aLogPath.BeginWriting(), 2048);
+    aLogPath.SetLength(len);
+    return NS_OK;
 }
 
 NS_IMETHODIMP

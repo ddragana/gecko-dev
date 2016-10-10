@@ -3,7 +3,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Tooltip widget (see devtools/client/shared/widgets/Tooltip.js) */
+/* Tooltip specific theme variables */
+
+.theme-dark {
+  --bezier-diagonal-color: #eee;
+  --bezier-grid-color: rgba(0, 0, 0, 0.2);
+}
+
+.theme-light {
+  --bezier-diagonal-color: rgba(0, 0, 0, 0.2);
+  --bezier-grid-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Tooltip widget (see devtools/client/shared/widgets/tooltip/Tooltip.js) */
 
 .devtools-tooltip .panel-arrowcontent {
   padding: 4px;
@@ -58,19 +70,6 @@
 
 .devtools-tooltip-simple-text:last-child {
   margin-bottom: -4px;
-}
-
-/* Tooltip: Alert Icon */
-
-.devtools-tooltip-alert-icon {
-  width: 32px;
-  height: 32px;
-  margin: 6px;
-  margin-inline-end: 20px;
-}
-
-.devtools-tooltip-alert-icon {
-  list-style-image: url("chrome://global/skin/icons/warning-32.png");
 }
 
 /* Tooltip: Variables View */
@@ -205,8 +204,13 @@
   flex-shrink: 0;
 }
 
-.tooltip-arrow:-moz-locale-dir(rtl) {
-  align-self: flex-end;
+/* In RTL locales, only use RTL on the tooltip content, keep LTR for positioning */
+.tooltip-container:-moz-locale-dir(rtl) {
+  direction: ltr;
+}
+
+.tooltip-panel:-moz-locale-dir(rtl) {
+  direction: rtl;
 }
 
 .tooltip-top .tooltip-arrow {
@@ -359,6 +363,7 @@
  */
 
 .stack-trace-tooltip {
+  direction: ltr;
   height: 100%;
   overflow-y: auto;
 }
@@ -401,11 +406,18 @@
 
 .stack-frame-source-name {
   flex: 1 1;
+  /* Makes the file name truncated (and ellipsis shown) on the left side */
   direction: rtl;
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Enforce LTR direction for the file name - fixes bug 1290056 */
+.stack-frame-source-name-inner {
+  direction: ltr;
+  unicode-bidi: embed;
 }
 
 .stack-frame-line {

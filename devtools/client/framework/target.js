@@ -348,8 +348,15 @@ TabTarget.prototype = {
   },
 
   get isAddon() {
+    return !!(this._form && this._form.actor && (
+      this._form.actor.match(/conn\d+\.addon\d+/) ||
+      this._form.actor.match(/conn\d+\.webExtension\d+/)
+    ));
+  },
+
+  get isWebExtension() {
     return !!(this._form && this._form.actor &&
-              this._form.actor.match(/conn\d+\.addon\d+/));
+              this._form.actor.match(/conn\d+\.webExtension\d+/));
   },
 
   get isLocalTab() {
@@ -579,7 +586,7 @@ TabTarget.prototype = {
       if (this.isLocalTab) {
         // We started with a local tab and created the client ourselves, so we
         // should close it.
-        this._client.close(cleanupAndResolve);
+        this._client.close().then(cleanupAndResolve);
       } else if (this.activeTab) {
         // The client was handed to us, so we are not responsible for closing
         // it. We just need to detach from the tab, if already attached.
@@ -612,6 +619,9 @@ TabTarget.prototype = {
     this._form = null;
     this._remote = null;
     this._root = null;
+    this._title = null;
+    this._url = null;
+    this.threadActor = null;
   },
 
   toString: function () {
@@ -760,7 +770,9 @@ WorkerTarget.prototype = {
     return this._workerClient.client;
   },
 
-  destroy: function () {},
+  destroy: function () {
+    this._workerClient.detach();
+  },
 
   hasActor: function (name) {
     // console is the only one actor implemented by WorkerActor

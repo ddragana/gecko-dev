@@ -270,7 +270,10 @@ nsTimerEvent::DeleteAllocatorIfNeeded()
 NS_IMETHODIMP
 nsTimerEvent::Run()
 {
-  MOZ_ASSERT(mTimer);
+  if (!mTimer) {
+    MOZ_ASSERT(false);
+    return NS_OK;
+  }
 
   if (mGeneration != mTimer->GetGeneration()) {
     return NS_OK;
@@ -386,10 +389,6 @@ TimerThread::Shutdown()
   return NS_OK;
 }
 
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
-
 namespace {
 
 struct MicrosecondsToInterval
@@ -412,12 +411,6 @@ NS_IMETHODIMP
 TimerThread::Run()
 {
   PR_SetCurrentThreadName("Timer");
-
-#ifdef MOZ_NUWA_PROCESS
-  if (IsNuwaProcess()) {
-    NuwaMarkCurrentThread(nullptr, nullptr);
-  }
-#endif
 
   MonitorAutoLock lock(mMonitor);
 
@@ -446,11 +439,7 @@ TimerThread::Run()
     bool forceRunThisTimer = forceRunNextTimer;
     forceRunNextTimer = false;
 
-    if (mSleeping
-#ifdef MOZ_NUWA_PROCESS
-        || IsNuwaProcess() // Don't fire timers or deadlock will result.
-#endif
-        ) {
+    if (mSleeping) {
       // Sleep for 0.1 seconds while not firing timers.
       uint32_t milliseconds = 100;
       if (ChaosMode::isActive(ChaosFeature::TimerScheduling)) {
@@ -597,39 +586,12 @@ TimerThread::AddTimer(nsTimerImpl* aTimer)
 }
 
 nsresult
-TimerThread::TimerDelayChanged(nsTimerImpl* aTimer)
-{
-  MonitorAutoLock lock(mMonitor);
-
-  // Our caller has a strong ref to aTimer, so it can't go away here under
-  // ReleaseTimerInternal.
-  RemoveTimerInternal(aTimer);
-
-  int32_t i = AddTimerInternal(aTimer);
-  if (i < 0) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  // Awaken the timer thread.
-  if (mWaiting && i == 0) {
-    mNotified = true;
-    mMonitor.Notify();
-  }
-
-  return NS_OK;
-}
-
-nsresult
 TimerThread::RemoveTimer(nsTimerImpl* aTimer)
 {
   MonitorAutoLock lock(mMonitor);
 
   // Remove the timer from our array.  Tell callers that aTimer was not found
-  // by returning NS_ERROR_NOT_AVAILABLE.  Unlike the TimerDelayChanged case
-  // immediately above, our caller may be passing a (now-)weak ref in via the
-  // aTimer param, specifically when nsTimerImpl::Release loses a race with
-  // TimerThread::Run, must wait for the mMonitor auto-lock here, and during the
-  // wait Run drops the only remaining ref to aTimer via RemoveTimerInternal.
+  // by returning NS_ERROR_NOT_AVAILABLE.
 
   if (!RemoveTimerInternal(aTimer)) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -662,7 +624,6 @@ TimerThread::AddTimerInternal(nsTimerImpl* aTimer)
     return -1;
   }
 
-  aTimer->mArmed = true;
   NS_ADDREF(aTimer);
 
 #ifdef MOZ_TASK_TRACER
@@ -693,8 +654,6 @@ TimerThread::ReleaseTimerInternal(nsTimerImpl* aTimer)
     // copied to a local array before releasing in shutdown
     mMonitor.AssertCurrentThreadOwns();
   }
-  // Order is crucial here -- see nsTimerImpl::Release.
-  aTimer->mArmed = false;
   NS_RELEASE(aTimer);
 }
 
@@ -724,12 +683,6 @@ TimerThread::PostTimerEvent(already_AddRefed<nsTimerImpl> aTimerRef)
 
   if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
     event->mInitTime = TimeStamp::Now();
-  }
-
-  // If this is a repeating precise timer, we need to calculate the time for
-  // the next timer to fire before we make the callback. But don't re-arm.
-  if (timer->IsRepeatingPrecisely()) {
-    timer->SetDelayInternal(timer->mDelay);
   }
 
 #ifdef MOZ_TASK_TRACER

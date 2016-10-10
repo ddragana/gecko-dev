@@ -7,12 +7,15 @@
 '''Python usage, esp. virtualenv.
 '''
 
+import distutils.version
 import os
 import subprocess
 import sys
 import time
 import json
+import socket
 import traceback
+import urlparse
 
 import mozharness
 from mozharness.base.script import (
@@ -49,7 +52,7 @@ def get_tlsv1_post():
 
 # Virtualenv {{{1
 virtualenv_config_options = [
-    [["--venv-path", "--virtualenv-path"], {
+    [["--virtualenv-path"], {
         "action": "store",
         "dest": "virtualenv_path",
         "default": "venv",
@@ -111,18 +114,21 @@ class VirtualenvMixin(object):
                                          optional, two_pass, editable))
 
     def query_virtualenv_path(self):
-        c = self.config
+        """Determine the absolute path to the virtualenv."""
         dirs = self.query_abs_dirs()
-        virtualenv = None
+
         if 'abs_virtualenv_dir' in dirs:
-            virtualenv = dirs['abs_virtualenv_dir']
-        elif c.get('virtualenv_path'):
-            if os.path.isabs(c['virtualenv_path']):
-                virtualenv = c['virtualenv_path']
-            else:
-                virtualenv = os.path.join(dirs['abs_work_dir'],
-                                          c['virtualenv_path'])
-        return virtualenv
+            return dirs['abs_virtualenv_dir']
+
+        p = self.config['virtualenv_path']
+        if not p:
+            self.fatal('virtualenv_path config option not set; '
+                       'this should never happen')
+
+        if os.path.isabs(p):
+            return p
+        else:
+            return os.path.join(dirs['abs_work_dir'], p)
 
     def query_python_path(self, binary="python"):
         """Return the path of a binary inside the virtualenv, if
@@ -134,10 +140,8 @@ class VirtualenvMixin(object):
             if self._is_windows():
                 bin_dir = 'Scripts'
             virtualenv_path = self.query_virtualenv_path()
-            if virtualenv_path:
-                self.python_paths[binary] = os.path.abspath(os.path.join(virtualenv_path, bin_dir, binary))
-            else:
-                self.python_paths[binary] = self.query_exe(binary)
+            self.python_paths[binary] = os.path.abspath(os.path.join(virtualenv_path, bin_dir, binary))
+
         return self.python_paths[binary]
 
     def query_python_site_packages_path(self):
@@ -257,10 +261,28 @@ class VirtualenvMixin(object):
         else:
             self.fatal("install_module() doesn't understand an install_method of %s!" % install_method)
 
-        # Add --find-links pages to look at
+        # Add --find-links pages to look at. Add --trusted-host automatically if
+        # the host isn't secure. This allows modern versions of pip to connect
+        # without requiring an override.
         proxxy = Proxxy(self.config, self.log_obj)
+        trusted_hosts = set()
         for link in proxxy.get_proxies_and_urls(c.get('find_links', [])):
+            parsed = urlparse.urlparse(link)
+
+            try:
+                socket.gethostbyname(parsed.hostname)
+            except socket.gaierror as e:
+                self.info('error resolving %s (ignoring): %s' %
+                          (parsed.hostname, e.message))
+                continue
+
             command.extend(["--find-links", link])
+            if parsed.scheme != 'https':
+                trusted_hosts.add(parsed.hostname)
+
+        if self.pip_version >= distutils.version.LooseVersion('6.0'):
+            for host in sorted(trusted_hosts):
+                command.extend(['--trusted-host', host])
 
         # module_url can be None if only specifying requirements files
         if module_url:
@@ -349,45 +371,74 @@ class VirtualenvMixin(object):
         dirs = self.query_abs_dirs()
         venv_path = self.query_virtualenv_path()
         self.info("Creating virtualenv %s" % venv_path)
-        virtualenv = c.get('virtualenv', self.query_exe('virtualenv'))
-        if isinstance(virtualenv, str):
-            # allow for [python, virtualenv] in config
-            virtualenv = [virtualenv]
 
-        if not os.path.exists(virtualenv[0]) and not self.which(virtualenv[0]):
-            self.add_summary("The executable '%s' is not found; not creating "
-                             "virtualenv!" % virtualenv[0], level=FATAL)
-            return -1
+        # If running from a source checkout, use the virtualenv that is
+        # vendored since that is deterministic.
+        if self.topsrcdir:
+            virtualenv = [
+                sys.executable,
+                os.path.join(self.topsrcdir, 'python', 'virtualenv', 'virtualenv.py')
+            ]
+            virtualenv_options = c.get('virtualenv_options', [])
+            # Don't create symlinks. If we don't do this, permissions issues may
+            # hinder virtualenv creation or operation. Ideally we should do this
+            # below when using the system virtualenv. However, this is a newer
+            # feature and isn't guaranteed to be supported.
+            virtualenv_options.append('--always-copy')
 
-        # https://bugs.launchpad.net/virtualenv/+bug/352844/comments/3
-        # https://bugzilla.mozilla.org/show_bug.cgi?id=700415#c50
-        if c.get('virtualenv_python_dll'):
-            # We may someday want to copy a differently-named dll, but
-            # let's not think about that right now =\
-            dll_name = os.path.basename(c['virtualenv_python_dll'])
-            target = self.query_python_path(dll_name)
-            scripts_dir = os.path.dirname(target)
-            self.mkdir_p(scripts_dir)
-            self.copyfile(c['virtualenv_python_dll'], target, error_level=WARNING)
+        # No source checkout. Try to find virtualenv from config options
+        # or search path.
         else:
-            self.mkdir_p(dirs['abs_work_dir'])
+            virtualenv = c.get('virtualenv', self.query_exe('virtualenv'))
+            if isinstance(virtualenv, str):
+                # allow for [python, virtualenv] in config
+                virtualenv = [virtualenv]
 
-        # make this list configurable?
-        for module in ('distribute', 'pip'):
-            if c.get('%s_url' % module):
-                self.download_file(c['%s_url' % module],
-                                   parent_dir=dirs['abs_work_dir'])
+            if not os.path.exists(virtualenv[0]) and not self.which(virtualenv[0]):
+                self.add_summary("The executable '%s' is not found; not creating "
+                                 "virtualenv!" % virtualenv[0], level=FATAL)
+                return -1
 
-        virtualenv_options = c.get('virtualenv_options',
-                                   ['--no-site-packages', '--distribute'])
+            # https://bugs.launchpad.net/virtualenv/+bug/352844/comments/3
+            # https://bugzilla.mozilla.org/show_bug.cgi?id=700415#c50
+            if c.get('virtualenv_python_dll'):
+                # We may someday want to copy a differently-named dll, but
+                # let's not think about that right now =\
+                dll_name = os.path.basename(c['virtualenv_python_dll'])
+                target = self.query_python_path(dll_name)
+                scripts_dir = os.path.dirname(target)
+                self.mkdir_p(scripts_dir)
+                self.copyfile(c['virtualenv_python_dll'], target, error_level=WARNING)
+
+            # make this list configurable?
+            for module in ('distribute', 'pip'):
+                if c.get('%s_url' % module):
+                    self.download_file(c['%s_url' % module],
+                                       parent_dir=dirs['abs_work_dir'])
+
+            virtualenv_options = c.get('virtualenv_options',
+                                       ['--no-site-packages', '--distribute'])
 
         if os.path.exists(self.query_python_path()):
             self.info("Virtualenv %s appears to already exist; skipping virtualenv creation." % self.query_python_path())
         else:
+            self.mkdir_p(dirs['abs_work_dir'])
             self.run_command(virtualenv + virtualenv_options + [venv_path],
                              cwd=dirs['abs_work_dir'],
                              error_list=VirtualenvErrorList,
                              halt_on_failure=True)
+
+        # Resolve the pip version so we can conditionally do things if we have
+        # a modern pip.
+        pip = self.query_python_path('pip')
+        output = self.get_output_from_command([pip, '--version'],
+                                              halt_on_failure=True)
+        words = output.split()
+        if words[0] != 'pip':
+            self.fatal('pip --version output is weird: %s' % output)
+        pip_version = words[1]
+        self.pip_version = distutils.version.LooseVersion(pip_version)
+
         if not modules:
             modules = c.get('virtualenv_modules', [])
         if not requirements:
@@ -466,6 +517,12 @@ class ResourceMonitoringMixin(object):
                                         method='pip', optional=True)
         self.register_virtualenv_module('jsonschema==2.5.1',
                                         method='pip')
+        # explicitly install functools32, because some slaves aren't using
+        # a version of pip recent enough to install it automatically with
+        # jsonschema (which depends on it)
+        # https://github.com/Julian/jsonschema/issues/233
+        self.register_virtualenv_module('functools32==3.2.3-2',
+                                        method='pip')
         self._resource_monitor = None
 
         # 2-tuple of (name, options) to assign Perfherder resource monitor
@@ -523,6 +580,8 @@ class ResourceMonitoringMixin(object):
             # Upload a JSON file containing the raw resource data.
             try:
                 upload_dir = self.query_abs_dirs()['abs_blob_upload_dir']
+                if not os.path.exists(upload_dir):
+                    os.makedirs(upload_dir)
                 with open(os.path.join(upload_dir, 'resource-usage.json'), 'wb') as fh:
                     json.dump(self._resource_monitor.as_dict(), fh,
                               sort_keys=True, indent=4)
@@ -614,13 +673,17 @@ class ResourceMonitoringMixin(object):
                     {
                         'name': 'time',
                         'value': phase_duration,
-                    },
-                    {
+                    }
+                ]
+                cpu_percent = rm.aggregate_cpu_percent(phase=phase,
+                                                       per_cpu=False)
+                if cpu_percent is not None:
+                    subtests.append({
                         'name': 'cpu_percent',
                         'value': rm.aggregate_cpu_percent(phase=phase,
                                                           per_cpu=False),
-                    }
-                ]
+                    })
+
                 # We don't report I/O during each step because measured I/O
                 # is system I/O and that I/O can be delayed (e.g. writes will
                 # buffer before being flushed and recorded in our metrics).
@@ -634,18 +697,18 @@ class ResourceMonitoringMixin(object):
                 'suites': suites,
             }
 
-            try:
-                schema_path = os.path.join(external_tools_path,
-                                           'performance-artifact-schema.json')
-                with open(schema_path, 'rb') as fh:
-                    schema = json.load(fh)
+            schema_path = os.path.join(external_tools_path,
+                                       'performance-artifact-schema.json')
+            with open(schema_path, 'rb') as fh:
+                schema = json.load(fh)
 
-                self.info('Validating Perfherder data against %s' % schema_path)
-                jsonschema.validate(data, schema)
-            except Exception:
-                self.exception('error while validating Perfherder data; ignoring')
-            else:
-                self.info('PERFHERDER_DATA: %s' % json.dumps(data))
+            # this will throw an exception that causes the job to fail if the
+            # perfherder data is not valid -- please don't change this
+            # behaviour, otherwise people will inadvertently break this
+            # functionality
+            self.info('Validating Perfherder data against %s' % schema_path)
+            jsonschema.validate(data, schema)
+            self.info('PERFHERDER_DATA: %s' % json.dumps(data))
 
         log_usage('Total resource usage', duration, cpu_percent, cpu_times, io)
 

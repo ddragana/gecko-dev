@@ -93,7 +93,6 @@ TextTrack::SetMode(TextTrackMode aValue)
   if (mMode != aValue) {
     mMode = aValue;
     if (aValue == TextTrackMode::Disabled) {
-      SetCuesInactive();
       // Remove all the cues in MediaElement.
       if (mTextTrackList) {
         HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
@@ -103,6 +102,7 @@ TextTrack::SetMode(TextTrackMode aValue)
           }
         }
       }
+      SetCuesInactive();
     } else {
       // Add all the cues into MediaElement.
       if (mTextTrackList) {
@@ -150,9 +150,12 @@ TextTrack::AddCue(TextTrackCue& aCue)
 void
 TextTrack::RemoveCue(TextTrackCue& aCue, ErrorResult& aRv)
 {
-  aCue.SetActive(false);
-
+  // Bug1304948, check the aCue belongs to the TextTrack.
   mCueList->RemoveCue(aCue, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+  aCue.SetActive(false);
   aCue.SetTrack(nullptr);
   if (mTextTrackList) {
     HTMLMediaElement* mediaElement = mTextTrackList->GetMediaElement();
@@ -316,6 +319,17 @@ TextTrack::GetLanguage(nsAString& aLanguage) const
   } else {
     aLanguage = mLanguage;
   }
+}
+
+void
+TextTrack::DispatchAsyncTrustedEvent(const nsString& aEventName)
+{
+  RefPtr<TextTrack> self = this;
+  NS_DispatchToMainThread(
+    NS_NewRunnableFunction([self, aEventName]() {
+      self->DispatchTrustedEvent(aEventName);
+    })
+  );
 }
 
 } // namespace dom

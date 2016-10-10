@@ -11,12 +11,14 @@
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/CSSStyleSheet.h"
 
+#include "nsNullPrincipal.h"
+
 namespace mozilla {
 
-StyleSheet::StyleSheet(StyleBackendType aType)
+StyleSheet::StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMode)
   : mDocument(nullptr)
   , mOwningNode(nullptr)
-  , mParsingMode(css::eUserSheetFeatures)
+  , mParsingMode(aParsingMode)
   , mType(aType)
   , mDisabled(false)
 {
@@ -33,6 +35,22 @@ StyleSheet::StyleSheet(const StyleSheet& aCopy,
 {
 }
 
+mozilla::dom::CSSStyleSheetParsingMode
+StyleSheet::ParsingModeDOM()
+{
+#define CHECK(X, Y) \
+  static_assert(static_cast<int>(X) == static_cast<int>(Y),             \
+                "mozilla::dom::CSSStyleSheetParsingMode and mozilla::css::SheetParsingMode should have identical values");
+
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Agent, css::eAgentSheetFeatures);
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::User, css::eUserSheetFeatures);
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Author, css::eAuthorSheetFeatures);
+
+#undef CHECK
+
+  return static_cast<mozilla::dom::CSSStyleSheetParsingMode>(mParsingMode);
+}
+
 bool
 StyleSheet::IsComplete() const
 {
@@ -42,12 +60,13 @@ StyleSheet::IsComplete() const
 void
 StyleSheet::SetComplete()
 {
-  NS_ASSERTION(!IsGecko() || !AsGecko().mDirty, "Can't set a dirty sheet complete!");
+  NS_ASSERTION(!IsGecko() || !AsGecko()->mDirty,
+               "Can't set a dirty sheet complete!");
   SheetInfo().mComplete = true;
   if (mDocument && !mDisabled) {
     // Let the document know
     mDocument->BeginUpdate(UPDATE_STYLE);
-    mDocument->SetStyleSheetApplicableState(AsHandle(), true);
+    mDocument->SetStyleSheetApplicableState(this, true);
     mDocument->EndUpdate(UPDATE_STYLE);
   }
 
@@ -59,13 +78,21 @@ StyleSheet::SetComplete()
   }
 }
 
-StyleSheetInfo&
-StyleSheet::SheetInfo()
+StyleSheetInfo::StyleSheetInfo(CORSMode aCORSMode,
+                               ReferrerPolicy aReferrerPolicy,
+                               const dom::SRIMetadata& aIntegrity)
+  : mPrincipal(nsNullPrincipal::Create())
+  , mCORSMode(aCORSMode)
+  , mReferrerPolicy(aReferrerPolicy)
+  , mIntegrity(aIntegrity)
+  , mComplete(false)
+#ifdef DEBUG
+  , mPrincipalSet(false)
+#endif
 {
-  if (IsServo()) {
-    return AsServo();
+  if (!mPrincipal) {
+    NS_RUNTIMEABORT("nsNullPrincipal::Init failed");
   }
-  return *AsGecko().mInner;
 }
 
 } // namespace mozilla

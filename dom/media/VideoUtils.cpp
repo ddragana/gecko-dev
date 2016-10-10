@@ -9,6 +9,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Function.h"
 
+#include "MediaContentType.h"
 #include "MediaPrefs.h"
 #include "MediaResource.h"
 #include "TimeUnits.h"
@@ -28,6 +29,10 @@
 #include <stdint.h>
 
 namespace mozilla {
+
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemClearkey, "org.w3.clearkey");
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemWidevine, "com.widevine.alpha");
+NS_NAMED_LITERAL_CSTRING(kEMEKeySystemPrimetime, "com.adobe.primetime");
 
 using layers::PlanarYCbCrImage;
 
@@ -407,16 +412,6 @@ LogToBrowserConsole(const nsAString& aMsg)
 }
 
 bool
-IsAACCodecString(const nsAString& aCodec)
-{
-  return
-    aCodec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
-    aCodec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
-    aCodec.EqualsLiteral("mp4a.67")   || // MPEG2 AAC-LC
-    aCodec.EqualsLiteral("mp4a.40.29");  // MPEG4 HE-AACv2
-}
-
-bool
 ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs)
 {
   aOutCodecs.Clear();
@@ -434,97 +429,98 @@ ParseCodecsString(const nsAString& aCodecs, nsTArray<nsString>& aOutCodecs)
   return true;
 }
 
-static bool
-CheckContentType(const nsAString& aContentType,
-                 mozilla::function<bool(const nsAString&)> aSubtypeFilter,
-                 mozilla::function<bool(const nsAString&)> aCodecFilter)
+bool
+ParseMIMETypeString(const nsAString& aMIMEType,
+                    nsString& aOutContainerType,
+                    nsTArray<nsString>& aOutCodecs)
 {
-  nsContentTypeParser parser(aContentType);
-  nsAutoString mimeType;
-  nsresult rv = parser.GetType(mimeType);
-  if (NS_FAILED(rv) || !aSubtypeFilter(mimeType)) {
+  nsContentTypeParser parser(aMIMEType);
+  nsresult rv = parser.GetType(aOutContainerType);
+  if (NS_FAILED(rv)) {
     return false;
   }
 
   nsString codecsStr;
   parser.GetParameter("codecs", codecsStr);
-  nsTArray<nsString> codecs;
-  if (!ParseCodecsString(codecsStr, codecs)) {
-    return false;
-  }
-  for (const nsString& codec : codecs) {
-    if (!aCodecFilter(codec)) {
+  return ParseCodecsString(codecsStr, aOutCodecs);
+}
+
+bool
+IsH264CodecString(const nsAString& aCodec)
+{
+  int16_t profile = 0;
+  int16_t level = 0;
+  return ExtractH264CodecDetails(aCodec, profile, level);
+}
+
+bool
+IsAACCodecString(const nsAString& aCodec)
+{
+  return
+    aCodec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
+    aCodec.EqualsLiteral("mp4a.67") || // MPEG2 AAC-LC
+    aCodec.EqualsLiteral("mp4a.40.29");  // MPEG4 HE-AACv2
+}
+
+bool
+IsVP8CodecString(const nsAString& aCodec)
+{
+  return aCodec.EqualsLiteral("vp8") ||
+         aCodec.EqualsLiteral("vp8.0");
+}
+
+bool
+IsVP9CodecString(const nsAString& aCodec)
+{
+  return aCodec.EqualsLiteral("vp9") ||
+         aCodec.EqualsLiteral("vp9.0");
+}
+
+template <int N>
+static bool
+StartsWith(const nsACString& string, const char (&prefix)[N])
+{
+    if (N - 1 > string.Length()) {
       return false;
     }
+    return memcmp(string.Data(), prefix, N - 1) == 0;
+}
+
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMEType(const nsACString& aCodecMIMEType)
+{
+  UniquePtr<TrackInfo> trackInfo;
+  if (StartsWith(aCodecMIMEType, "audio/")) {
+    trackInfo.reset(new AudioInfo());
+    trackInfo->mMimeType = aCodecMIMEType;
+  } else if (StartsWith(aCodecMIMEType, "video/")) {
+    trackInfo.reset(new VideoInfo());
+    trackInfo->mMimeType = aCodecMIMEType;
   }
-  return true;
+  return trackInfo;
 }
 
-bool
-IsH264ContentType(const nsAString& aContentType)
+UniquePtr<TrackInfo>
+CreateTrackInfoWithMIMETypeAndContentTypeExtraParameters(
+  const nsACString& aCodecMIMEType,
+  const MediaContentType& aContentType)
 {
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("video/mp4");
-    },
-    [](const nsAString& codec) {
-      int16_t profile = 0;
-      int16_t level = 0;
-      return ExtractH264CodecDetails(codec, profile, level);
+  UniquePtr<TrackInfo> trackInfo = CreateTrackInfoWithMIMEType(aCodecMIMEType);
+  if (trackInfo) {
+    VideoInfo* videoInfo = trackInfo->GetAsVideoInfo();
+    if (videoInfo) {
+      Maybe<int32_t> maybeWidth = aContentType.GetWidth();
+      if (maybeWidth && *maybeWidth > 0) {
+        videoInfo->mImage.width = *maybeWidth;
+      }
+      Maybe<int32_t> maybeHeight = aContentType.GetHeight();
+      if (maybeHeight && *maybeHeight > 0) {
+        videoInfo->mImage.height = *maybeHeight;
+      }
     }
-  );
-}
-
-bool
-IsAACContentType(const nsAString& aContentType)
-{
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("audio/mp4") ||
-             type.EqualsLiteral("audio/x-m4a");
-    },
-    [](const nsAString& codec) {
-      return codec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
-             codec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
-             codec.EqualsLiteral("mp4a.67");     // MPEG2 AAC-LC
-    });
-}
-
-bool
-IsVorbisContentType(const nsAString& aContentType)
-{
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("audio/webm") ||
-             type.EqualsLiteral("audio/ogg");
-    },
-    [](const nsAString& codec) {
-      return codec.EqualsLiteral("vorbis");
-    });
-}
-
-bool
-IsVP8ContentType(const nsAString& aContentType)
-{
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("video/webm");
-    },
-    [](const nsAString& codec) {
-      return codec.EqualsLiteral("vp8");
-    });
-}
-
-bool
-IsVP9ContentType(const nsAString& aContentType)
-{
-  return CheckContentType(aContentType,
-    [](const nsAString& type) {
-      return type.EqualsLiteral("video/webm");
-    },
-    [](const nsAString& codec) {
-      return codec.EqualsLiteral("vp9");
-    });
+  }
+  return trackInfo;
 }
 
 } // end namespace mozilla

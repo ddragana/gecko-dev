@@ -58,9 +58,6 @@ public:
 
     for (uint32_t i = 0; i < children.Length(); i++) {
       Layer* child = children.ElementAt(i);
-      if (!child->IsVisible()) {
-        continue;
-      }
 
       ToClientLayer(child)->RenderLayerWithReadback(&readback);
 
@@ -135,6 +132,11 @@ public:
   void ForceIntermediateSurface() { mUseIntermediateSurface = true; }
 
   void SetSupportsComponentAlphaChildren(bool aSupports) { mSupportsComponentAlphaChildren = aSupports; }
+
+  virtual void Disconnect() override
+  {
+    ClientLayer::Disconnect();
+  }
 
 protected:
   ClientLayerManager* ClientManager()

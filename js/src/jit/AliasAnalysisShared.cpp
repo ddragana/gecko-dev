@@ -90,6 +90,7 @@ GetObject(const MDefinition* ins)
       case MDefinition::Op_ArrayLength:
       case MDefinition::Op_SetArrayLength:
       case MDefinition::Op_StoreElementHole:
+      case MDefinition::Op_FallibleStoreElement:
       case MDefinition::Op_TypedObjectDescr:
       case MDefinition::Op_Slots:
       case MDefinition::Op_Elements:
@@ -146,8 +147,8 @@ GetObject(const MDefinition* ins)
       case MDefinition::Op_WasmStore:
       case MDefinition::Op_AsmJSCompareExchangeHeap:
       case MDefinition::Op_AsmJSAtomicBinopHeap:
-      case MDefinition::Op_AsmJSLoadGlobalVar:
-      case MDefinition::Op_AsmJSStoreGlobalVar:
+      case MDefinition::Op_WasmLoadGlobalVar:
+      case MDefinition::Op_WasmStoreGlobalVar:
       case MDefinition::Op_ArrayJoin:
         return nullptr;
       default:

@@ -25,7 +25,7 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
-#include "xpcprivate.h"
+#include "xpcpublic.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsProxyRelease.h"
@@ -340,7 +340,8 @@ public:
     }
 
     if (NS_WARN_IF(!WorkerProxyToMainThreadRunnable::Dispatch())) {
-      RunBackOnWorkerThread();
+      // RunBackOnWorkerThread() will be called by
+      // WorkerProxyToMainThreadRunnable::Dispatch().
       return false;
     }
 
@@ -1099,7 +1100,7 @@ Console::ProfileMethodInternal(JSContext* aCx, const nsAString& aAction,
     return;
   }
 
-  nsXPConnect*  xpc = nsXPConnect::XPConnect();
+  nsIXPConnect* xpc = nsContentUtils::XPConnect();
   nsCOMPtr<nsISupports> wrapper;
   const nsIID& iid = NS_GET_IID(nsISupports);
 
@@ -1251,9 +1252,10 @@ Console::MethodInternal(JSContext* aCx, MethodName aMethodName,
     callData->SetOriginAttributes(BasePrincipal::Cast(principal)->OriginAttributesRef());
   }
 
-  uint32_t maxDepth = ShouldIncludeStackTrace(aMethodName) ?
-                      DEFAULT_MAX_STACKTRACE_DEPTH : 1;
-  nsCOMPtr<nsIStackFrame> stack = CreateStack(aCx, maxDepth);
+  JS::StackCapture captureMode = ShouldIncludeStackTrace(aMethodName) ?
+    JS::StackCapture(JS::MaxFrames(DEFAULT_MAX_STACKTRACE_DEPTH)) :
+    JS::StackCapture(JS::FirstSubsumedFrame(aCx));
+  nsCOMPtr<nsIStackFrame> stack = CreateStack(aCx, mozilla::Move(captureMode));
 
   if (stack) {
     callData->mTopStackFrame.emplace();
@@ -1379,7 +1381,7 @@ Console::MethodInternal(JSContext* aCx, MethodName aMethodName,
 
   RefPtr<ConsoleCallDataRunnable> runnable =
     new ConsoleCallDataRunnable(this, callData);
-  NS_WARN_IF(!runnable->Dispatch(aCx));
+  Unused << NS_WARN_IF(!runnable->Dispatch(aCx));
 }
 
 // We store information to lazily compute the stack in the reserved slots of
@@ -1476,8 +1478,8 @@ Console::ProcessCallData(JSContext* aCx, ConsoleCallData* aData,
   }
 
   if (aData->mMethodName == MethodClear) {
-    nsresult rv = mStorage->ClearEvents(innerID);
-    NS_WARN_IF(NS_FAILED(rv));
+    DebugOnly<nsresult> rv = mStorage->ClearEvents(innerID);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "ClearEvents failed");
   }
 
   if (NS_FAILED(mStorage->RecordEvent(innerID, outerID, eventValue))) {
@@ -1998,7 +2000,7 @@ Console::StartTimer(JSContext* aCx, const JS::Value& aName,
     return false;
   }
 
-  DOMHighResTimeStamp entry;
+  DOMHighResTimeStamp entry = 0;
   if (!mTimerRegistry.Get(label, &entry)) {
     mTimerRegistry.Put(label, aTimestamp);
   } else {
@@ -2061,7 +2063,7 @@ Console::StopTimer(JSContext* aCx, const JS::Value& aName,
     return false;
   }
 
-  DOMHighResTimeStamp entry;
+  DOMHighResTimeStamp entry = 0;
   if (NS_WARN_IF(!mTimerRegistry.Get(key, &entry))) {
     return false;
   }

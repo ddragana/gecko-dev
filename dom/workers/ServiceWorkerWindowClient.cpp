@@ -183,7 +183,7 @@ ServiceWorkerWindowClient::Focus(ErrorResult& aRv) const
     if (promiseProxy) {
       RefPtr<ClientFocusRunnable> r = new ClientFocusRunnable(mWindowId,
                                                               promiseProxy);
-      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(r));
+      MOZ_ALWAYS_SUCCEEDS(workerPrivate->DispatchToMainThread(r.forget()));
     } else {
       promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
     }
@@ -474,7 +474,7 @@ private:
       return rv;
     }
 
-    loadInfo->SetOwner(aPrincipal);
+    loadInfo->SetTriggeringPrincipal(aPrincipal);
     loadInfo->SetReferrer(doc->GetOriginalURI());
     loadInfo->SetReferrerPolicy(doc->GetReferrerPolicy());
     loadInfo->SetLoadType(nsIDocShellLoadInfo::loadStopContentAndReplace);
@@ -516,7 +516,7 @@ ServiceWorkerWindowClient::Navigate(const nsAString& aUrl, ErrorResult& aRv)
   if (promiseProxy) {
     RefPtr<ClientNavigateRunnable> r =
       new ClientNavigateRunnable(mWindowId, aUrl, promiseProxy);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(r));
+    MOZ_ALWAYS_SUCCEEDS(workerPrivate->DispatchToMainThread(r.forget()));
   } else {
     promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
   }

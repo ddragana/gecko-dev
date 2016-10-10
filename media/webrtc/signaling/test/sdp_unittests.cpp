@@ -1000,6 +1000,22 @@ class NewSdpTest : public ::testing::Test,
       ASSERT_EQ(extra, feedback.extra);
     }
 
+    void CheckDtmfFmtp(const std::string& expectedDtmfTones) const {
+      ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+                  SdpAttribute::kFmtpAttribute));
+      auto audio_format_params =
+          mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+      ASSERT_EQ(2U, audio_format_params.size());
+
+      ASSERT_EQ("101", audio_format_params[1].format);
+      ASSERT_TRUE(!!audio_format_params[1].parameters);
+      const SdpFmtpAttributeList::TelephoneEventParameters* te_parameters =
+        static_cast<SdpFmtpAttributeList::TelephoneEventParameters*>(
+            audio_format_params[1].parameters.get());
+      ASSERT_NE(0U, te_parameters->dtmfTones.size());
+      ASSERT_EQ(expectedDtmfTones, te_parameters->dtmfTones);
+    }
+
     void CheckSerialize(const std::string& expected,
                         const SdpAttribute& attr) const {
       std::stringstream str;
@@ -1177,6 +1193,10 @@ TEST_P(NewSdpTest, CheckMediaSectionGetBandwidth) {
 #define ID_B ID_A ID_A ID_A ID_A
 #define LONG_IDENTITY ID_B ID_B ID_B ID_B "xx"
 
+#define BASE64_DTLS_HELLO "FgEAAAAAAAAAAAAAagEAAF4AAAAAAAAAXgEARI11KHx3QB6Ky" \
+  "CKgoBj/kwjKrApkL8kiZLwIqBaJGT8AAAA2ADkAOAA1ABYAEwAKADMAMgAvAAcAZgAFAAQAYw" \
+  "BiAGEAFQASAAkAZQBkAGAAFAARAAgABgADAQA="
+
 // SDP from a basic A/V apprtc call FFX/FFX
 const std::string kBasicAudioVideoOffer =
 "v=0" CRLF
@@ -1184,6 +1204,7 @@ const std::string kBasicAudioVideoOffer =
 "s=SIP Call" CRLF
 "c=IN IP4 224.0.0.1/100/12" CRLF
 "t=0 0" CRLF
+"a=dtls-message:client " BASE64_DTLS_HELLO CRLF
 "a=ice-ufrag:4a799b2e" CRLF
 "a=ice-pwd:e4cc12a910f106a0a744719425510e17" CRLF
 "a=ice-lite" CRLF
@@ -1206,7 +1227,7 @@ const std::string kBasicAudioVideoOffer =
 "a=rtpmap:0 PCMU/8000" CRLF
 "a=rtpmap:8 PCMA/8000" CRLF
 "a=rtpmap:101 telephone-event/8000" CRLF
-"a=fmtp:101 0-15" CRLF
+"a=fmtp:101 0-15,66,32-34,67" CRLF
 "a=ice-ufrag:00000000" CRLF
 "a=ice-pwd:0000000000000000000000000000000" CRLF
 "a=sendonly" CRLF
@@ -1225,7 +1246,7 @@ const std::string kBasicAudioVideoOffer =
 "a=rtcp:62454 IN IP4 162.222.183.171" CRLF
 "a=end-of-candidates" CRLF
 "a=ssrc:5150" CRLF
-"m=video 9 RTP/SAVPF 120 121" CRLF
+"m=video 9 RTP/SAVPF 120 121 122 123" CRLF
 "c=IN IP6 ::1" CRLF
 "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
 "a=mid:second" CRLF
@@ -1233,6 +1254,8 @@ const std::string kBasicAudioVideoOffer =
 "a=fmtp:120 max-fs=3600;max-fr=30" CRLF
 "a=rtpmap:121 VP9/90000" CRLF
 "a=fmtp:121 max-fs=3600;max-fr=30" CRLF
+"a=rtpmap:122 red/90000" CRLF
+"a=rtpmap:123 ulpfec/90000" CRLF
 "a=recvonly" CRLF
 "a=rtcp-fb:120 nack" CRLF
 "a=rtcp-fb:120 nack pli" CRLF
@@ -1270,6 +1293,41 @@ const std::string kBasicAudioVideoOffer =
 
 TEST_P(NewSdpTest, BasicAudioVideoSdpParse) {
   ParseSdp(kBasicAudioVideoOffer);
+}
+
+TEST_P(NewSdpTest, CheckRemoveFmtp) {
+  ParseSdp(kBasicAudioVideoOffer);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(3U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  SdpAttributeList& audioAttrList = mSdp->GetMediaSection(0).GetAttributeList();
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(2U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  mSdp->GetMediaSection(0).RemoveFmtp("101");
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(1U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  mSdp->GetMediaSection(0).RemoveFmtp("109");
+
+  ASSERT_TRUE(audioAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(0U, audioAttrList.GetFmtp().mFmtps.size());
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("109"));
+  ASSERT_FALSE(mSdp->GetMediaSection(0).FindFmtp("101"));
+
+  // make sure we haven't disturbed the video fmtps
+  SdpAttributeList& videoAttrList = mSdp->GetMediaSection(1).GetAttributeList();
+  ASSERT_TRUE(videoAttrList.HasAttribute(SdpAttribute::kFmtpAttribute));
+  ASSERT_EQ(2U, videoAttrList.GetFmtp().mFmtps.size());
+  ASSERT_TRUE(mSdp->GetMediaSection(1).FindFmtp("120"));
+  ASSERT_TRUE(mSdp->GetMediaSection(1).FindFmtp("121"));
 }
 
 TEST_P(NewSdpTest, CheckIceUfrag) {
@@ -1389,6 +1447,18 @@ TEST_P(NewSdpTest, CheckIdentity) {
   ASSERT_EQ(LONG_IDENTITY, identity) << "Wrong identity assertion";
 }
 
+TEST_P(NewSdpTest, CheckDtlsMessage) {
+  ParseSdp(kBasicAudioVideoOffer);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_TRUE(mSdp->GetAttributeList().HasAttribute(
+        SdpAttribute::kDtlsMessageAttribute));
+  auto dtls_message = mSdp->GetAttributeList().GetDtlsMessage();
+  ASSERT_EQ(SdpDtlsMessageAttribute::kClient, dtls_message.mRole)
+    << "Wrong dtls-message role";
+  ASSERT_EQ(BASE64_DTLS_HELLO, dtls_message.mValue)
+    << "Wrong dtls-message value";
+}
+
 TEST_P(NewSdpTest, CheckNumberOfMediaSections) {
   ParseSdp(kBasicAudioVideoOffer);
   ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
@@ -1418,9 +1488,11 @@ TEST_P(NewSdpTest, CheckMlines) {
             mSdp->GetMediaSection(1).GetProtocol())
     << "Wrong protocol for video";
   auto video_formats = mSdp->GetMediaSection(1).GetFormats();
-  ASSERT_EQ(2U, video_formats.size()) << "Wrong number of formats for video";
+  ASSERT_EQ(4U, video_formats.size()) << "Wrong number of formats for video";
   ASSERT_EQ("120", video_formats[0]);
   ASSERT_EQ("121", video_formats[1]);
+  ASSERT_EQ("122", video_formats[2]);
+  ASSERT_EQ("123", video_formats[3]);
 
   ASSERT_EQ(SdpMediaSection::kAudio, mSdp->GetMediaSection(2).GetMediaType())
     << "Wrong type for third media section";
@@ -1511,30 +1583,361 @@ TEST_P(NewSdpTest, CheckRtpmap) {
               rtpmap);
 
   CheckRtpmap("101",
-              SdpRtpmapAttributeList::kOtherCodec,
+              SdpRtpmapAttributeList::kTelephoneEvent,
               "telephone-event",
               8000,
               1,
               audiosec.GetFormats()[4],
               rtpmap);
 
-  const SdpMediaSection& videosec1 = mSdp->GetMediaSection(1);
+  const SdpMediaSection& videosec = mSdp->GetMediaSection(1);
+  const SdpRtpmapAttributeList videoRtpmap =
+    videosec.GetAttributeList().GetRtpmap();
+  ASSERT_EQ(4U, videoRtpmap.mRtpmaps.size())
+    << "Wrong number of rtpmap attributes for video";
+
   CheckRtpmap("120",
               SdpRtpmapAttributeList::kVP8,
               "VP8",
               90000,
               0,
-              videosec1.GetFormats()[0],
-              videosec1.GetAttributeList().GetRtpmap());
+              videosec.GetFormats()[0],
+              videoRtpmap);
 
-  const SdpMediaSection& videosec2 = mSdp->GetMediaSection(1);
   CheckRtpmap("121",
               SdpRtpmapAttributeList::kVP9,
               "VP9",
               90000,
               0,
-              videosec2.GetFormats()[1],
-              videosec2.GetAttributeList().GetRtpmap());
+              videosec.GetFormats()[1],
+              videoRtpmap);
+
+  CheckRtpmap("122",
+              SdpRtpmapAttributeList::kRed,
+              "red",
+              90000,
+              0,
+              videosec.GetFormats()[2],
+              videoRtpmap);
+
+  CheckRtpmap("123",
+              SdpRtpmapAttributeList::kUlpfec,
+              "ulpfec",
+              90000,
+              0,
+              videosec.GetFormats()[3],
+              videoRtpmap);
+}
+
+static const std::string kAudioWithTelephoneEvent =
+  "v=0" CRLF
+  "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+  "s=SIP Call" CRLF
+  "c=IN IP4 198.51.100.7" CRLF
+  "t=0 0" CRLF
+  "m=audio 9 RTP/SAVPF 109 9 0 8 101" CRLF
+  "c=IN IP4 0.0.0.0" CRLF
+  "a=mid:first" CRLF
+  "a=rtpmap:109 opus/48000/2" CRLF
+  "a=fmtp:109 maxplaybackrate=32000;stereo=1" CRLF
+  "a=ptime:20" CRLF
+  "a=maxptime:20" CRLF
+  "a=rtpmap:9 G722/8000" CRLF
+  "a=rtpmap:0 PCMU/8000" CRLF
+  "a=rtpmap:8 PCMA/8000" CRLF
+  "a=rtpmap:101 telephone-event/8000" CRLF;
+
+TEST_P(NewSdpTest, CheckTelephoneEventNoFmtp) {
+  ParseSdp(kAudioWithTelephoneEvent);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto audio_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(1U, audio_format_params.size());
+
+  // make sure we don't get a fmtp for codec 101
+  for (size_t i = 0; i < audio_format_params.size(); ++i) {
+    ASSERT_NE("101", audio_format_params[i].format);
+  }
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventWithDefaultEvents) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-15" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventWithBadCharacter) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-5." CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventIncludingCommas) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-15,66,67" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0-15,66,67");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventComplexEvents) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0,1,2-4,5-15,66,67" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0,1,2-4,5-15,66,67");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventNoHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 5,6,7" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("5,6,7");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventOnlyZero) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("0");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventOnlyOne) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  CheckDtmfFmtp("1");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadThreeDigit) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadThreeDigitWithHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 0-123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadLeadingHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 -12" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingHyphen) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 12-" CRLF, false);
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingHyphenInMiddle) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,12-,4" CRLF, false);
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadLeadingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 ,2,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadMultipleLeadingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 ,,,2,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadConsecutiveCommas) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,,,,,,,,3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTrailingComma) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1,2,3," CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadTwoHyphens) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 1-2-3" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadSixDigit) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 112233" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+TEST_P(NewSdpTest, CheckTelephoneEventBadRangeReversed) {
+  ParseSdp(kAudioWithTelephoneEvent
+           + "a=fmtp:101 33-2" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  // check for the default dtmf tones
+  CheckDtmfFmtp("0-15");
+}
+
+static const std::string kVideoWithRedAndUlpfecSdp =
+  "v=0" CRLF
+  "o=- 4294967296 2 IN IP4 127.0.0.1" CRLF
+  "s=SIP Call" CRLF
+  "c=IN IP4 198.51.100.7" CRLF
+  "t=0 0" CRLF
+  "m=video 9 RTP/SAVPF 97 120 121 122 123" CRLF
+  "c=IN IP6 ::1" CRLF
+  "a=fingerprint:sha-1 DF:FA:FB:08:3B:3C:54:1D:D7:D4:05:77:A0:72:9B:14:08:6D:0F:4C:2E:AC:8A:FD:0A:8E:99:BF:5D:E8:3C:E7" CRLF
+  "a=rtpmap:97 H264/90000" CRLF
+  "a=fmtp:97 profile-level-id=42a01e" CRLF
+  "a=rtpmap:120 VP8/90000" CRLF
+  "a=fmtp:120 max-fs=3600;max-fr=30" CRLF
+  "a=rtpmap:121 VP9/90000" CRLF
+  "a=fmtp:121 max-fs=3600;max-fr=30" CRLF
+  "a=rtpmap:122 red/90000" CRLF
+  "a=rtpmap:123 ulpfec/90000" CRLF;
+
+TEST_P(NewSdpTest, CheckRedNoFmtp) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(3U, video_format_params.size());
+
+  // make sure we don't get a fmtp for codec 122
+  for (size_t i = 0; i < video_format_params.size(); ++i) {
+    ASSERT_NE("122", video_format_params[i].format);
+  }
+}
+
+TEST_P(NewSdpTest, CheckRedFmtpWith2Codecs) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp + "a=fmtp:122 120/121" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(4U, video_format_params.size());
+
+  ASSERT_EQ("122", video_format_params[3].format);
+  ASSERT_TRUE(!!video_format_params[3].parameters);
+  ASSERT_EQ(SdpRtpmapAttributeList::kRed,
+            video_format_params[3].parameters->codec_type);
+  const SdpFmtpAttributeList::RedParameters* red_parameters(
+      static_cast<SdpFmtpAttributeList::RedParameters*>(
+        video_format_params[3].parameters.get()));
+  ASSERT_EQ(2U, red_parameters->encodings.size());
+  ASSERT_EQ(120U, red_parameters->encodings[0]);
+  ASSERT_EQ(121U, red_parameters->encodings[1]);
+}
+
+TEST_P(NewSdpTest, CheckRedFmtpWith3Codecs) {
+  ParseSdp(kVideoWithRedAndUlpfecSdp + "a=fmtp:122 120/121/123" CRLF);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+  ASSERT_EQ(1U, mSdp->GetMediaSectionCount())
+    << "Wrong number of media sections";
+
+  ASSERT_TRUE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+              SdpAttribute::kFmtpAttribute));
+  auto video_format_params =
+      mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
+  ASSERT_EQ(4U, video_format_params.size());
+
+  ASSERT_EQ("122", video_format_params[3].format);
+  ASSERT_TRUE(!!video_format_params[3].parameters);
+  ASSERT_EQ(SdpRtpmapAttributeList::kRed,
+            video_format_params[3].parameters->codec_type);
+  const SdpFmtpAttributeList::RedParameters* red_parameters(
+      static_cast<SdpFmtpAttributeList::RedParameters*>(
+        video_format_params[3].parameters.get()));
+  ASSERT_EQ(3U, red_parameters->encodings.size());
+  ASSERT_EQ(120U, red_parameters->encodings[0]);
+  ASSERT_EQ(121U, red_parameters->encodings[1]);
+  ASSERT_EQ(123U, red_parameters->encodings[2]);
 }
 
 const std::string kH264AudioVideoOffer =
@@ -1562,6 +1965,7 @@ const std::string kH264AudioVideoOffer =
 "a=rtpmap:8 PCMA/8000" CRLF
 "a=rtpmap:101 telephone-event/8000" CRLF
 "a=fmtp:109 maxplaybackrate=32000;stereo=1;useinbandfec=1" CRLF
+"a=fmtp:101 0-15,66,32-34,67" CRLF
 "a=ice-ufrag:00000000" CRLF
 "a=ice-pwd:0000000000000000000000000000000" CRLF
 "a=sendonly" CRLF
@@ -1615,7 +2019,7 @@ TEST_P(NewSdpTest, CheckFormatParameters) {
       SdpAttribute::kFmtpAttribute));
   auto audio_format_params =
       mSdp->GetMediaSection(0).GetAttributeList().GetFmtp().mFmtps;
-  ASSERT_EQ(1U, audio_format_params.size());
+  ASSERT_EQ(2U, audio_format_params.size());
   ASSERT_EQ("109", audio_format_params[0].format);
   ASSERT_TRUE(!!audio_format_params[0].parameters);
   const SdpFmtpAttributeList::OpusParameters* opus_parameters =
@@ -1624,6 +2028,13 @@ TEST_P(NewSdpTest, CheckFormatParameters) {
   ASSERT_EQ(32000U, opus_parameters->maxplaybackrate);
   ASSERT_EQ(1U, opus_parameters->stereo);
   ASSERT_EQ(1U, opus_parameters->useInBandFec);
+  ASSERT_EQ("101", audio_format_params[1].format);
+  ASSERT_TRUE(!!audio_format_params[1].parameters);
+  const SdpFmtpAttributeList::TelephoneEventParameters* te_parameters =
+    static_cast<SdpFmtpAttributeList::TelephoneEventParameters*>(
+        audio_format_params[1].parameters.get());
+  ASSERT_NE(0U, te_parameters->dtmfTones.size());
+  ASSERT_EQ("0-15,66,32-34,67", te_parameters->dtmfTones);
 
   ASSERT_TRUE(mSdp->GetMediaSection(1).GetAttributeList().HasAttribute(
       SdpAttribute::kFmtpAttribute));
@@ -2800,6 +3211,29 @@ TEST_P(NewSdpTest, CheckNoAttributes) {
   ASSERT_EQ(SdpDirectionAttribute::kSendrecv,
       mSdp->GetAttributeList().GetDirection());
 }
+
+
+const std::string kMediaLevelDtlsMessage =
+"v=0" CRLF
+"o=Mozilla-SIPUA-35.0a1 5184 0 IN IP4 0.0.0.0" CRLF
+"s=SIP Call" CRLF
+"c=IN IP4 224.0.0.1/100/12" CRLF
+"t=0 0" CRLF
+"m=video 9 RTP/SAVPF 120" CRLF
+"c=IN IP4 0.0.0.0" CRLF
+"a=dtls-message:client " BASE64_DTLS_HELLO CRLF
+"a=rtpmap:120 VP8/90000" CRLF;
+
+TEST_P(NewSdpTest, CheckMediaLevelDtlsMessage) {
+  ParseSdp(kMediaLevelDtlsMessage);
+  ASSERT_TRUE(!!mSdp) << "Parse failed: " << GetParseErrors();
+
+  // dtls-message is not defined for use at the media level; we don't
+  // parse it
+  ASSERT_FALSE(mSdp->GetMediaSection(0).GetAttributeList().HasAttribute(
+        SdpAttribute::kDtlsMessageAttribute));
+}
+
 
 TEST(NewSdpTestNoFixture, CheckAttributeTypeSerialize) {
   for (auto a = static_cast<size_t>(SdpAttribute::kFirstAttribute);

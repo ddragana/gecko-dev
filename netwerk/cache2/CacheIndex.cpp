@@ -21,7 +21,7 @@
 #include "mozilla/AutoRestore.h"
 #include <algorithm>
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 
 #define kMinUnwrittenChanges   300
@@ -43,16 +43,29 @@ class FrecencyComparator
 {
 public:
   bool Equals(CacheIndexRecord* a, CacheIndexRecord* b) const {
+    if (!a || !b) {
+      return false;
+    }
+
     return a->mFrecency == b->mFrecency;
   }
   bool LessThan(CacheIndexRecord* a, CacheIndexRecord* b) const {
-    // Place entries with frecency 0 at the end of the array.
+    // Removed (=null) entries must be at the end of the array.
+    if (!a) {
+      return false;
+    }
+    if (!b) {
+      return true;
+    }
+
+    // Place entries with frecency 0 at the end of the non-removed entries.
     if (a->mFrecency == 0) {
       return false;
     }
     if (b->mFrecency == 0) {
       return true;
     }
+
     return a->mFrecency < b->mFrecency;
   }
 };
@@ -95,19 +108,39 @@ public:
     }
 
     if (entry && !mOldRecord) {
-      mIndex->InsertRecordToFrecencyArray(entry->mRec);
+      mIndex->mFrecencyArray.AppendRecord(entry->mRec);
       mIndex->AddRecordToIterators(entry->mRec);
     } else if (!entry && mOldRecord) {
-      mIndex->RemoveRecordFromFrecencyArray(mOldRecord);
+      mIndex->mFrecencyArray.RemoveRecord(mOldRecord);
       mIndex->RemoveRecordFromIterators(mOldRecord);
     } else if (entry && mOldRecord) {
       if (entry->mRec != mOldRecord) {
         // record has a different address, we have to replace it
         mIndex->ReplaceRecordInIterators(mOldRecord, entry->mRec);
-        mIndex->RemoveRecordFromFrecencyArray(mOldRecord);
-        mIndex->InsertRecordToFrecencyArray(entry->mRec);
+
+        if (entry->mRec->mFrecency == mOldFrecency) {
+          // If frecency hasn't changed simply replace the pointer
+          mIndex->mFrecencyArray.ReplaceRecord(mOldRecord, entry->mRec);
+        } else {
+          // It is expected that when the frecency is changed the new value is
+          // always bigger than the old one. There is also a special case when
+          // we zero the frecency if eviction of the entry fails. If the above
+          // isn't true, this algorithm might not work properly and needs to be
+          // changed.
+          MOZ_ASSERT(entry->mRec->mFrecency == 0 ||
+                     entry->mRec->mFrecency > mOldFrecency);
+
+          // Remove old pointer and insert the new one at the end of the array
+          mIndex->mFrecencyArray.RemoveRecord(mOldRecord);
+          mIndex->mFrecencyArray.AppendRecord(entry->mRec);
+        }
       } else if (entry->mRec->mFrecency != mOldFrecency) {
-        mIndex->mFrecencyArraySorted = false;
+        MOZ_ASSERT(entry->mRec->mFrecency == 0 ||
+                   entry->mRec->mFrecency > mOldFrecency);
+
+        // Move the element at the end of the array
+        mIndex->mFrecencyArray.RemoveRecord(entry->mRec);
+        mIndex->mFrecencyArray.AppendRecord(entry->mRec);
       }
     } else {
       // both entries were removed or not initialized, do nothing
@@ -223,7 +256,7 @@ NS_IMETHODIMP FileOpenHelper::OnFileOpened(CacheFileHandle *aHandle,
 NS_IMPL_ISUPPORTS(FileOpenHelper, CacheFileIOListener);
 
 
-CacheIndex * CacheIndex::gInstance = nullptr;
+StaticRefPtr<CacheIndex> CacheIndex::gInstance;
 StaticMutex  CacheIndex::sLock;
 
 
@@ -252,7 +285,6 @@ CacheIndex::CacheIndex()
   , mRWBufPos(0)
   , mRWPending(false)
   , mJournalReadSuccessfully(false)
-  , mFrecencyArraySorted(false)
   , mAsyncGetDiskConsumptionBlocked(false)
 {
   sLock.AssertCurrentThreadOwns();
@@ -289,7 +321,7 @@ CacheIndex::Init(nsIFile *aCacheDirectory)
   nsresult rv = idx->InitInternal(aCacheDirectory);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  idx.swap(gInstance);
+  gInstance = idx.forget();
   return NS_OK;
 }
 
@@ -316,7 +348,7 @@ CacheIndex::PreShutdown()
 
   StaticMutexAutoLock lock(sLock);
 
-  LOG(("CacheIndex::PreShutdown() [gInstance=%p]", gInstance));
+  LOG(("CacheIndex::PreShutdown() [gInstance=%p]", gInstance.get()));
 
   nsresult rv;
   RefPtr<CacheIndex> index = gInstance;
@@ -410,10 +442,9 @@ CacheIndex::Shutdown()
 
   StaticMutexAutoLock lock(sLock);
 
-  LOG(("CacheIndex::Shutdown() [gInstance=%p]", gInstance));
+  LOG(("CacheIndex::Shutdown() [gInstance=%p]", gInstance.get()));
 
-  RefPtr<CacheIndex> index;
-  index.swap(gInstance);
+  RefPtr<CacheIndex> index = gInstance.forget();
 
   if (!index) {
     return NS_ERROR_NOT_INITIALIZED;
@@ -442,10 +473,10 @@ CacheIndex::Shutdown()
     case READY:
       if (index->mIndexOnDiskIsValid && !index->mDontMarkIndexClean) {
         if (!sanitize && NS_FAILED(index->WriteLogToDisk())) {
-          index->RemoveIndexFromDisk();
+          index->RemoveJournalAndTempFile();
         }
       } else {
-        index->RemoveIndexFromDisk();
+        index->RemoveJournalAndTempFile();
       }
       break;
     case READING:
@@ -460,7 +491,7 @@ CacheIndex::Shutdown()
   }
 
   if (sanitize) {
-    index->RemoveIndexFromDisk();
+    index->RemoveAllIndexFiles();
   }
 
   return NS_OK;
@@ -1191,43 +1222,44 @@ CacheIndex::GetEntryForEviction(bool aIgnoreEmptyEntries, SHA1Sum::Hash *aHash, 
   }
 
   SHA1Sum::Hash hash;
-  bool foundEntry = false;
-  uint32_t i;
+  CacheIndexRecord *foundRecord = nullptr;
+  uint32_t skipped = 0;
 
   // find first non-forced valid and unpinned entry with the lowest frecency
-  if (!index->mFrecencyArraySorted) {
-    index->mFrecencyArray.Sort(FrecencyComparator());
-    index->mFrecencyArraySorted = true;
-  }
+  index->mFrecencyArray.SortIfNeeded();
 
-  for (i = 0; i < index->mFrecencyArray.Length(); ++i) {
-    memcpy(&hash, &index->mFrecencyArray[i]->mHash, sizeof(SHA1Sum::Hash));
+  for (auto iter = index->mFrecencyArray.Iter(); !iter.Done(); iter.Next()) {
+    CacheIndexRecord *rec = iter.Get();
+
+    memcpy(&hash, rec->mHash, sizeof(SHA1Sum::Hash));
+
+    ++skipped;
 
     if (IsForcedValidEntry(&hash)) {
       continue;
     }
 
-    if (CacheIndexEntry::IsPinned(index->mFrecencyArray[i])) {
+    if (CacheIndexEntry::IsPinned(rec)) {
       continue;
     }
 
-    if (aIgnoreEmptyEntries &&
-        !CacheIndexEntry::GetFileSize(index->mFrecencyArray[i])) {
+    if (aIgnoreEmptyEntries && !CacheIndexEntry::GetFileSize(rec)) {
       continue;
     }
 
-    foundEntry = true;
+    --skipped;
+    foundRecord = rec;
     break;
   }
 
-  if (!foundEntry)
+  if (!foundRecord)
     return NS_ERROR_NOT_AVAILABLE;
 
-  *aCnt = index->mFrecencyArray.Length() - i;
+  *aCnt = skipped;
 
   LOG(("CacheIndex::GetEntryForEviction() - returning entry from frecency "
         "array [hash=%08x%08x%08x%08x%08x, cnt=%u, frecency=%u]",
-        LOGSHA1(&hash), *aCnt, index->mFrecencyArray[i]->mFrecency));
+        LOGSHA1(&hash), *aCnt, foundRecord->mFrecency));
 
   memcpy(aHash, &hash, sizeof(SHA1Sum::Hash));
 
@@ -1321,8 +1353,8 @@ CacheIndex::GetCacheStats(nsILoadContextInfo *aInfo, uint32_t *aSize, uint32_t *
   *aSize = 0;
   *aCount = 0;
 
-  for (uint32_t i = 0; i < index->mFrecencyArray.Length(); ++i) {
-    CacheIndexRecord* record = index->mFrecencyArray[i];
+  for (auto iter = index->mFrecencyArray.Iter(); !iter.Done(); iter.Next()) {
+    CacheIndexRecord *record = iter.Get();
     if (!CacheIndexEntry::RecordMatchesLoadContextInfo(record, aInfo))
       continue;
 
@@ -1405,22 +1437,21 @@ CacheIndex::GetIterator(nsILoadContextInfo *aInfo, bool aAddNew,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  RefPtr<CacheIndexIterator> iter;
+  RefPtr<CacheIndexIterator> idxIter;
   if (aInfo) {
-    iter = new CacheIndexContextIterator(index, aAddNew, aInfo);
+    idxIter = new CacheIndexContextIterator(index, aAddNew, aInfo);
   } else {
-    iter = new CacheIndexIterator(index, aAddNew);
+    idxIter = new CacheIndexIterator(index, aAddNew);
   }
 
-  if (!index->mFrecencyArraySorted) {
-    index->mFrecencyArray.Sort(FrecencyComparator());
-    index->mFrecencyArraySorted = true;
+  index->mFrecencyArray.SortIfNeeded();
+
+  for (auto iter = index->mFrecencyArray.Iter(); !iter.Done(); iter.Next()) {
+    idxIter->AddRecord(iter.Get());
   }
 
-  iter->AddRecords(index->mFrecencyArray);
-
-  index->mIterators.AppendElement(iter);
-  iter.swap(*_retval);
+  index->mIterators.AppendElement(idxIter);
+  idxIter.swap(*_retval);
   return NS_OK;
 }
 
@@ -1840,11 +1871,17 @@ CacheIndex::RemoveFile(const nsACString &aName)
 }
 
 void
-CacheIndex::RemoveIndexFromDisk()
+CacheIndex::RemoveAllIndexFiles()
 {
-  LOG(("CacheIndex::RemoveIndexFromDisk()"));
-
+  LOG(("CacheIndex::RemoveAllIndexFiles()"));
   RemoveFile(NS_LITERAL_CSTRING(INDEX_NAME));
+  RemoveJournalAndTempFile();
+}
+
+void
+CacheIndex::RemoveJournalAndTempFile()
+{
+  LOG(("CacheIndex::RemoveJournalAndTempFile()"));
   RemoveFile(NS_LITERAL_CSTRING(TEMP_INDEX_NAME));
   RemoveFile(NS_LITERAL_CSTRING(JOURNAL_NAME));
 }
@@ -1853,8 +1890,7 @@ class WriteLogHelper
 {
 public:
   explicit WriteLogHelper(PRFileDesc *aFD)
-    : mStatus(NS_OK)
-    , mFD(aFD)
+    : mFD(aFD)
     , mBufSize(kMaxBufSize)
     , mBufPos(0)
   {
@@ -1873,11 +1909,10 @@ private:
 
   nsresult FlushBuffer();
 
-  nsresult            mStatus;
-  PRFileDesc         *mFD;
-  char               *mBuf;
-  uint32_t            mBufSize;
-  int32_t             mBufPos;
+  PRFileDesc       *mFD;
+  char             *mBuf;
+  uint32_t          mBufSize;
+  int32_t           mBufPos;
   RefPtr<CacheHash> mHash;
 };
 
@@ -1886,18 +1921,11 @@ WriteLogHelper::AddEntry(CacheIndexEntry *aEntry)
 {
   nsresult rv;
 
-  if (NS_FAILED(mStatus)) {
-    return mStatus;
-  }
-
   if (mBufPos + sizeof(CacheIndexRecord) > mBufSize) {
     mHash->Update(mBuf, mBufPos);
 
     rv = FlushBuffer();
-    if (NS_FAILED(rv)) {
-      mStatus = rv;
-      return rv;
-    }
+    NS_ENSURE_SUCCESS(rv, rv);
     MOZ_ASSERT(mBufPos + sizeof(CacheIndexRecord) <= mBufSize);
   }
 
@@ -1912,17 +1940,10 @@ WriteLogHelper::Finish()
 {
   nsresult rv;
 
-  if (NS_FAILED(mStatus)) {
-    return mStatus;
-  }
-
   mHash->Update(mBuf, mBufPos);
   if (mBufPos + sizeof(CacheHash::Hash32_t) > mBufSize) {
     rv = FlushBuffer();
-    if (NS_FAILED(rv)) {
-      mStatus = rv;
-      return rv;
-    }
+    NS_ENSURE_SUCCESS(rv, rv);
     MOZ_ASSERT(mBufPos + sizeof(CacheHash::Hash32_t) <= mBufSize);
   }
 
@@ -1932,14 +1953,16 @@ WriteLogHelper::Finish()
   rv = FlushBuffer();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  mStatus = NS_ERROR_UNEXPECTED; // Don't allow any other operation
   return NS_OK;
 }
 
 nsresult
 WriteLogHelper::FlushBuffer()
 {
-  MOZ_ASSERT(NS_SUCCEEDED(mStatus));
+  if (CacheObserver::IsPastShutdownIOLag()) {
+    LOG(("WriteLogHelper::FlushBuffer() - Interrupting writing journal."));
+    return NS_ERROR_FAILURE;
+  }
 
   int32_t bytesWritten = PR_Write(mFD, mBuf, mBufPos);
 
@@ -1960,6 +1983,11 @@ CacheIndex::WriteLogToDisk()
 
   MOZ_ASSERT(mPendingUpdates.Count() == 0);
   MOZ_ASSERT(mState == SHUTDOWN);
+
+  if (CacheObserver::IsPastShutdownIOLag()) {
+    LOG(("CacheIndex::WriteLogToDisk() - Skipping writing journal."));
+    return NS_ERROR_FAILURE;
+  }
 
   RemoveFile(NS_LITERAL_CSTRING(TEMP_INDEX_NAME));
 
@@ -1982,9 +2010,11 @@ CacheIndex::WriteLogToDisk()
   for (auto iter = mIndex.Iter(); !iter.Done(); iter.Next()) {
     CacheIndexEntry* entry = iter.Get();
     if (entry->IsRemoved() || entry->IsDirty()) {
-      wlh.AddEntry(entry);
+      rv = wlh.AddEntry(entry);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
     }
-    iter.Remove();
   }
 
   rv = wlh.Finish();
@@ -3233,24 +3263,80 @@ CacheIndex::ReleaseBuffer()
 }
 
 void
-CacheIndex::InsertRecordToFrecencyArray(CacheIndexRecord *aRecord)
+CacheIndex::FrecencyArray::AppendRecord(CacheIndexRecord *aRecord)
 {
-  LOG(("CacheIndex::InsertRecordToFrecencyArray() [record=%p, hash=%08x%08x%08x"
+  LOG(("CacheIndex::FrecencyArray::AppendRecord() [record=%p, hash=%08x%08x%08x"
        "%08x%08x]", aRecord, LOGSHA1(aRecord->mHash)));
 
-  MOZ_ASSERT(!mFrecencyArray.Contains(aRecord));
-  mFrecencyArray.AppendElement(aRecord);
-  mFrecencyArraySorted = false;
+  MOZ_ASSERT(!mRecs.Contains(aRecord));
+  mRecs.AppendElement(aRecord);
+
+  // If the new frecency is 0, the element should be at the end of the array,
+  // i.e. this change doesn't affect order of the array
+  if (aRecord->mFrecency != 0) {
+    ++mUnsortedElements;
+  }
 }
 
 void
-CacheIndex::RemoveRecordFromFrecencyArray(CacheIndexRecord *aRecord)
+CacheIndex::FrecencyArray::RemoveRecord(CacheIndexRecord *aRecord)
 {
-  LOG(("CacheIndex::RemoveRecordFromFrecencyArray() [record=%p]", aRecord));
+  LOG(("CacheIndex::FrecencyArray::RemoveRecord() [record=%p]", aRecord));
 
-  DebugOnly<bool> removed;
-  removed = mFrecencyArray.RemoveElement(aRecord);
-  MOZ_ASSERT(removed);
+  decltype(mRecs)::index_type idx;
+  idx = mRecs.IndexOf(aRecord);
+  MOZ_RELEASE_ASSERT(idx != mRecs.NoIndex);
+  mRecs[idx] = nullptr;
+  ++mRemovedElements;
+
+  // Calling SortIfNeeded ensures that we get rid of removed elements in the
+  // array once we hit the limit.
+  SortIfNeeded();
+}
+
+void
+CacheIndex::FrecencyArray::ReplaceRecord(CacheIndexRecord *aOldRecord,
+                                         CacheIndexRecord *aNewRecord)
+{
+  LOG(("CacheIndex::FrecencyArray::ReplaceRecord() [oldRecord=%p, "
+       "newRecord=%p]", aOldRecord, aNewRecord));
+
+  decltype(mRecs)::index_type idx;
+  idx = mRecs.IndexOf(aOldRecord);
+  MOZ_RELEASE_ASSERT(idx != mRecs.NoIndex);
+  mRecs[idx] = aNewRecord;
+}
+
+void
+CacheIndex::FrecencyArray::SortIfNeeded()
+{
+  const uint32_t kMaxUnsortedCount = 512;
+  const uint32_t kMaxUnsortedPercent = 10;
+  const uint32_t kMaxRemovedCount = 512;
+
+  uint32_t unsortedLimit =
+    std::min<uint32_t>(kMaxUnsortedCount, Length() * kMaxUnsortedPercent / 100);
+
+  if (mUnsortedElements > unsortedLimit ||
+      mRemovedElements > kMaxRemovedCount) {
+    LOG(("CacheIndex::FrecencyArray::SortIfNeeded() - Sorting array "
+       "[unsortedElements=%u, unsortedLimit=%u, removedElements=%u, "
+       "maxRemovedCount=%u]", mUnsortedElements, unsortedLimit,
+       mRemovedElements, kMaxRemovedCount));
+
+    mRecs.Sort(FrecencyComparator());
+    mUnsortedElements = 0;
+    if (mRemovedElements) {
+#ifdef DEBUG
+      for (uint32_t i = Length(); i < mRecs.Length(); ++i) {
+        MOZ_ASSERT(!mRecs[i]);
+      }
+#endif
+      // Removed elements are at the end after sorting.
+      mRecs.RemoveElementsAt(Length(), mRemovedElements);
+      mRemovedElements = 0;
+    }
+  }
 }
 
 void
@@ -3628,7 +3714,7 @@ CacheIndex::SizeOfExcludingThisInternal(mozilla::MallocSizeOf mallocSizeOf) cons
   n += mTmpJournal.SizeOfExcludingThis(mallocSizeOf);
 
   // mFrecencyArray items are reported by mIndex/mPendingUpdates
-  n += mFrecencyArray.ShallowSizeOfExcludingThis(mallocSizeOf);
+  n += mFrecencyArray.mRecs.ShallowSizeOfExcludingThis(mallocSizeOf);
   n += mDiskConsumptionObservers.ShallowSizeOfExcludingThis(mallocSizeOf);
 
   return n;
@@ -3712,7 +3798,9 @@ CacheIndex::ReportHashStats()
   }
 
   nsTArray<CacheIndexRecord *> records;
-  records.AppendElements(mFrecencyArray);
+  for (auto iter = mFrecencyArray.Iter(); !iter.Done(); iter.Next()) {
+    records.AppendElement(iter.Get());
+  }
 
   records.Sort(HashComparator());
 

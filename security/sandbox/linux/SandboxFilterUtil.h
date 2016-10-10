@@ -13,8 +13,8 @@
 // between different Linux architectures.
 
 #include "mozilla/Maybe.h"
-#include "sandbox/linux/services/linux_syscalls.h"
 #include "sandbox/linux/bpf_dsl/policy.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 namespace mozilla {
 
@@ -72,6 +72,12 @@ public:
 #define CASES_FOR_mmap   case __NR_mmap2
 #else
 #define CASES_FOR_mmap   case __NR_mmap
+#endif
+
+#ifdef __NR_fchown32
+#define CASES_FOR_fchown   case __NR_fchown32: case __NR_fchown
+#else
+#define CASES_FOR_fchown   case __NR_fchown
 #endif
 
 #ifdef __NR_getuid32

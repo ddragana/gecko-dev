@@ -5,15 +5,12 @@
 "use strict";
 
 const {InspectorFront} = require("devtools/shared/fronts/inspector");
-const {TargetFactory} = require("devtools/client/framework/target");
 const AUTOCOMPLETION_PREF = "devtools.editor.autocomplete";
 const TEST_URI = "data:text/html;charset=UTF-8,<html><body><bar></bar>" +
                  "<div id='baz'></div><body></html>";
 
-const wait = (delay) => new Promise(resolve => setTimeout(resolve, delay));
-
 add_task(function* () {
-  yield promiseTab(TEST_URI);
+  yield addTab(TEST_URI);
   yield runTests();
 });
 
@@ -25,7 +22,7 @@ function* runTests() {
   let {ed, win, edWin} = yield setup(null, {
     autocomplete: true,
     mode: Editor.modes.css,
-    autocompleteOpts: {walker: walker}
+    autocompleteOpts: {walker: walker, cssProperties: getClientCssProperties()}
   });
   yield testMouse(ed, edWin);
   yield testKeyboard(ed, edWin);

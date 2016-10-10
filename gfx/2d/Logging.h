@@ -126,6 +126,9 @@ enum class LogReason : int {
   AsyncTransactionTimeout, // 30
   TextureCreation,
   InvalidCacheSurface,
+  AlphaWithBasicClient,
+  UnbalancedClipStack,
+  ProcessingError,
   // End
   MustBeLessThanThis = 101,
 };
@@ -494,16 +497,23 @@ private:
       if ((mOptions & int(LogOptions::CrashAction)) && ValidReason()) {
         mMessage << " " << (int)mReason;
       }
-      mMessage << "]: ";
+      if (AutoPrefix()) {
+        mMessage << "]: ";
+      }
     }
   }
 
   void WriteLog(const std::string &aString) {
     if (MOZ_UNLIKELY(LogIt())) {
       Logger::OutputMessage(aString, L, NoNewline());
+      // Assert if required.  We don't have a three parameter MOZ_ASSERT
+      // so use the underlying functions instead (see bug 1281702):
+#ifdef DEBUG
       if (mOptions & int(LogOptions::AssertOnCall)) {
-        MOZ_ASSERT(false, "An assert from the graphics logger");
+        MOZ_ReportAssertionFailure(aString.c_str(), __FILE__, __LINE__);
+        MOZ_CRASH("GFX: An assert from the graphics logger");
       }
+#endif
       if ((mOptions & int(LogOptions::CrashAction)) && ValidReason()) {
         Logger::CrashAction(mReason);
       }
@@ -633,7 +643,10 @@ public:
   }
 
   void IncreaseIndent() { ++mDepth; }
-  void DecreaseIndent() { --mDepth; }
+  void DecreaseIndent() {
+    MOZ_ASSERT(mDepth > 0);
+    --mDepth;
+  }
 
   void ConditionOnPrefFunction(bool(*aPrefFunction)()) {
     mConditionedOnPref = true;
@@ -671,6 +684,14 @@ public:
   explicit TreeAutoIndent(TreeLog& aTreeLog) : mTreeLog(aTreeLog) {
     mTreeLog.IncreaseIndent();
   }
+
+  TreeAutoIndent(const TreeAutoIndent& aTreeAutoIndent) :
+      TreeAutoIndent(aTreeAutoIndent.mTreeLog) {
+    mTreeLog.IncreaseIndent();
+  }
+
+  TreeAutoIndent& operator=(const TreeAutoIndent& aTreeAutoIndent) = delete;
+
   ~TreeAutoIndent() {
     mTreeLog.DecreaseIndent();
   }

@@ -141,7 +141,7 @@ public:
   void SendWindowFocusChanged(bool aIsActive);
   NPDrawingModel GetDrawingModel();
   bool IsRemoteDrawingCoreAnimation();
-  nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
+
   NPEventModel GetEventModel();
   static void CARefresh(nsITimer *aTimer, void *aClosure);
   void AddToCARefreshTimer();
@@ -158,6 +158,10 @@ public:
 #endif // XP_MACOSX
 
   void ResolutionMayHaveChanged();
+#if defined(XP_MACOSX) || defined(XP_WIN)
+  nsresult ContentsScaleFactorChanged(double aContentsScaleFactor);
+#endif
+
   void UpdateDocumentActiveState(bool aIsActive);
 
   void SetFrame(nsPluginFrame *aFrame);
@@ -229,8 +233,6 @@ public:
   // Returns true if this is windowed plugin that can return static captures
   // for scroll operations.
   bool NeedsScrollImageLayer();
-  // Notification we receive from nsPluginFrame about scroll state.
-  bool UpdateScrollState(bool aIsScrolling);
 
   void DidComposite();
 
@@ -258,11 +260,12 @@ public:
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInfo* aVideoInfo);
 
   void Invalidate();
+  void Recomposite();
 
   void RequestFullScreen();
   void ExitFullScreen();
 
-  // Called from AndroidJNI when we removed the fullscreen view.
+  // Called from nsAppShell when we removed the fullscreen view.
   static void ExitFullScreen(jobject view);
 #endif
 
@@ -338,10 +341,10 @@ private:
   bool                                      mSentInitialTopLevelWindowEvent;
   bool                                      mLastWindowIsActive;
   bool                                      mLastContentFocused;
-  double                                    mLastScaleFactor;
   // True if, the next time the window is activated, we should blur ourselves.
   bool                                      mShouldBlurOnActivate;
 #endif
+  double                                    mLastScaleFactor;
   double                                    mLastCSSZoomFactor;
   // Initially, the event loop nesting level we were created on, it's updated
   // if we detect the appshell is on a lower level as long as we're not stopped.
@@ -411,9 +414,6 @@ private:
 #endif
 
   bool mWaitingForPaint;
-#if defined(XP_WIN)
-  bool mScrollState;
-#endif
 };
 
 #endif // nsPluginInstanceOwner_h_

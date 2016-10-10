@@ -205,6 +205,27 @@ this.BrowserTestUtils = {
   },
 
   /**
+   * Waits for the selected browser to load in a new window. This
+   * is most useful when you've got a window that might not have
+   * loaded its DOM yet, and where you can't easily use browserLoaded
+   * on gBrowser.selectedBrowser since gBrowser doesn't yet exist.
+   *
+   * @param {win}
+   *        A newly opened window for which we're waiting for the
+   *        first browser load.
+   *
+   * @return {Promise}
+   * @resolves Once the selected browser fires its load event.
+   */
+  firstBrowserLoaded(win) {
+    let mm = win.messageManager;
+    return this.waitForMessage(mm, "browser-test-utils:loadEvent", (msg) => {
+      let selectedBrowser = win.gBrowser.selectedBrowser;
+      return msg.target == selectedBrowser;
+    });
+  },
+
+  /**
    * Waits for the web progress listener associated with this tab to fire a
    * STATE_STOP for the toplevel document.
    *
@@ -252,6 +273,9 @@ this.BrowserTestUtils = {
    *
    * @return {Promise}
    * @resolves With the {xul:tab} when a tab is opened and its location changes to the given URL.
+   *
+   * NB: this method will not work if you open a new tab with e.g. BrowserOpenTab
+   * and the tab does not load a URL, because no onLocationChange will fire.
    */
   waitForNewTab(tabbrowser, url) {
     return new Promise((resolve, reject) => {
@@ -273,6 +297,34 @@ this.BrowserTestUtils = {
         tabbrowser.addTabsProgressListener(progressListener);
 
       });
+    });
+  },
+
+  /**
+   * Waits for onLocationChange.
+   *
+   * @param {tabbrowser} tabbrowser
+   *        The tabbrowser to wait for the location change on.
+   * @param {string} url
+   *        The string URL to look for. The URL must match the URL in the
+   *        location bar exactly.
+   * @return {Promise}
+   * @resolves When onLocationChange fires.
+   */
+  waitForLocationChange(tabbrowser, url) {
+    return new Promise((resolve, reject) => {
+      let progressListener = {
+        onLocationChange(aBrowser) {
+          if ((url && aBrowser.currentURI.spec != url) ||
+              (!url && aBrowser.currentURI.spec == "about:blank")) {
+            return;
+          }
+
+          tabbrowser.removeTabsProgressListener(progressListener);
+          resolve();
+        },
+      };
+      tabbrowser.addTabsProgressListener(progressListener);
     });
   },
 
@@ -362,16 +414,25 @@ this.BrowserTestUtils = {
    *        The window we should wait to have "domwindowopened" sent through
    *        the observer service for. If this is not supplied, we'll just
    *        resolve when the first "domwindowopened" notification is seen.
+   * @param {function} checkFn [optional]
+   *        Called with the nsIDOMWindow object as argument, should return true
+   *        if the event is the expected one, or false if it should be ignored
+   *        and observing should continue. If not specified, the first window
+   *        resolves the returned promise.
    * @return {Promise}
    *         A Promise which resolves when a "domwindowopened" notification
    *         has been fired by the window watcher.
    */
-  domWindowOpened(win) {
+  domWindowOpened(win, checkFn) {
     return new Promise(resolve => {
       function observer(subject, topic, data) {
         if (topic == "domwindowopened" && (!win || subject === win)) {
+          let observedWindow = subject.QueryInterface(Ci.nsIDOMWindow);
+          if (checkFn && !checkFn(observedWindow)) {
+            return;
+          }
           Services.ww.unregisterNotification(observer);
-          resolve(subject.QueryInterface(Ci.nsIDOMWindow));
+          resolve(observedWindow);
         }
       }
       Services.ww.registerNotification(observer);
@@ -433,11 +494,11 @@ this.BrowserTestUtils = {
     // Wait for browser-delayed-startup-finished notification, it indicates
     // that the window has loaded completely and is ready to be used for
     // testing.
-    yield this.waitForEvent(win, "load");
     let startupPromise =
       TestUtils.topicObserved("browser-delayed-startup-finished",
                               subject => subject == win).then(() => win);
-    let loadPromise = this.browserLoaded(win.gBrowser.selectedBrowser);
+
+    let loadPromise = this.firstBrowserLoaded(win);
 
     yield startupPromise;
     yield loadPromise;

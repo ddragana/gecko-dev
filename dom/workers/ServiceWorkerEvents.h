@@ -11,13 +11,10 @@
 #include "mozilla/dom/ExtendableEventBinding.h"
 #include "mozilla/dom/ExtendableMessageEventBinding.h"
 #include "mozilla/dom/FetchEventBinding.h"
+#include "mozilla/dom/File.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/workers/bindings/ServiceWorker.h"
-
-#ifndef MOZ_SIMPLEPUSH
-#include "mozilla/dom/File.h"
-#endif
 
 #include "nsProxyRelease.h"
 #include "nsContentUtils.h"
@@ -80,6 +77,7 @@ public:
     bool trusted = e->Init(aOwner);
     e->InitEvent(aType, aOptions.mBubbles, aOptions.mCancelable);
     e->SetTrusted(trusted);
+    e->SetComposed(aOptions.mComposed);
     return e.forget();
   }
 
@@ -185,8 +183,6 @@ public:
   ReportCanceled();
 };
 
-#ifndef MOZ_SIMPLEPUSH
-
 class PushMessageData final : public nsISupports,
                               public nsWrapperCache
 {
@@ -214,7 +210,7 @@ private:
   nsString mDecodedText;
   ~PushMessageData();
 
-  NS_METHOD EnsureDecodedText();
+  nsresult EnsureDecodedText();
   uint8_t* GetContentsCopy();
 };
 
@@ -255,7 +251,6 @@ public:
     return mData;
   }
 };
-#endif /* ! MOZ_SIMPLEPUSH */
 
 class ExtendableMessageEvent final : public ExtendableEvent
 {

@@ -11,6 +11,7 @@
 #include "nsNodeInfoManager.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
 #include "nsCOMPtr.h"
@@ -274,9 +275,8 @@ nsNodeInfoManager::GetNodeInfo(const nsAString& aName, nsIAtom *aPrefix,
   void *node = PL_HashTableLookup(mNodeInfoHash, &tmpKey);
 
   if (node) {
-    NodeInfo* nodeInfo = static_cast<NodeInfo *>(node);
-
-    NS_ADDREF(*aNodeInfo = nodeInfo);
+    RefPtr<NodeInfo> nodeInfo = static_cast<NodeInfo*>(node);
+    nodeInfo.forget(aNodeInfo);
 
     return NS_OK;
   }
@@ -390,6 +390,11 @@ nsNodeInfoManager::SetDocumentPrincipal(nsIPrincipal *aPrincipal)
   }
 
   NS_ASSERTION(aPrincipal, "Must have principal by this point!");
+  MOZ_DIAGNOSTIC_ASSERT(!nsContentUtils::IsExpandedPrincipal(aPrincipal),
+                        "Documents shouldn't have an expanded principal");
+  if (nsContentUtils::IsExpandedPrincipal(aPrincipal)) {
+    Telemetry::Accumulate(Telemetry::DOCUMENT_WITH_EXPANDED_PRINCIPAL, 1);
+  }
 
   mPrincipal = aPrincipal;
 }

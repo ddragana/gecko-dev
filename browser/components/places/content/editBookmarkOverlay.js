@@ -131,14 +131,18 @@ var gEditItemOverlay = {
                         PlacesUIUtils.getItemDescription(this._paneInfo.itemId));
   },
 
-  _initKeywordField: Task.async(function* (aNewKeyword) {
-    if (!this._paneInfo.isBookmark)
+  _initKeywordField: Task.async(function* (newKeyword = "") {
+    if (!this._paneInfo.isBookmark) {
       throw new Error("_initKeywordField called unexpectedly");
+    }
 
-    let newKeyword = aNewKeyword;
-    if (newKeyword === undefined) {
-      let itemId = this._paneInfo.itemId;
-      newKeyword = PlacesUtils.bookmarks.getKeywordForBookmark(itemId);
+    if (!newKeyword) {
+      let entries = [];
+      yield PlacesUtils.keywords.fetch({ url: this._paneInfo.uri.spec },
+                                       e => entries.push(e));
+      if (entries.length > 0) {
+        this._keyword = newKeyword = entries[0].keyword;
+      }
     }
     this._initTextField(this._keywordField, newKeyword);
   }),
@@ -173,6 +177,18 @@ var gEditItemOverlay = {
   initPanel(aInfo) {
     if (typeof(aInfo) != "object" || aInfo === null)
       throw new Error("aInfo must be an object.");
+    if ("node" in aInfo) {
+      try {
+        aInfo.node.type;
+      } catch (e) {
+        // If the lazy loader for |type| generates an exception, it means that
+        // this bookmark could not be loaded. This sometimes happens when tests
+        // create a bookmark by clicking the bookmark star, then try to cleanup
+        // before the bookmark panel has finished opening. Either way, if we
+        // cannot retrieve the bookmark information, we cannot open the panel.
+        return;
+      }
+    }
 
     // For sanity ensure that the implementer has uninited the panel before
     // trying to init it again, or we could end up leaking due to observers.
@@ -215,7 +231,7 @@ var gEditItemOverlay = {
     }
 
     if (showOrCollapse("keywordRow", isBookmark, "keyword")) {
-      this._initKeywordField();
+      this._initKeywordField().catch(Components.utils.reportError);
       this._keywordField.readOnly = this.readOnly;
     }
 
@@ -568,7 +584,7 @@ var gEditItemOverlay = {
                     : this._paneInfo.itemGuid;
         PlacesTransactions.EditTitle({ guid, title: newTitle })
                           .transact().catch(Components.utils.reportError);
-      }).catch(Cu.reportError);
+      }).catch(Components.utils.reportError);
     }
   },
 
@@ -601,7 +617,7 @@ var gEditItemOverlay = {
     try {
       newURI = PlacesUIUtils.createFixedURI(this._locationField.value);
     }
-    catch(ex) {
+    catch (ex) {
       // TODO: Bug 1089141 - Provide some feedback about the invalid url.
       return;
     }
@@ -625,14 +641,19 @@ var gEditItemOverlay = {
       return;
 
     let itemId = this._paneInfo.itemId;
-    let newKeyword = this._keywordField.value;
+    let oldKeyword = this._keyword;
+    let keyword = this._keyword = this._keywordField.value;
+    let postData = this._paneInfo.postData;
     if (!PlacesUIUtils.useAsyncTransactions) {
-      let txn = new PlacesEditBookmarkKeywordTransaction(itemId, newKeyword, this._paneInfo.postData);
+      let txn = new PlacesEditBookmarkKeywordTransaction(itemId,
+                                                         keyword,
+                                                         postData,
+                                                         oldKeyword);
       PlacesUtils.transactionManager.doTransaction(txn);
       return;
     }
     let guid = this._paneInfo.itemGuid;
-    PlacesTransactions.EditKeyword({ guid, keyword: newKeyword })
+    PlacesTransactions.EditKeyword({ guid, keyword, postData, oldKeyword })
                       .transact().catch(Components.utils.reportError);
   },
 
@@ -979,9 +1000,8 @@ var gEditItemOverlay = {
         if (curTagIndex == -1)
           tags.push(tagCheckbox.label);
       }
-      else {
-        if (curTagIndex != -1)
-          tags.splice(curTagIndex, 1);
+      else if (curTagIndex != -1) {
+        tags.splice(curTagIndex, 1);
       }
       this._element("tagsField").value = tags.join(", ");
       this._updateTags();
@@ -1086,7 +1106,7 @@ var gEditItemOverlay = {
       break;
     case "keyword":
       if (this._paneInfo.visibleRows.has("keywordRow"))
-        this._initKeywordField(aValue);
+        this._initKeywordField(aValue).catch(Components.utils.reportError);
       break;
     case PlacesUIUtils.DESCRIPTION_ANNO:
       if (this._paneInfo.visibleRows.has("descriptionRow"))

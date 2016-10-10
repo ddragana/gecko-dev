@@ -10,19 +10,25 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 const TOPIC_WILL_IMPORT_BOOKMARKS = "initial-migration-will-import-default-bookmarks";
 const TOPIC_DID_IMPORT_BOOKMARKS = "initial-migration-did-import-default-bookmarks";
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/AppConstants.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "BookmarkHTMLUtils",
-                                  "resource://gre/modules/BookmarkHTMLUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
-                                  "resource://gre/modules/PromiseUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AutoMigrate",
                                   "resource:///modules/AutoMigrate.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BookmarkHTMLUtils",
+                                  "resource://gre/modules/BookmarkHTMLUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+                                  "resource://gre/modules/PromiseUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Sqlite",
+                                  "resource://gre/modules/Sqlite.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
+                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WindowsRegistry",
+                                  "resource://gre/modules/WindowsRegistry.jsm");
 
 var gMigrators = null;
 var gProfileStartup = null;
@@ -31,7 +37,7 @@ var gMigrationBundle = null;
 XPCOMUtils.defineLazyGetter(this, "gAvailableMigratorKeys", function() {
   if (AppConstants.platform == "win") {
     return [
-      "firefox", "edge", "ie", "chrome", "chromium", "safari", "360se",
+      "firefox", "edge", "ie", "chrome", "chromium", "360se",
       "canary"
     ];
   }
@@ -197,6 +203,10 @@ this.MigratorPrototype = {
     return types.reduce((a, b) => a |= b, 0);
   },
 
+  getKey: function MP_getKey() {
+    return this.contractID.match(/\=([^\=]+)$/)[1];
+  },
+
   /**
    * DO NOT OVERRIDE - After deCOMing migration, the UI will just call
    * migrate for each resource.
@@ -216,6 +226,31 @@ this.MigratorPrototype = {
       return new Promise(resolve => {
         Services.tm.mainThread.dispatch(resolve, Ci.nsIThread.DISPATCH_NORMAL);
       });
+    };
+
+    let getHistogramForResourceType = resourceType => {
+      if (resourceType == MigrationUtils.resourceTypes.HISTORY) {
+        return "FX_MIGRATION_HISTORY_IMPORT_MS";
+      }
+      if (resourceType == MigrationUtils.resourceTypes.BOOKMARKS) {
+        return "FX_MIGRATION_BOOKMARKS_IMPORT_MS";
+      }
+      if (resourceType == MigrationUtils.resourceTypes.PASSWORDS) {
+        return "FX_MIGRATION_LOGINS_IMPORT_MS";
+      }
+      return null;
+    };
+    let maybeStartTelemetryStopwatch = (resourceType, resource) => {
+      let histogram = getHistogramForResourceType(resourceType);
+      if (histogram) {
+        TelemetryStopwatch.startKeyed(histogram, this.getKey(), resource);
+      }
+    };
+    let maybeStopTelemetryStopwatch = (resourceType, resource) => {
+      let histogram = getHistogramForResourceType(resourceType);
+      if (histogram) {
+        TelemetryStopwatch.finishKeyed(histogram, this.getKey(), resource);
+      }
     };
 
     // Called either directly or through the bookmarks import callback.
@@ -246,8 +281,10 @@ this.MigratorPrototype = {
         for (let res of itemResources) {
           // Workaround bug 449811.
           let resource = res;
+          maybeStartTelemetryStopwatch(migrationType, resource);
           let completeDeferred = PromiseUtils.defer();
           let resourceDone = function(aSuccess) {
+            maybeStopTelemetryStopwatch(migrationType, resource);
             itemResources.delete(resource);
             itemSuccess |= aSuccess;
             if (itemResources.size == 0) {
@@ -267,7 +304,7 @@ this.MigratorPrototype = {
           try {
             resource.migrate(resourceDone);
           }
-          catch(ex) {
+          catch (ex) {
             Cu.reportError(ex);
             resourceDone(false);
           }
@@ -337,7 +374,7 @@ this.MigratorPrototype = {
         exists = profiles.length > 0;
       }
     }
-    catch(ex) {
+    catch (ex) {
       Cu.reportError(ex);
     }
     return exists;
@@ -411,7 +448,7 @@ this.MigrationUtils = Object.freeze({
         aFunction.apply(null, arguments);
         success = true;
       }
-      catch(ex) {
+      catch (ex) {
         Cu.reportError(ex);
       }
       // Do not change this to call aCallback directly in try try & catch
@@ -452,6 +489,36 @@ this.MigrationUtils = Object.freeze({
       aKey, aReplacements, aReplacements.length);
   },
 
+  _getLocalePropertyForBrowser(browserId) {
+    switch (browserId) {
+      case "edge":
+        return "sourceNameEdge";
+      case "ie":
+        return "sourceNameIE";
+      case "safari":
+        return "sourceNameSafari";
+      case "canary":
+        return "sourceNameCanary";
+      case "chrome":
+        return "sourceNameChrome";
+      case "chromium":
+        return "sourceNameChromium";
+      case "firefox":
+        return "sourceNameFirefox";
+      case "360se":
+        return "sourceName360se";
+    }
+    return null;
+  },
+
+  getBrowserName(browserId) {
+    let prop = this._getLocalePropertyForBrowser(browserId);
+    if (prop) {
+      return this.getLocalizedString(prop);
+    }
+    return null;
+  },
+
   /**
    * Helper for creating a folder for imported bookmarks from a particular
    * migration source.  The folder is created at the end of the given folder.
@@ -473,6 +540,69 @@ this.MigrationUtils = Object.freeze({
     })).guid;
   }),
 
+  /**
+   * Get all the rows corresponding to a select query from a database, without
+   * requiring a lock on the database. If fetching data fails (because someone
+   * else tried to write to the DB at the same time, for example), we will
+   * retry the fetch after a 100ms timeout, up to 10 times.
+   *
+   * @param path
+   *        the file path to the database we want to open.
+   * @param description
+   *        a developer-readable string identifying what kind of database we're
+   *        trying to open.
+   * @param selectQuery
+   *        the SELECT query to use to fetch the rows.
+   *
+   * @return a promise that resolves to an array of rows. The promise will be
+   *         rejected if the read/fetch failed even after retrying.
+   */
+  getRowsFromDBWithoutLocks(path, description, selectQuery) {
+    let dbOptions = {
+      readOnly: true,
+      ignoreLockingMode: true,
+      path,
+    };
+
+    const RETRYLIMIT = 10;
+    const RETRYINTERVAL = 100;
+    return Task.spawn(function* innerGetRows() {
+      let rows = null;
+      for (let retryCount = RETRYLIMIT; retryCount && !rows; retryCount--) {
+        // Attempt to get the rows. If this succeeds, we will bail out of the loop,
+        // close the database in a failsafe way, and pass the rows back.
+        // If fetching the rows throws, we will wait RETRYINTERVAL ms
+        // and try again. This will repeat a maximum of RETRYLIMIT times.
+        let db;
+        let didOpen = false;
+        let exceptionSeen;
+        try {
+          db = yield Sqlite.openConnection(dbOptions);
+          didOpen = true;
+          rows = yield db.execute(selectQuery);
+        } catch (ex) {
+          if (!exceptionSeen) {
+            Cu.reportError(ex);
+          }
+          exceptionSeen = ex;
+        } finally {
+          try {
+            if (didOpen) {
+              yield db.close();
+            }
+          } catch (ex) {}
+        }
+        if (exceptionSeen) {
+          yield new Promise(resolve => setTimeout(resolve, RETRYINTERVAL));
+        }
+      }
+      if (!rows) {
+        throw new Error("Couldn't get rows from the " + description + " database.");
+      }
+      return rows;
+    });
+  },
+
   get _migrators() {
     return gMigrators ? gMigrators : gMigrators = new Map();
   },
@@ -484,7 +614,7 @@ this.MigrationUtils = Object.freeze({
    * @param aKey internal name of the migration source.
    *             Supported values: ie (windows),
    *                               edge (windows),
-   *                               safari (mac/windows),
+   *                               safari (mac),
    *                               canary (mac/windows),
    *                               chrome (mac/windows/linux),
    *                               chromium (mac/windows/linux),
@@ -509,7 +639,7 @@ this.MigrationUtils = Object.freeze({
         migrator = Cc["@mozilla.org/profile/migrator;1?app=browser&type=" +
                       aKey].createInstance(Ci.nsIBrowserProfileMigrator);
       }
-      catch(ex) { Cu.reportError(ex) }
+      catch (ex) { Cu.reportError(ex) }
       this._migrators.set(aKey, migrator);
     }
 
@@ -540,17 +670,39 @@ this.MigrationUtils = Object.freeze({
     };
 
     let browserDesc = "";
+    let key = "";
     try {
       let browserDesc =
         Cc["@mozilla.org/uriloader/external-protocol-service;1"].
         getService(Ci.nsIExternalProtocolService).
         getApplicationDescription("http");
-      return APP_DESC_TO_KEY[browserDesc] || "";
+      key = APP_DESC_TO_KEY[browserDesc] || "";
     }
-    catch(ex) {
+    catch (ex) {
       Cu.reportError("Could not detect default browser: " + ex);
     }
-    return "";
+
+    // "firefox" is the least useful entry here, and might just be because we've set
+    // ourselves as the default (on Windows 7 and below). In that case, check if we
+    // have a registry key that tells us where to go:
+    if (key == "firefox" && AppConstants.isPlatformAndVersionAtMost("win", "6.2")) {
+      const kRegPath = "Software\\Mozilla\\Firefox";
+      let oldDefault = WindowsRegistry.readRegKey(
+          Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER, kRegPath, "OldDefaultBrowserCommand");
+      if (oldDefault) {
+        // Remove the key:
+        WindowsRegistry.removeRegKey(
+          Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER, kRegPath, "OldDefaultBrowserCommand");
+        try {
+          let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFileWin);
+          file.initWithCommandLine(oldDefault);
+          key = APP_DESC_TO_KEY[file.getVersionInfoField("FileDescription")] || key;
+        } catch (ex) {
+          Cu.reportError("Could not convert old default browser value to description.");
+        }
+      }
+    }
+    return key;
   },
 
   // Whether or not we're in the process of startup migration
@@ -716,8 +868,7 @@ this.MigrationUtils = Object.freeze({
     let isRefresh = migrator && skipSourcePage &&
                     migratorKey == AppConstants.MOZ_APP_NAME;
 
-    if (!isRefresh &&
-        Services.prefs.getBoolPref("browser.migration.automigrate")) {
+    if (!isRefresh && AutoMigrate.enabled) {
       try {
         AutoMigrate.migrate(aProfileStartup, aMigratorKey, aProfileToMigrate);
         return;

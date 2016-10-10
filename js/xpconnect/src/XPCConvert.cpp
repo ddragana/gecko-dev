@@ -341,7 +341,7 @@ XPCConvert::NativeData2JS(MutableHandleValue d, const void* s,
         }
 
         xpcObjectHelper helper(iface);
-        return NativeInterface2JSObject(d, nullptr, helper, iid, nullptr, true, pErr);
+        return NativeInterface2JSObject(d, nullptr, helper, iid, true, pErr);
     }
 
     default:
@@ -361,7 +361,7 @@ CheckChar16InCharRange(char16_t c)
         /* U+0080/U+0100 - U+FFFF data lost. */
         static const size_t MSG_BUF_SIZE = 64;
         char msg[MSG_BUF_SIZE];
-        JS_snprintf(msg, MSG_BUF_SIZE, "char16_t out of char range; high bits of data lost: 0x%x", c);
+        snprintf(msg, MSG_BUF_SIZE, "char16_t out of char range; high bits of data lost: 0x%x", int(c));
         NS_WARNING(msg);
         return false;
     }
@@ -519,7 +519,7 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
         nsAString* ws = *((nsAString**)d);
 
         if (!str) {
-            ws->AssignLiteral(MOZ_UTF16("undefined"));
+            ws->AssignLiteral(u"undefined");
         } else if (XPCStringConvert::IsDOMString(str)) {
             // The characters represent an existing nsStringBuffer that
             // was shared by XPCStringConvert::ReadableToJSVal.
@@ -640,7 +640,6 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
     {
         if (s.isNull() || s.isUndefined()) {
             nsACString* rs = *((nsACString**)d);
-            rs->Truncate();
             rs->SetIsVoid(true);
             return true;
         }
@@ -744,11 +743,9 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
                                      nsIXPConnectJSObjectHolder** dest,
                                      xpcObjectHelper& aHelper,
                                      const nsID* iid,
-                                     XPCNativeInterface** Interface,
                                      bool allowNativeWrapper,
                                      nsresult* pErr)
 {
-    MOZ_ASSERT_IF(Interface, iid);
     if (!iid)
         iid = &NS_GET_IID(nsISupports);
 
@@ -822,20 +819,10 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
     }
 
     // Go ahead and create an XPCWrappedNative for this object.
-    AutoMarkingNativeInterfacePtr iface(cx);
-    if (iid) {
-        if (Interface)
-            iface = *Interface;
-
-        if (!iface) {
-            iface = XPCNativeInterface::GetNewOrUsed(iid);
-            if (!iface)
-                return false;
-
-            if (Interface)
-                *Interface = iface;
-        }
-    }
+    RefPtr<XPCNativeInterface> iface =
+        XPCNativeInterface::GetNewOrUsed(iid);
+    if (!iface)
+        return false;
 
     RefPtr<XPCWrappedNative> wrapper;
     nsresult rv = XPCWrappedNative::GetNewOrUsed(aHelper, xpcscope, iface,
@@ -1044,7 +1031,7 @@ XPCConvert::ConstructException(nsresult rv, const char* message,
 class MOZ_STACK_CLASS AutoExceptionRestorer
 {
 public:
-    AutoExceptionRestorer(JSContext* cx, Value v)
+    AutoExceptionRestorer(JSContext* cx, const Value& v)
         : mContext(cx), tvr(cx, v)
     {
         JS_ClearPendingException(mContext);

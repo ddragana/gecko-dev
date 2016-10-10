@@ -9,7 +9,7 @@
 // shared-head.js handles imports, constants, and utility functions
 Services.scriptloader.loadSubScript("chrome://mochitests/content/browser/devtools/client/framework/test/shared-head.js", this);
 
-var {Utils: WebConsoleUtils} = require("devtools/shared/webconsole/utils");
+var {Utils: WebConsoleUtils} = require("devtools/client/webconsole/utils");
 var {Messages} = require("devtools/client/webconsole/console-output");
 const asyncStorage = require("devtools/shared/async-storage");
 const HUDService = require("devtools/client/webconsole/hudservice");
@@ -37,15 +37,14 @@ const SEVERITY_LOG = 3;
 // The indent of a console group in pixels.
 const GROUP_INDENT = 12;
 
-const WEBCONSOLE_STRINGS_URI = "chrome://devtools/locale/" +
-                               "webconsole.properties";
+const WEBCONSOLE_STRINGS_URI = "devtools/locale/webconsole.properties";
 var WCUL10n = new WebConsoleUtils.L10n(WEBCONSOLE_STRINGS_URI);
 
 const DOCS_GA_PARAMS = "?utm_source=mozilla" +
                        "&utm_medium=firefox-console-errors" +
                        "&utm_campaign=default";
 
-DevToolsUtils.testing = true;
+flags.testing = true;
 
 function loadTab(url) {
   let deferred = promise.defer();
@@ -322,8 +321,14 @@ var finishTest = Task.async(function* () {
   finish();
 });
 
+// Always use the 'old' frontend for tests that rely on it
+Services.prefs.setBoolPref("devtools.webconsole.new-frontend-enabled", false);
 registerCleanupFunction(function* () {
-  DevToolsUtils.testing = false;
+  Services.prefs.clearUserPref("devtools.webconsole.new-frontend-enabled");
+});
+
+registerCleanupFunction(function* () {
+  flags.testing = false;
 
   // Remove stored console commands in between tests
   yield asyncStorage.removeItem("webConsoleHistory");

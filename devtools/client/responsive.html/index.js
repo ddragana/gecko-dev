@@ -11,7 +11,7 @@ const { BrowserLoader } =
   Cu.import("resource://devtools/client/shared/browser-loader.js", {});
 const { require } = BrowserLoader({
   baseURI: "resource://devtools/client/responsive.html/",
-  window: this
+  window
 });
 const { Task } = require("devtools/shared/task");
 const Telemetry = require("devtools/client/shared/telemetry");
@@ -110,9 +110,9 @@ window.getViewportSize = () => {
 };
 
 /**
- * Called by manager.js to set viewport size from GCLI.
+ * Called by manager.js to set viewport size from tests, GCLI, etc.
  */
-window.setViewportSize = (width, height) => {
+window.setViewportSize = ({ width, height }) => {
   try {
     bootstrap.dispatch(resizeViewport(0, width, height));
   } catch (e) {

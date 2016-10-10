@@ -70,7 +70,7 @@ RemoteMediator.prototype = {
     let callbackID = this._addCallback(callback, installs.uris);
 
     installs.mimetype = XPINSTALL_MIMETYPE;
-    installs.triggeringPrincipal = principal;
+    installs.principalToInherit = principal;
     installs.callbackID = callbackID;
 
     if (Services.appinfo.processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
@@ -215,7 +215,7 @@ InstallTrigger.prototype = {
                                        secman.DISALLOW_INHERIT_PRINCIPAL);
       return true;
     }
-    catch(e) {
+    catch (e) {
       return false;
     }
   },

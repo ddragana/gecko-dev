@@ -46,9 +46,9 @@ class TestExecuteAsyncContent(MarionetteTestCase):
     def test_same_context(self):
         var1 = 'testing'
         self.assertEqual(self.marionette.execute_script("""
-            this.testvar = '%s';
+            this.testvar = '{}';
             return this.testvar;
-            """ % var1), var1)
+            """.format(var1)), var1)
         self.assertEqual(self.marionette.execute_async_script(
             "marionetteScriptFinished(this.testvar);", new_sandbox=False), var1)
 
@@ -110,6 +110,19 @@ marionetteScriptFinished(4);
         self.assertEqual(self.marionette.execute_async_script(
             "marionetteScriptFinished(global.barfoo);", new_sandbox=False),
                          [42, 23])
+
+    # Functions defined in higher privilege scopes, such as the privileged
+    # content frame script listener.js runs in, cannot be accessed from
+    # content.  This tests that it is possible to introspect the objects on
+    # `arguments` without getting permission defined errors.  This is made
+    # possible because the last argument is always the callback/complete
+    # function.
+    #
+    # See bug 1290966.
+    def test_introspection_of_arguments(self):
+        self.marionette.execute_async_script(
+            "arguments[0].cheese; __webDriverCallback();",
+            script_args=[], sandbox=None)
 
 
 class TestExecuteAsyncChrome(TestExecuteAsyncContent):

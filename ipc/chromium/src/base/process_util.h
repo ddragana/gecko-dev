@@ -74,7 +74,8 @@ enum ProcessArchitecture {
   PROCESS_ARCH_X86_64 = 0x2,
   PROCESS_ARCH_PPC = 0x4,
   PROCESS_ARCH_ARM = 0x8,
-  PROCESS_ARCH_MIPS = 0x10
+  PROCESS_ARCH_MIPS = 0x10,
+  PROCESS_ARCH_ARM64 = 0x20
 };
 
 inline ProcessArchitecture GetCurrentProcessArchitecture()
@@ -90,6 +91,8 @@ inline ProcessArchitecture GetCurrentProcessArchitecture()
   currentArchitecture = base::PROCESS_ARCH_ARM;
 #elif defined(ARCH_CPU_MIPS)
   currentArchitecture = base::PROCESS_ARCH_MIPS;
+#elif defined(ARCH_CPU_ARM64)
+  currentArchitecture = base::PROCESS_ARCH_ARM64;
 #endif
   return currentArchitecture;
 }
@@ -114,13 +117,10 @@ ProcessHandle GetCurrentProcessHandle();
 bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Converts a PID to a process handle. On Windows the handle is opened
-// with more access rights and must only be used by trusted code. Parameter
-// error can be used to get the error code in opening the process handle.
+// with more access rights and must only be used by trusted code.
 // You have to close returned handle using CloseProcessHandle. Returns true
 // on success.
-bool OpenPrivilegedProcessHandle(ProcessId pid,
-                                 ProcessHandle* handle,
-                                 int64_t* error = nullptr);
+bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle);
 
 // Closes the process handle opened by OpenProcessHandle.
 void CloseProcessHandle(ProcessHandle process);

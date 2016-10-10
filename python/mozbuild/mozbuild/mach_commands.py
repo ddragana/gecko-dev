@@ -36,11 +36,10 @@ from mozbuild.base import (
     ObjdirMismatchException,
 )
 
-from mozpack.manifests import (
-    InstallManifest,
+from mozbuild.backend import (
+    backends,
+    get_backend_class,
 )
-
-from mozbuild.backend import backends
 from mozbuild.shellutil import quote as shell_quote
 
 
@@ -413,10 +412,40 @@ class Build(MachCommandBase):
                     if status != 0:
                         break
             else:
-                status = self._run_make(srcdir=True, filename='client.mk',
-                    line_handler=output.on_line, log=False, print_directory=False,
-                    allow_parallel=False, ensure_exit_code=False, num_jobs=jobs,
-                    silent=not verbose)
+                # Try to call the default backend's build() method. This will
+                # run configure to determine BUILD_BACKENDS if it hasn't run
+                # yet.
+                config = None
+                try:
+                    config = self.config_environment
+                except Exception:
+                    config_rc = self.configure(buildstatus_messages=True,
+                                               line_handler=output.on_line)
+                    if config_rc != 0:
+                        return config_rc
+
+                    # Even if configure runs successfully, we may have trouble
+                    # getting the config_environment for some builds, such as
+                    # OSX Universal builds. These have to go through client.mk
+                    # regardless.
+                    try:
+                        config = self.config_environment
+                    except Exception:
+                        pass
+
+                if config:
+                    active_backend = config.substs.get('BUILD_BACKENDS', [None])[0]
+                    if active_backend:
+                        backend_cls = get_backend_class(active_backend)(config)
+                        status = backend_cls.build(self, output, jobs, verbose)
+
+                # If the backend doesn't specify a build() method, then just
+                # call client.mk directly.
+                if status is None:
+                    status = self._run_make(srcdir=True, filename='client.mk',
+                        line_handler=output.on_line, log=False, print_directory=False,
+                        allow_parallel=False, ensure_exit_code=False, num_jobs=jobs,
+                        silent=not verbose)
 
                 self.log(logging.WARNING, 'warning_summary',
                     {'count': len(monitor.warnings_database)},
@@ -517,16 +546,23 @@ class Build(MachCommandBase):
         description='Configure the tree (run configure and config.status).')
     @CommandArgument('options', default=None, nargs=argparse.REMAINDER,
                      help='Configure options')
-    def configure(self, options=None):
+    def configure(self, options=None, buildstatus_messages=False, line_handler=None):
         def on_line(line):
             self.log(logging.INFO, 'build_output', {'line': line}, '{line}')
 
+        line_handler = line_handler or on_line
+
         options = ' '.join(shell_quote(o) for o in options or ())
+        append_env = {b'CONFIGURE_ARGS': options.encode('utf-8')}
+
+        # Only print build status messages when we have an active
+        # monitor.
+        if not buildstatus_messages:
+            append_env[b'NO_BUILDSTATUS_MESSAGES'] =  b'1'
         status = self._run_make(srcdir=True, filename='client.mk',
-            target='configure', line_handler=on_line, log=False,
+            target='configure', line_handler=line_handler, log=False,
             print_directory=False, allow_parallel=False, ensure_exit_code=False,
-            append_env={b'CONFIGURE_ARGS': options.encode('utf-8'),
-                        b'NO_BUILDSTATUS_MESSAGES': b'1',})
+            append_env=append_env)
 
         if not status:
             print('Configure complete!')
@@ -572,41 +608,6 @@ class Build(MachCommandBase):
 
         print('Hit CTRL+c to stop server.')
         server.run()
-
-    CLOBBER_CHOICES = ['objdir', 'python']
-    @Command('clobber', category='build',
-        description='Clobber the tree (delete the object directory).')
-    @CommandArgument('what', default=['objdir'], nargs='*',
-        help='Target to clobber, must be one of {{{}}} (default objdir).'.format(
-             ', '.join(CLOBBER_CHOICES)))
-    def clobber(self, what):
-        invalid = set(what) - set(self.CLOBBER_CHOICES)
-        if invalid:
-            print('Unknown clobber target(s): {}'.format(', '.join(invalid)))
-            return 1
-
-        ret = 0
-        if 'objdir' in what:
-            try:
-                self.remove_objdir()
-            except OSError as e:
-                if sys.platform.startswith('win'):
-                    if isinstance(e, WindowsError) and e.winerror in (5,32):
-                        self.log(logging.ERROR, 'file_access_error', {'error': e},
-                            "Could not clobber because a file was in use. If the "
-                            "application is running, try closing it. {error}")
-                        return 1
-                raise
-
-        if 'python' in what:
-            if os.path.isdir(mozpath.join(self.topsrcdir, '.hg')):
-                cmd = ['hg', 'purge', '--all', '-I', 'glob:**.py[co]']
-            elif os.path.isdir(mozpath.join(self.topsrcdir, '.git')):
-                cmd = ['git', 'clean', '-f', '-x', '*.py[co]']
-            else:
-                cmd = ['find', '.', '-type', 'f', '-name', '*.py[co]', '-delete']
-            ret = subprocess.call(cmd, cwd=self.topsrcdir)
-        return ret
 
     @Command('build-backend', category='build',
         description='Generate a backend used to build the tree.')
@@ -658,6 +659,47 @@ class Doctor(MachCommandBase):
         return doctor.check_all()
 
 @CommandProvider
+class Clobber(MachCommandBase):
+    NO_AUTO_LOG = True
+    CLOBBER_CHOICES = ['objdir', 'python']
+    @Command('clobber', category='build',
+        description='Clobber the tree (delete the object directory).')
+    @CommandArgument('what', default=['objdir'], nargs='*',
+        help='Target to clobber, must be one of {{{}}} (default objdir).'.format(
+             ', '.join(CLOBBER_CHOICES)))
+    @CommandArgument('--full', action='store_true',
+        help='Perform a full clobber')
+    def clobber(self, what, full=False):
+        invalid = set(what) - set(self.CLOBBER_CHOICES)
+        if invalid:
+            print('Unknown clobber target(s): {}'.format(', '.join(invalid)))
+            return 1
+
+        ret = 0
+        if 'objdir' in what:
+            from mozbuild.controller.clobber import Clobberer
+            try:
+                Clobberer(self.topsrcdir, self.topobjdir).remove_objdir(full)
+            except OSError as e:
+                if sys.platform.startswith('win'):
+                    if isinstance(e, WindowsError) and e.winerror in (5,32):
+                        self.log(logging.ERROR, 'file_access_error', {'error': e},
+                            "Could not clobber because a file was in use. If the "
+                            "application is running, try closing it. {error}")
+                        return 1
+                raise
+
+        if 'python' in what:
+            if os.path.isdir(mozpath.join(self.topsrcdir, '.hg')):
+                cmd = ['hg', 'purge', '--all', '-I', 'glob:**.py[co]']
+            elif os.path.isdir(mozpath.join(self.topsrcdir, '.git')):
+                cmd = ['git', 'clean', '-f', '-x', '*.py[co]']
+            else:
+                cmd = ['find', '.', '-type', 'f', '-name', '*.py[co]', '-delete']
+            ret = subprocess.call(cmd, cwd=self.topsrcdir)
+        return ret
+
+@CommandProvider
 class Logs(MachCommandBase):
     """Provide commands to read mach logs."""
     NO_AUTO_LOG = True
@@ -672,12 +714,12 @@ class Logs(MachCommandBase):
             path = self._get_state_filename('last_log.json')
             log_file = open(path, 'rb')
 
-        if self.log_manager.terminal:
+        if os.isatty(sys.stdout.fileno()):
             env = dict(os.environ)
             if 'LESS' not in env:
                 # Sensible default flags if none have been set in the user
                 # environment.
-                env['LESS'] = 'FRX'
+                env[b'LESS'] = b'FRX'
             less = subprocess.Popen(['less'], stdin=subprocess.PIPE, env=env)
             # Various objects already have a reference to sys.stdout, so we
             # can't just change it, we need to change the file descriptor under
@@ -1060,6 +1102,8 @@ class RunProgram(MachCommandBase):
         help='Do not pass the --foreground argument by default on Mac.')
     @CommandArgument('--noprofile', '-n', action='store_true', group=prog_group,
         help='Do not pass the --profile argument by default.')
+    @CommandArgument('--disable-e10s', action='store_true', group=prog_group,
+        help='Run the program with electrolysis disabled.')
 
     @CommandArgumentGroup('debugging')
     @CommandArgument('--debug', action='store_true', group='debugging',
@@ -1086,8 +1130,8 @@ class RunProgram(MachCommandBase):
         help='Allocation stack trace coverage. The default is \'partial\'.')
     @CommandArgument('--show-dump-stats', action='store_true', group='DMD',
         help='Show stats when doing dumps.')
-    def run(self, params, remote, background, noprofile, debug, debugger,
-        debugparams, slowscript, dmd, mode, stacks, show_dump_stats):
+    def run(self, params, remote, background, noprofile, disable_e10s, debug,
+        debugger, debugparams, slowscript, dmd, mode, stacks, show_dump_stats):
 
         if conditions.is_android(self):
             # Running Firefox for Android is completely different
@@ -1132,6 +1176,8 @@ class RunProgram(MachCommandBase):
                 args.append(path)
 
         extra_env = {'MOZ_CRASHREPORTER_DISABLE': '1'}
+        if disable_e10s:
+            extra_env['MOZ_FORCE_DISABLE_E10S'] = '1'
 
         if debug or debugger or debugparams:
             if 'INSIDE_EMACS' in os.environ:
@@ -1449,8 +1495,7 @@ class PackageFrontend(MachCommandBase):
         self._activate_virtualenv()
         os.environ['PATH'] = original_path
 
-        for package in ('pylru==1.0.9',
-                        'taskcluster==0.0.32',
+        for package in ('taskcluster==0.0.32',
                         'mozregression==1.0.2'):
             self._install_pip_package(package)
 
@@ -1529,3 +1574,23 @@ class PackageFrontend(MachCommandBase):
         artifacts = self._make_artifacts(tree=tree, job=job)
         artifacts.clear_cache()
         return 0
+
+@CommandProvider
+class Vendor(MachCommandBase):
+    """Vendor third-party dependencies into the source repository."""
+
+    @Command('vendor', category='misc',
+             description='Vendor third-party dependencies into the source repository.')
+    def vendor(self):
+        self.parser.print_usage()
+        sys.exit(1)
+
+    @SubCommand('vendor', 'rust',
+                description='Vendor rust crates from crates.io into third_party/rust')
+    @CommandArgument('--ignore-modified', action='store_true',
+        help='Ignore modified files in current checkout',
+        default=False)
+    def vendor_rust(self, **kwargs):
+        from mozbuild.vendor_rust import VendorRust
+        vendor_command = self._spawn(VendorRust)
+        vendor_command.vendor(**kwargs)

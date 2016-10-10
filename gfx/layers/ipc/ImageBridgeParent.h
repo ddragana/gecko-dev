@@ -46,15 +46,19 @@ public:
   typedef InfallibleTArray<OpDestroy> OpDestroyArray;
   typedef InfallibleTArray<EditReply> EditReplyArray;
 
+protected:
   ImageBridgeParent(MessageLoop* aLoop, ProcessId aChildProcessId);
+
+public:
   ~ImageBridgeParent();
+
+  static ImageBridgeParent* CreateSameProcess();
+  static bool CreateForGPUProcess(Endpoint<PImageBridgeParent>&& aEndpoint);
+  static bool CreateForContent(Endpoint<PImageBridgeParent>&& aEndpoint);
 
   virtual ShmemAllocator* AsShmemAllocator() override { return this; }
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-
-  static PImageBridgeParent*
-  Create(Transport* aTransport, ProcessId aChildProcessId);
 
   // CompositableParentManager
   virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override;
@@ -130,18 +134,14 @@ public:
 
   static bool NotifyImageComposites(nsTArray<ImageCompositeNotification>& aNotifications);
 
-  // Overriden from IToplevelProtocol
-  IToplevelProtocol*
-  CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
-                base::ProcessHandle aPeerProcess,
-                mozilla::ipc::ProtocolCloneContext* aCtx) override;
-
   virtual bool UsesImageBridge() const override { return true; }
 
   virtual bool IPCOpen() const override { return !mClosed; }
 
 protected:
   void OnChannelConnected(int32_t pid) override;
+
+  void Bind(Endpoint<PImageBridgeParent>&& aEndpoint);
 
 private:
   void DeferredDestroy();

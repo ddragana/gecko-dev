@@ -11,8 +11,10 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
 
   // Reps
-  const { createFactories, isGrip, cropString } = require("./rep-utils");
-  const { ObjectBox } = createFactories(require("./object-box"));
+  const { isGrip, cropString } = require("./rep-utils");
+
+  // Shortcuts
+  const { span } = React.DOM;
 
   /**
    * This component represents a template for Function objects.
@@ -28,13 +30,13 @@ define(function (require, exports, module) {
       if (this.props.objectLink) {
         return this.props.objectLink({
           object: grip
-        }, "function");
+        }, "function ");
       }
       return "";
     },
 
     summarizeFunction: function (grip) {
-      let name = grip.displayName || grip.name || "function";
+      let name = grip.userDisplayName || grip.displayName || grip.name || "function";
       return cropString(name + "()", 100);
     },
 
@@ -42,7 +44,7 @@ define(function (require, exports, module) {
       let grip = this.props.object;
 
       return (
-        ObjectBox({className: "function"},
+        span({className: "objectBox objectBox-function"},
           this.getTitle(grip),
           this.summarizeFunction(grip)
         )

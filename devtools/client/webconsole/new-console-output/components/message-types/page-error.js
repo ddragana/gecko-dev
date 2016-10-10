@@ -9,48 +9,57 @@
 // React & Redux
 const {
   createFactory,
-  DOM: dom,
   PropTypes
 } = require("devtools/client/shared/vendor/react");
-const MessageRepeat = createFactory(require("devtools/client/webconsole/new-console-output/components/message-repeat").MessageRepeat);
-const MessageIcon = createFactory(require("devtools/client/webconsole/new-console-output/components/message-icon").MessageIcon);
+const Message = createFactory(require("devtools/client/webconsole/new-console-output/components/message"));
 
 PageError.displayName = "PageError";
 
 PageError.propTypes = {
   message: PropTypes.object.isRequired,
+  open: PropTypes.bool,
+  indent: PropTypes.number.isRequired,
+};
+
+PageError.defaultProps = {
+  open: false,
+  indent: 0,
 };
 
 function PageError(props) {
-  const { message } = props;
-  const messageBody =
-    dom.span({className: "message-body devtools-monospace"},
-      message.data.errorMessage);
-  const repeat = MessageRepeat({repeat: message.repeat});
-  const icon = MessageIcon({severity: message.severity});
-  const children = [
-    messageBody,
-    repeat
-  ];
+  const {
+    message,
+    open,
+    serviceContainer,
+    indent,
+  } = props;
+  const {
+    id: messageId,
+    source,
+    type,
+    level,
+    messageText: messageBody,
+    repeat,
+    stacktrace,
+    frame
+  } = message;
 
-  // @TODO Use of "is" is a temporary hack to get the category and severity
-  // attributes to be applied. There are targeted in webconsole's CSS rules,
-  // so if we remove this hack, we have to modify the CSS rules accordingly.
-  return dom.div({
-    class: "message cm-s-mozilla",
-    is: "fdt-message",
-    category: message.category,
-    severity: message.severity
-  },
-    icon,
-    dom.span({className: "message-body-wrapper"},
-      dom.span({},
-        dom.span({className: "message-flex-body"},
-          children
-        )
-      )
-    )
-  );
+  const childProps = {
+    messageId,
+    open,
+    collapsible: true,
+    source,
+    type,
+    level,
+    topLevelClasses: [],
+    indent,
+    messageBody,
+    repeat,
+    frame,
+    stacktrace,
+    serviceContainer,
+  };
+  return Message(childProps);
 }
 
-module.exports.PageError = PageError;
+module.exports = PageError;

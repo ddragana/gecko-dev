@@ -70,8 +70,10 @@ class MacroAssemblerMIPS : public MacroAssemblerMIPSShared
 
     // arithmetic based ops
     // add
-    void ma_addTestOverflow(Register rd, Register rs, Register rt, Label* overflow);
-    void ma_addTestOverflow(Register rd, Register rs, Imm32 imm, Label* overflow);
+    template <typename L>
+    void ma_addTestOverflow(Register rd, Register rs, Register rt, L overflow);
+    template <typename L>
+    void ma_addTestOverflow(Register rd, Register rs, Imm32 imm, L overflow);
 
     // subtract
     void ma_subTestOverflow(Register rd, Register rs, Register rt, Label* overflow);
@@ -848,8 +850,9 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void load32(AbsoluteAddress address, Register dest);
     void load32(wasm::SymbolicAddress address, Register dest);
     void load64(const Address& address, Register64 dest) {
-        load32(Address(address.base, address.offset + LOW_32_OFFSET), dest.low);
-        load32(Address(address.base, address.offset + HIGH_32_OFFSET), dest.high);
+        load32(Address(address.base, address.offset + INT64LOW_OFFSET), dest.low);
+        int32_t highOffset = (address.offset < 0) ? -int32_t(INT64HIGH_OFFSET) : INT64HIGH_OFFSET;
+        load32(Address(address.base, address.offset + highOffset), dest.high);
     }
 
     void loadPtr(const Address& address, Register dest);
@@ -939,9 +942,8 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
         moveToDoubleHi(zero, reg);
     }
 
-    void clampIntToUint8(Register reg);
-
-    void convertUInt64ToDouble(Register64 src, Register temp, FloatRegister dest);
+    static bool convertUInt64ToDoubleNeedsTemp();
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp);
 
     void breakpoint();
 
@@ -997,13 +999,13 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void moveFloat32(FloatRegister src, FloatRegister dest) {
         as_movs(dest, src);
     }
-
-    void loadWasmActivation(Register dest) {
-        loadPtr(Address(GlobalReg, wasm::ActivationGlobalDataOffset - AsmJSGlobalRegBias), dest);
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
     }
-    void loadAsmJSHeapRegisterFromGlobalData() {
-        MOZ_ASSERT(Imm16::IsInSignedRange(wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias));
-        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias), HeapReg);
+    void loadWasmPinnedRegsFromTls() {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
+        ma_addu(GlobalReg, Imm32(AsmJSGlobalRegBias));
     }
 
     // Instrumentation for entering and leaving the profiler.

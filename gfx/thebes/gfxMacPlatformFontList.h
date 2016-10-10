@@ -29,7 +29,8 @@ public:
     friend class gfxMacPlatformFontList;
 
     MacOSFontEntry(const nsAString& aPostscriptName, int32_t aWeight,
-                   bool aIsStandardFace = false);
+                   bool aIsStandardFace = false,
+                   double aSizeHint = 0.0);
 
     // for use with data fonts
     MacOSFontEntry(const nsAString& aPostscriptName, CGFontRef aFontRef,
@@ -64,6 +65,8 @@ protected:
 
     CGFontRef mFontRef; // owning reference to the CGFont, released on destruction
 
+    double mSizeHint;
+
     bool mFontRefInitialized;
     bool mRequiresAAT;
     bool mIsCFF;
@@ -78,8 +81,6 @@ public:
     }
 
     static int32_t AppleWeightToCSSWeight(int32_t aAppleWeight);
-
-    gfxFontFamily* GetDefaultFont(const gfxFontStyle* aStyle) override;
 
     bool GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName) override;
 
@@ -107,6 +108,10 @@ public:
                           gfxFontStyle &aFontStyle,
                           float aDevPixPerCSSPixel);
 
+protected:
+    virtual gfxFontFamily*
+    GetDefaultFontForPlatform(const gfxFontStyle* aStyle) override;
+
 private:
     friend class gfxPlatformMac;
 
@@ -114,13 +119,13 @@ private:
     virtual ~gfxMacPlatformFontList();
 
     // initialize font lists
-    nsresult InitFontList() override;
+    virtual nsresult InitFontListForPlatform() override;
 
     // special case font faces treated as font families (set via prefs)
     void InitSingleFaceList();
 
     // initialize system fonts
-    void InitSystemFonts();
+    void InitSystemFontNames();
 
     // helper function to lookup in both hidden system fonts and normal fonts
     gfxFontFamily* FindSystemFontFamily(const nsAString& aFamily);
@@ -169,8 +174,8 @@ private:
     // or Helvetica Neue. For OSX 10.11, Apple uses pair of families
     // for the UI, one for text sizes and another for display sizes
     bool mUseSizeSensitiveSystemFont;
-    RefPtr<gfxFontFamily> mSystemTextFontFamily;
-    RefPtr<gfxFontFamily> mSystemDisplayFontFamily; // only used on OSX 10.11
+    nsString mSystemTextFontFamilyName;
+    nsString mSystemDisplayFontFamilyName; // only used on OSX 10.11
 };
 
 #endif /* gfxMacPlatformFontList_H_ */

@@ -12,6 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -84,7 +85,8 @@ static const ClassOps ErrorObjectClassOps = {
     { \
         js_Error_str, /* yes, really */ \
         JSCLASS_HAS_CACHED_PROTO(JSProto_##name) | \
-        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS), \
+        JSCLASS_HAS_RESERVED_SLOTS(ErrorObject::RESERVED_SLOTS) | \
+        JSCLASS_BACKGROUND_FINALIZE, \
         &ErrorObjectClassOps, \
         classSpecPtr \
     }
@@ -114,7 +116,7 @@ ErrorObject::subErrorClassSpec_ = {
 };
 
 const ClassSpec
-ErrorObject::debuggeeWouldRunClassSpec_ = {
+ErrorObject::nonGlobalErrorClassSpec_ = {
     ErrorObject::createConstructor,
     ErrorObject::createProto,
     nullptr,
@@ -136,9 +138,10 @@ ErrorObject::classes[JSEXN_LIMIT] = {
     IMPLEMENT_ERROR_CLASS(TypeError,      &ErrorObject::subErrorClassSpec_),
     IMPLEMENT_ERROR_CLASS(URIError,       &ErrorObject::subErrorClassSpec_),
 
-    // DebuggeeWouldRun is a subclass of Error but is accessible via the
-    // Debugger constructor, not the global.
-    IMPLEMENT_ERROR_CLASS(DebuggeeWouldRun, &ErrorObject::debuggeeWouldRunClassSpec_)
+    // These Error subclasses are not accessible via the global object:
+    IMPLEMENT_ERROR_CLASS(DebuggeeWouldRun, &ErrorObject::nonGlobalErrorClassSpec_),
+    IMPLEMENT_ERROR_CLASS(CompileError,   &ErrorObject::nonGlobalErrorClassSpec_),
+    IMPLEMENT_ERROR_CLASS(RuntimeError,   &ErrorObject::nonGlobalErrorClassSpec_)
 };
 
 JSErrorReport*
@@ -148,8 +151,6 @@ js::CopyErrorReport(JSContext* cx, JSErrorReport* report)
      * We use a single malloc block to make a deep copy of JSErrorReport with
      * the following layout:
      *   JSErrorReport
-     *   array of copies of report->messageArgs
-     *   char16_t array with characters for all messageArgs
      *   char16_t array with characters for ucmessage
      *   char16_t array with characters for linebuf
      *   char array with characters for filename
@@ -166,47 +167,20 @@ js::CopyErrorReport(JSContext* cx, JSErrorReport* report)
     if (report->linebuf())
         linebufSize = (report->linebufLength() + 1) * sizeof(char16_t);
     size_t ucmessageSize = 0;
-    size_t argsArraySize = 0;
-    size_t argsCopySize = 0;
-    if (report->ucmessage) {
+    if (report->ucmessage)
         ucmessageSize = JS_CHARS_SIZE(report->ucmessage);
-        if (report->messageArgs) {
-            size_t i = 0;
-            for (; report->messageArgs[i]; ++i)
-                argsCopySize += JS_CHARS_SIZE(report->messageArgs[i]);
-
-            /* Non-null messageArgs should have at least one non-null arg. */
-            MOZ_ASSERT(i != 0);
-            argsArraySize = (i + 1) * sizeof(const char16_t*);
-        }
-    }
 
     /*
      * The mallocSize can not overflow since it represents the sum of the
      * sizes of already allocated objects.
      */
-    size_t mallocSize = sizeof(JSErrorReport) + argsArraySize + argsCopySize +
-                         ucmessageSize + linebufSize + filenameSize;
+    size_t mallocSize = sizeof(JSErrorReport) + ucmessageSize + linebufSize + filenameSize;
     uint8_t* cursor = cx->pod_calloc<uint8_t>(mallocSize);
     if (!cursor)
         return nullptr;
 
     JSErrorReport* copy = (JSErrorReport*)cursor;
     cursor += sizeof(JSErrorReport);
-
-    if (argsArraySize != 0) {
-        copy->messageArgs = (const char16_t**)cursor;
-        cursor += argsArraySize;
-        size_t i = 0;
-        for (; report->messageArgs[i]; ++i) {
-            copy->messageArgs[i] = (const char16_t*)cursor;
-            size_t argSize = JS_CHARS_SIZE(report->messageArgs[i]);
-            js_memcpy(cursor, report->messageArgs[i], argSize);
-            cursor += argSize;
-        }
-        copy->messageArgs[i] = nullptr;
-        MOZ_ASSERT(cursor == (uint8_t*)copy->messageArgs[0] + argsCopySize);
-    }
 
     if (report->ucmessage) {
         copy->ucmessage = (const char16_t*)cursor;
@@ -266,7 +240,8 @@ static const size_t MAX_REPORTED_STACK_DEPTH = 1u << 7;
 static bool
 CaptureStack(JSContext* cx, MutableHandleObject stack)
 {
-    return CaptureCurrentStack(cx, stack, MAX_REPORTED_STACK_DEPTH);
+    return CaptureCurrentStack(cx, stack,
+                               JS::StackCapture(JS::MaxFrames(MAX_REPORTED_STACK_DEPTH)));
 }
 
 JSString*
@@ -288,6 +263,7 @@ js::ComputeStackString(JSContext* cx)
 static void
 exn_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->maybeOffMainThread());
     if (JSErrorReport* report = obj->as<ErrorObject>().getErrorReport())
         fop->free_(report);
 }
@@ -639,7 +615,7 @@ ErrorReportToString(JSContext* cx, JSErrorReport* reportp)
      * reportp->ucmessage without prefixing it with anything.
      */
     if (str) {
-        RootedString separator(cx, JS_NewUCStringCopyN(cx, MOZ_UTF16(": "), 2));
+        RootedString separator(cx, JS_NewUCStringCopyN(cx, u": ", 2));
         if (!separator)
             return nullptr;
         str = ConcatStrings<CanGC>(cx, str, separator);
@@ -673,17 +649,6 @@ ErrorReport::~ErrorReport()
         return;
 
     js_free(ownedMessage);
-    if (ownedReport.messageArgs) {
-        /*
-         * ExpandErrorArgumentsVA owns its messageArgs only if it had to
-         * inflate the arguments (from regular |char*|s), which is always in
-         * our case.
-         */
-        size_t i = 0;
-        while (ownedReport.messageArgs[i])
-            js_free(const_cast<char16_t*>(ownedReport.messageArgs[i++]));
-        js_free(ownedReport.messageArgs);
-    }
     js_free(const_cast<char16_t*>(ownedReport.ucmessage));
 }
 
@@ -740,12 +705,11 @@ ErrorReport::ReportAddonExceptionToTelementry(JSContext* cx)
         filename = "FILE_NOT_FOUND";
     }
     char histogramKey[64];
-    JS_snprintf(histogramKey, sizeof(histogramKey),
-                "%s %s %s %u",
-                addonIdChars.get(),
-                funname,
-                filename,
-                (reportp ? reportp->lineno : 0) );
+    SprintfLiteral(histogramKey, "%s %s %s %u",
+                   addonIdChars.get(),
+                   funname,
+                   filename,
+                   (reportp ? reportp->lineno : 0) );
     cx->runtime()->addTelemetry(JS_TELEMETRY_ADDON_EXCEPTIONS, 1, histogramKey);
 }
 
@@ -763,8 +727,8 @@ ErrorReport::init(JSContext* cx, HandleValue exn,
         reportp = ErrorFromException(cx, exnObject);
 
         if (!reportp && sniffingBehavior == NoSideEffects) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-                                 JSMSG_ERR_DURING_THROW);
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                      JSMSG_ERR_DURING_THROW);
             return false;
         }
 
@@ -894,12 +858,12 @@ ErrorReport::init(JSContext* cx, HandleValue exn,
     if (!reportp) {
         // This is basically an inlined version of
         //
-        //   JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
-        //                        JSMSG_UNCAUGHT_EXCEPTION, message_);
+        //   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+        //                            JSMSG_UNCAUGHT_EXCEPTION, message_);
         //
         // but without the reporting bits.  Instead it just puts all
         // the stuff we care about in our ownedReport and message_.
-        if (!populateUncaughtExceptionReport(cx, message_)) {
+        if (!populateUncaughtExceptionReportUTF8(cx, message_)) {
             // Just give up.  We're out of memory or something; not much we can
             // do here.
             return false;
@@ -913,17 +877,17 @@ ErrorReport::init(JSContext* cx, HandleValue exn,
 }
 
 bool
-ErrorReport::populateUncaughtExceptionReport(JSContext* cx, ...)
+ErrorReport::populateUncaughtExceptionReportUTF8(JSContext* cx, ...)
 {
     va_list ap;
     va_start(ap, cx);
-    bool ok = populateUncaughtExceptionReportVA(cx, ap);
+    bool ok = populateUncaughtExceptionReportUTF8VA(cx, ap);
     va_end(ap);
     return ok;
 }
 
 bool
-ErrorReport::populateUncaughtExceptionReportVA(JSContext* cx, va_list ap)
+ErrorReport::populateUncaughtExceptionReportUTF8VA(JSContext* cx, va_list ap)
 {
     new (&ownedReport) JSErrorReport();
     ownedReport.flags = JSREPORT_ERROR;
@@ -944,7 +908,7 @@ ErrorReport::populateUncaughtExceptionReportVA(JSContext* cx, va_list ap)
 
     if (!ExpandErrorArgumentsVA(cx, GetErrorMessage, nullptr,
                                 JSMSG_UNCAUGHT_EXCEPTION, &ownedMessage,
-                                ArgumentsAreASCII, &ownedReport, ap)) {
+                                nullptr, ArgumentsAreUTF8, &ownedReport, ap)) {
         return false;
     }
 

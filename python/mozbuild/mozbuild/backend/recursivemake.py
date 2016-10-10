@@ -59,7 +59,7 @@ from ..frontend.data import (
     ObjdirPreprocessedFiles,
     PerSourceFlag,
     Program,
-    RustRlibLibrary,
+    RustLibrary,
     SharedLibrary,
     SimpleProgram,
     Sources,
@@ -204,8 +204,6 @@ class BackendMakeFile(object):
         self.environment = environment
         self.name = mozpath.join(objdir, 'backend.mk')
 
-        # XPIDLFiles attached to this file.
-        self.idls = []
         self.xpt_name = None
 
         self.fh = FileAvoidWrite(self.name, capture_diff=True)
@@ -433,7 +431,6 @@ class RecursiveMakeBackend(CommonBackend):
         # CommonBackend handles XPIDLFile and TestManifest, but we want to do
         # some extra things for them.
         if isinstance(obj, XPIDLFile):
-            backend_file.idls.append(obj)
             backend_file.xpt_name = '%s.xpt' % obj.module
             self._idl_dirs.add(obj.relobjdir)
 
@@ -577,9 +574,11 @@ class RecursiveMakeBackend(CommonBackend):
             else:
                 return False
 
-        elif isinstance(obj, RustRlibLibrary):
-            # Nothing to do because |Sources| has done the work for us.
-            pass
+        elif isinstance(obj, RustLibrary):
+            self.backend_input_files.add(obj.cargo_file)
+            self._process_rust_library(obj, backend_file)
+            # No need to call _process_linked_libraries, because Rust
+            # libraries are self-contained objects at this point.
 
         elif isinstance(obj, SharedLibrary):
             self._process_shared_library(obj, backend_file)
@@ -1161,17 +1160,8 @@ class RecursiveMakeBackend(CommonBackend):
             backend_file.write('SDK_LIBRARY := %s\n' % libdef.import_name)
         if libdef.symbols_file:
             backend_file.write('SYMBOLS_FILE := %s\n' % libdef.symbols_file)
-
-        rust_rlibs = [o for o in libdef.linked_libraries if isinstance(o, RustRlibLibrary)]
-        if rust_rlibs:
-            # write out Rust file with extern crate declarations.
-            extern_crate_file = mozpath.join(libdef.objdir, 'rul.rs')
-            with self._write_file(extern_crate_file) as f:
-                f.write('// AUTOMATICALLY GENERATED.  DO NOT EDIT.\n\n')
-                for rlib in rust_rlibs:
-                    f.write('extern crate %s;\n' % rlib.crate_name)
-
-            backend_file.write('RS_STATICLIB_CRATE_SRC := %s\n' % extern_crate_file)
+        if not libdef.cxx_link:
+            backend_file.write('LIB_IS_C_ONLY := 1\n')
 
     def _process_static_library(self, libdef, backend_file):
         backend_file.write_once('LIBRARY_NAME := %s\n' % libdef.basename)
@@ -1181,6 +1171,10 @@ class RecursiveMakeBackend(CommonBackend):
             backend_file.write('SDK_LIBRARY := %s\n' % libdef.import_name)
         if libdef.no_expand_lib:
             backend_file.write('NO_EXPAND_LIBS := 1\n')
+
+    def _process_rust_library(self, libdef, backend_file):
+        backend_file.write_once('RUST_LIBRARY_FILE := %s\n' % libdef.import_name)
+        backend_file.write('CARGO_FILE := $(srcdir)/Cargo.toml')
 
     def _process_host_library(self, libdef, backend_file):
         backend_file.write('HOST_LIBRARY_NAME = %s\n' % libdef.basename)
@@ -1192,7 +1186,7 @@ class RecursiveMakeBackend(CommonBackend):
     def _process_linked_libraries(self, obj, backend_file):
         def write_shared_and_system_libs(lib):
             for l in lib.linked_libraries:
-                if isinstance(l, StaticLibrary):
+                if isinstance(l, (StaticLibrary, RustLibrary)):
                     write_shared_and_system_libs(l)
                 else:
                     backend_file.write_once('SHARED_LIBS += %s/%s\n'
@@ -1214,14 +1208,15 @@ class RecursiveMakeBackend(CommonBackend):
                     self._build_target_for_obj(lib))
             relpath = pretty_relpath(lib)
             if isinstance(obj, Library):
-                if isinstance(lib, StaticLibrary):
+                if isinstance(lib, RustLibrary):
+                    # We don't need to do anything here; we will handle
+                    # linkage for any RustLibrary elsewhere.
+                    continue
+                elif isinstance(lib, StaticLibrary):
                     backend_file.write_once('STATIC_LIBS += %s/%s\n'
                                         % (relpath, lib.import_name))
                     if isinstance(obj, SharedLibrary):
                         write_shared_and_system_libs(lib)
-                elif isinstance(lib, RustRlibLibrary):
-                    backend_file.write_once('RLIB_EXTERN_CRATE_OPTIONS += --extern %s=%s/%s\n'
-                                            % (lib.crate_name, relpath, lib.rlib_filename))
                 elif isinstance(obj, SharedLibrary):
                     assert lib.variant != lib.COMPONENT
                     backend_file.write_once('SHARED_LIBS += %s/%s\n'
@@ -1240,13 +1235,52 @@ class RecursiveMakeBackend(CommonBackend):
                 backend_file.write_once('HOST_LIBS += %s/%s\n'
                                    % (relpath, lib.import_name))
 
-        # We have to link the Rust super-crate after all intermediate static
-        # libraries have been listed to ensure that the Rust objects are
+        # We have to link any Rust libraries after all intermediate static
+        # libraries have been listed to ensure that the Rust libraries are
         # searched after the C/C++ objects that might reference Rust symbols.
-        # Building the Rust super-crate will take care of Rust->Rust linkage.
-        if isinstance(obj, SharedLibrary) and any(isinstance(o, RustRlibLibrary)
-                                                  for o in obj.linked_libraries):
-            backend_file.write('STATIC_LIBS += librul.$(LIB_SUFFIX)\n')
+
+        def find_rlibs(obj):
+            if isinstance(obj, RustLibrary):
+                yield obj
+            elif isinstance(obj, StaticLibrary) and not obj.no_expand_lib:
+                for l in obj.linked_libraries:
+                    for rlib in find_rlibs(l):
+                        yield rlib
+
+        # Check if we have any rust libraries to prelink and include in our
+        # final library. If we do, write out the RUST_PRELINK information
+        rlibs = []
+        if isinstance(obj, (SharedLibrary, StaticLibrary)):
+            for l in obj.linked_libraries:
+                rlibs += find_rlibs(l)
+        if rlibs:
+            prelink_libname = '%s/%s%s-rs-prelink%s' \
+                              % (relpath,
+                                 obj.config.lib_prefix,
+                                 obj.basename,
+                                 obj.config.lib_suffix)
+            backend_file.write('RUST_PRELINK := %s\n' % prelink_libname)
+            backend_file.write_once('STATIC_LIBS += %s\n' % prelink_libname)
+
+            extern_crate_file = mozpath.join(
+                obj.objdir, '%s-rs-prelink.rs' % obj.basename)
+            with self._write_file(extern_crate_file) as f:
+                f.write('// AUTOMATICALLY GENERATED.  DO NOT EDIT.\n\n')
+                for rlib in rlibs:
+                    f.write('extern crate %s;\n'
+                            % rlib.basename.replace('-', '_'))
+            backend_file.write('RUST_PRELINK_SRC := %s\n' % extern_crate_file)
+
+            backend_file.write('RUST_PRELINK_FLAGS :=\n')
+            backend_file.write('RUST_PRELINK_DEPS :=\n')
+            for rlib in rlibs:
+                rlib_relpath = pretty_relpath(rlib)
+                backend_file.write('RUST_PRELINK_FLAGS += --extern %s=%s/%s\n'
+                                   % (rlib.basename.replace('-', '_'), rlib_relpath, rlib.import_name))
+                backend_file.write('RUST_PRELINK_FLAGS += -L %s/%s\n'
+                                   % (rlib_relpath, rlib.deps_path))
+                backend_file.write('RUST_PRELINK_DEPS += %s/%s\n'
+                                   % (rlib_relpath, rlib.import_name))
 
         for lib in obj.linked_system_libs:
             if obj.KIND == 'target':
@@ -1439,7 +1473,6 @@ class RecursiveMakeBackend(CommonBackend):
         backend_file = self._get_backend_file_for(obj)
 
         backend_file.write('RS_STATICLIB_CRATE_SRC := %s\n' % extern_crate_file)
-        backend_file.write('STATIC_LIBS += librul.$(LIB_SUFFIX)\n')
 
     def _handle_ipdl_sources(self, ipdl_dir, sorted_ipdl_sources,
                              unified_ipdl_cppsrcs_mapping):

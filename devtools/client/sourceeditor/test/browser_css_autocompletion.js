@@ -6,8 +6,6 @@
 
 const CSSCompleter = require("devtools/client/sourceeditor/css-autocompleter");
 const {InspectorFront} = require("devtools/shared/fronts/inspector");
-const {TargetFactory} = require("devtools/client/framework/target");
-const { Cc, Ci } = require("chrome");
 
 const CSS_URI = "http://mochi.test:8888/browser/devtools/client/sourceeditor" +
                 "/test/css_statemachine_testcases.css";
@@ -79,13 +77,10 @@ let inspector;
 
 function test() {
   waitForExplicitFinish();
-  gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function onload() {
-    gBrowser.selectedBrowser.removeEventListener("load", onload, true);
+  addTab(TEST_URI).then(function () {
     doc = content.document;
     runTests();
-  }, true);
-  content.location = TEST_URI;
+  });
 }
 
 function runTests() {
@@ -95,7 +90,8 @@ function runTests() {
   target.makeRemote().then(() => {
     inspector = InspectorFront(target.client, target.form);
     inspector.getWalker().then(walker => {
-      completer = new CSSCompleter({walker: walker});
+      completer = new CSSCompleter({walker: walker,
+                                    cssProperties: getClientCssProperties()});
       checkStateAndMoveOn();
     });
   });
@@ -107,13 +103,15 @@ function checkStateAndMoveOn() {
     return;
   }
 
-  let test = tests[index];
+  let [lineCh, expectedSuggestions] = tests[index];
+  let [line, ch] = lineCh;
+
   progress.dataset.progress = ++index;
   progressDiv.style.width = 100 * index / tests.length + "%";
-  completer.complete(limit(source, test[0]),
-                     {line: test[0][0], ch: test[0][1]}).then(suggestions => {
-                       checkState(test[1], suggestions);
-                     }).then(checkStateAndMoveOn);
+
+  completer.complete(limit(source, lineCh), {line, ch})
+           .then(actualSuggestions => checkState(expectedSuggestions, actualSuggestions))
+           .then(checkStateAndMoveOn);
 }
 
 function checkState(expected, actual) {

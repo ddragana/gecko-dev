@@ -24,14 +24,12 @@
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/DocumentRendererChild.h"
 #include "mozilla/ipc/URIUtils.h"
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/APZEventState.h"
+#include "mozilla/layers/ContentProcessController.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -46,9 +44,10 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozIApplication.h"
 #include "nsContentUtils.h"
+#include "nsCSSFrameConstructor.h"
 #include "nsDocShell.h"
 #include "nsEmbedCID.h"
 #include "nsGlobalWindow.h"
@@ -86,6 +85,7 @@
 #include "nsLayoutUtils.h"
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
+#include "nsViewManager.h"
 #include "nsWeakReference.h"
 #include "nsWindowWatcher.h"
 #include "PermissionMessageUtils.h"
@@ -113,6 +113,8 @@
 #include "nsDeviceContext.h"
 #include "nsSandboxFlags.h"
 #include "FrameLayerBuilder.h"
+#include "VRManagerChild.h"
+#include "nsICommandParams.h"
 
 #ifdef NS_PRINTING
 #include "nsIPrintSession.h"
@@ -147,19 +149,6 @@ static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
 
 typedef nsDataHashtable<nsUint64HashKey, TabChild*> TabChildMap;
 static TabChildMap* sTabChildren;
-
-static bool
-UsingCompositorLRU()
-{
-  static bool sHavePrefs = false;
-  static uint32_t sCompositorLRUSize = 0;
-  if (!sHavePrefs) {
-    sHavePrefs = true;
-    Preferences::AddUintVarCache(&sCompositorLRUSize,
-                                 "layers.compositor-lru-size", 0);
-  }
-  return sCompositorLRUSize != 0;
-}
 
 TabChildBase::TabChildBase()
   : mTabChildGlobal(nullptr)
@@ -233,6 +222,7 @@ TabChildBase::DispatchMessageManagerMessage(const nsAString& aMessageName,
         ErrorResult rv;
         data.Write(cx, json, rv);
         if (NS_WARN_IF(rv.Failed())) {
+            rv.SuppressException();
             return;
         }
     }
@@ -373,7 +363,7 @@ public:
     }
 
 private:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mInfo);
@@ -404,7 +394,7 @@ private:
     }
 
     NS_IMETHOD
-    Run()
+    Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mTabChild);
@@ -468,41 +458,6 @@ PreloadSlowThingsPostFork(void* aUnused)
 
 }
 
-#ifdef MOZ_NUWA_PROCESS
-class MessageChannelAutoBlock MOZ_STACK_CLASS
-{
-public:
-    MessageChannelAutoBlock()
-    {
-        SetMessageChannelBlocked(true);
-    }
-
-    ~MessageChannelAutoBlock()
-    {
-        SetMessageChannelBlocked(false);
-    }
-
-private:
-    void SetMessageChannelBlocked(bool aBlock)
-    {
-        if (!IsNuwaProcess()) {
-            return;
-        }
-
-        mozilla::dom::ContentChild* content =
-            mozilla::dom::ContentChild::GetSingleton();
-        if (aBlock) {
-            content->GetIPCChannel()->Block();
-        } else {
-            content->GetIPCChannel()->Unblock();
-        }
-
-        // Other IPC channels do not perform the checks through Block() and
-        // Unblock().
-    }
-};
-#endif
-
 static bool sPreloaded = false;
 
 /*static*/ void
@@ -525,12 +480,6 @@ TabChild::PreloadSlowThings()
         return;
     }
 
-#ifdef MOZ_NUWA_PROCESS
-    // Temporarily block the IPC channels to the chrome process when we are
-    // preloading.
-    MessageChannelAutoBlock autoblock;
-#endif
-
     // Just load and compile these scripts, but don't run them.
     tab->TryCacheLoadAndCompileScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
     // Load, compile, and run these scripts.
@@ -541,15 +490,7 @@ TabChild::PreloadSlowThings()
     sPreallocatedTab = tab;
     ClearOnShutdown(&sPreallocatedTab);
 
-#ifdef MOZ_NUWA_PROCESS
-    if (IsNuwaProcess()) {
-        NuwaAddFinalConstructor(PreloadSlowThingsPostFork, nullptr);
-    } else {
-        PreloadSlowThingsPostFork(nullptr);
-    }
-#else
     PreloadSlowThingsPostFork(nullptr);
-#endif
 }
 
 /*static*/ already_AddRefed<TabChild>
@@ -570,7 +511,7 @@ TabChild::Create(nsIContentChild* aManager,
         child->mManager = aManager;
         child->SetTabId(aTabId);
         child->SetTabContext(aContext);
-        child->NotifyTabContextUpdated();
+        child->NotifyTabContextUpdated(true);
         return child.forget();
     }
 
@@ -594,19 +535,22 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mNotified(false)
   , mTriedBrowserInit(false)
   , mOrientation(eScreenOrientation_PortraitPrimary)
-  , mUpdateHitRegion(false)
   , mIgnoreKeyPressEvent(false)
   , mHasValidInnerSize(false)
   , mDestroyed(false)
   , mUniqueId(aTabId)
   , mDPI(0)
+  , mRounding(0)
   , mDefaultScale(0)
   , mIsTransparent(false)
-  , mIPCOpen(true)
+  , mIPCOpen(false)
   , mParentIsActive(false)
   , mDidSetRealShowInfo(false)
   , mDidLoadURLInit(false)
-  , mAPZChild(nullptr)
+  , mLayerObserverEpoch(0)
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  , mNativeWindowHandle(0)
+#endif
 {
   // In the general case having the TabParent tell us if APZ is enabled or not
   // doesn't really work because the TabParent itself may not have a reference
@@ -733,9 +677,8 @@ TabChild::ContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
                                     uint64_t aInputBlockId,
                                     bool aPreventDefault) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendContentReceivedInputBlock(aGuid, aInputBlockId,
-                                             aPreventDefault);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->ContentReceivedInputBlock(aInputBlockId, aPreventDefault);
   }
 }
 
@@ -743,8 +686,8 @@ void
 TabChild::SetTargetAPZC(uint64_t aInputBlockId,
                         const nsTArray<ScrollableLayerGuid>& aTargets) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendSetTargetAPZC(aInputBlockId, aTargets);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->SetTargetAPZC(aInputBlockId, aTargets);
   }
 }
 
@@ -752,8 +695,8 @@ void
 TabChild::SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                   const nsTArray<TouchBehaviorFlags>& aTargets) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendSetAllowedTouchBehavior(aInputBlockId, aTargets);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->SetAllowedTouchBehavior(aInputBlockId, aTargets);
   }
 }
 
@@ -769,12 +712,14 @@ TabChild::DoUpdateZoomConstraints(const uint32_t& aPresShellId,
     return true;
   }
 
-  if (!mAPZChild) {
+  if (!mApzcTreeManager) {
     return false;
   }
 
-  return mAPZChild->SendUpdateZoomConstraints(aPresShellId, aViewId,
-                                              aConstraints);
+  ScrollableLayerGuid guid = ScrollableLayerGuid(mLayersId, aPresShellId, aViewId);
+
+  mApzcTreeManager->UpdateZoomConstraints(guid, aConstraints);
+  return true;
 }
 
 nsresult
@@ -787,6 +732,7 @@ TabChild::Init()
   }
 
   webBrowser->SetContainerWindow(this);
+  webBrowser->SetOriginAttributes(OriginAttributesRef());
   mWebNav = do_QueryInterface(webBrowser);
   NS_ASSERTION(mWebNav, "nsWebBrowser doesn't implement nsIWebNavigation?");
 
@@ -805,7 +751,7 @@ TabChild::Init()
     NS_ERROR("couldn't create fake widget");
     return NS_ERROR_FAILURE;
   }
-  mPuppetWidget->Create(
+  mPuppetWidget->InfallibleCreate(
     nullptr, 0,              // no parents
     LayoutDeviceIntRect(0, 0, 0, 0),
     nullptr                  // HandleWidgetEvent
@@ -815,8 +761,7 @@ TabChild::Init()
   baseWindow->Create();
 
   // Set the tab context attributes then pass to docShell
-  SetPrivateBrowsingAttributes(mChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW);
-  NotifyTabContextUpdated();
+  NotifyTabContextUpdated(false);
 
   // IPC uses a WebBrowser object for which DNS prefetching is turned off
   // by default. But here we really want it, so enable it explicitly
@@ -837,8 +782,7 @@ TabChild::Init()
       mChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_LIFETIME);
   nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(WebNavigation());
   MOZ_ASSERT(loadContext);
-  loadContext->SetPrivateBrowsing(
-      mChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW);
+  loadContext->SetPrivateBrowsing(OriginAttributesRef().mPrivateBrowsingId > 0);
   loadContext->SetRemoteTabs(
       mChromeFlags & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW);
 
@@ -856,7 +800,12 @@ TabChild::Init()
     do_QueryInterface(window->GetChromeEventHandler());
   docShell->SetChromeEventHandler(chromeHandler);
 
-  window->SetKeyboardIndicators(ShowAccelerators(), ShowFocusRings());
+  if (window->GetCurrentInnerWindow()) {
+    window->SetKeyboardIndicators(ShowAccelerators(), ShowFocusRings());
+  } else {
+    // Skip ShouldShowFocusRing check if no inner window is available
+    window->SetInitialKeyboardIndicators(ShowAccelerators(), ShowFocusRings());
+  }
 
   // Set prerender flag if necessary.
   if (mIsPrerendered) {
@@ -878,11 +827,13 @@ TabChild::Init()
       });
   mAPZEventState = new APZEventState(mPuppetWidget, Move(callback));
 
+  mIPCOpen = true;
+
   return NS_OK;
 }
 
 void
-TabChild::NotifyTabContextUpdated()
+TabChild::NotifyTabContextUpdated(bool aIsPreallocated)
 {
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
   MOZ_ASSERT(docShell);
@@ -892,7 +843,10 @@ TabChild::NotifyTabContextUpdated()
   }
 
   UpdateFrameType();
-  nsDocShell::Cast(docShell)->SetOriginAttributes(OriginAttributesRef());
+
+  if (aIsPreallocated)  {
+    nsDocShell::Cast(docShell)->SetOriginAttributes(OriginAttributesRef());
+  }
 
   // Set SANDBOXED_AUXILIARY_NAVIGATION flag if this is a receiver page.
   if (!PresentationURL().IsEmpty()) {
@@ -995,6 +949,37 @@ TabChild::RemoteSizeShellTo(int32_t aWidth, int32_t aHeight,
   }
 
   bool sent = SendSizeShellTo(flags, aWidth, aHeight, aShellItemWidth, aShellItemHeight);
+
+  return sent ? NS_OK : NS_ERROR_FAILURE;
+}
+
+NS_IMETHODIMP
+TabChild::RemoteDropLinks(uint32_t aLinksCount, nsIDroppedLinkItem** aLinks)
+{
+  nsTArray<nsString> linksArray;
+  nsresult rv = NS_OK;
+  for (uint32_t i = 0; i < aLinksCount; i++) {
+    nsString tmp;
+    rv = aLinks[i]->GetUrl(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+
+    rv = aLinks[i]->GetName(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+
+    rv = aLinks[i]->GetType(tmp);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+    linksArray.AppendElement(tmp);
+  }
+
+  bool sent = SendDropLinks(linksArray);
 
   return sent ? NS_OK : NS_ERROR_FAILURE;
 }
@@ -1103,8 +1088,6 @@ TabChild::GetDimensions(uint32_t aFlags, int32_t* aX,
 NS_IMETHODIMP
 TabChild::SetFocus()
 {
-  NS_WARNING("TabChild::SetFocus not supported in TabChild");
-
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1149,8 +1132,6 @@ TabChild::GetSiteWindow(void** aSiteWindow)
 NS_IMETHODIMP
 TabChild::Blur()
 {
-  NS_WARNING("TabChild::Blur not supported in TabChild");
-
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -1353,7 +1334,7 @@ TabChild::RecvLoadURL(const nsCString& aURI,
   nsresult rv =
     WebNavigation()->LoadURI(NS_ConvertUTF8toUTF16(aURI).get(),
                              nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP |
-                             nsIWebNavigation::LOAD_FLAGS_DISALLOW_INHERIT_OWNER,
+                             nsIWebNavigation::LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL,
                              nullptr, nullptr, nullptr);
   if (NS_FAILED(rv)) {
       NS_WARNING("WebNavigation()->LoadURI failed. Eating exception, what else can I do?");
@@ -1552,9 +1533,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
       nsCOMPtr<nsILoadContext> context = do_GetInterface(docShell);
       // No need to re-set private browsing mode.
       if (!context->UsePrivateBrowsing()) {
-        bool nonBlank;
-        docShell->GetHasLoadedNonBlankURI(&nonBlank);
-        if (nonBlank) {
+        if (docShell->GetHasLoadedNonBlankURI()) {
           nsContentUtils::ReportToConsoleNonLocalized(
             NS_LITERAL_STRING("We should not switch to Private Browsing after loading a document."),
             nsIScriptError::warningFlag,
@@ -1569,6 +1548,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
     }
   }
   mDPI = aInfo.dpi();
+  mRounding = aInfo.widgetRounding();
   mDefaultScale = aInfo.defaultScale();
   mIsTransparent = aInfo.isTransparent();
 }
@@ -1761,9 +1741,8 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
 
   // Note: there is nothing to do with the modifiers here, as we are not
   // synthesizing any sort of mouse event.
-  CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid);
   nsCOMPtr<nsIDocument> document = GetDocument();
-  CSSRect zoomToRect = CalculateRectToZoomTo(document, point);
+  CSSRect zoomToRect = CalculateRectToZoomTo(document, aPoint);
   // The double-tap can be dispatched by any scroll frame (so |aGuid| could be
   // the guid of any scroll frame), but the zoom-to-rect operation must be
   // performed by the root content scroll frame, so query its identifiers
@@ -1771,40 +1750,53 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
   uint32_t presShellId;
   ViewID viewId;
   if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(
-      document->GetDocumentElement(), &presShellId, &viewId) &&
-      mAPZChild) {
-    mAPZChild->SendZoomToRect(presShellId, viewId, zoomToRect,
-                              DEFAULT_BEHAVIOR);
+      document->GetDocumentElement(), &presShellId, &viewId) && mApzcTreeManager) {
+    ScrollableLayerGuid guid(mLayersId, presShellId, viewId);
+
+    mApzcTreeManager->ZoomToRect(guid, zoomToRect, DEFAULT_BEHAVIOR);
   }
 }
 
-void
-TabChild::HandleTap(GeckoContentController::TapType aType,
-                    const CSSPoint& aPoint, const Modifiers& aModifiers,
-                    const ScrollableLayerGuid& aGuid, const uint64_t& aInputBlockId,
-                    bool aCallTakeFocusForClickFromTap)
+bool
+TabChild::RecvHandleTap(const GeckoContentController::TapType& aType,
+                        const LayoutDevicePoint& aPoint,
+                        const Modifiers& aModifiers,
+                        const ScrollableLayerGuid& aGuid,
+                        const uint64_t& aInputBlockId)
 {
+  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  if (!presShell) {
+    return true;
+  }
+  if (!presShell->GetPresContext()) {
+    return true;
+  }
+  CSSToLayoutDeviceScale scale(presShell->GetPresContext()->CSSToDevPixelScale());
+  CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint / scale, aGuid);
+
   switch (aType) {
   case GeckoContentController::TapType::eSingleTap:
-    if (aCallTakeFocusForClickFromTap && mRemoteFrame) {
-      mRemoteFrame->SendTakeFocusForClickFromTap();
-    }
     if (mGlobal && mTabChildGlobal) {
-      mAPZEventState->ProcessSingleTap(aPoint, aModifiers, aGuid);
+      mAPZEventState->ProcessSingleTap(point, scale, aModifiers, aGuid, 1);
     }
     break;
   case GeckoContentController::TapType::eDoubleTap:
-    HandleDoubleTap(aPoint, aModifiers, aGuid);
+    HandleDoubleTap(point, aModifiers, aGuid);
+    break;
+  case GeckoContentController::TapType::eSecondTap:
+    if (mGlobal && mTabChildGlobal) {
+      mAPZEventState->ProcessSingleTap(point, scale, aModifiers, aGuid, 2);
+    }
     break;
   case GeckoContentController::TapType::eLongTap:
     if (mGlobal && mTabChildGlobal) {
-      mAPZEventState->ProcessLongTap(GetPresShell(), aPoint, aModifiers, aGuid,
+      mAPZEventState->ProcessLongTap(presShell, point, scale, aModifiers, aGuid,
           aInputBlockId);
     }
     break;
   case GeckoContentController::TapType::eLongTapUp:
     if (mGlobal && mTabChildGlobal) {
-      mAPZEventState->ProcessLongTapUp();
+      mAPZEventState->ProcessLongTapUp(presShell, point, scale, aModifiers);
     }
     break;
   case GeckoContentController::TapType::eSentinel:
@@ -1813,6 +1805,7 @@ TabChild::HandleTap(GeckoContentController::TapType aType,
     MOZ_ASSERT(false);
     break;
   }
+  return true;
 }
 
 bool
@@ -1833,8 +1826,11 @@ TabChild::NotifyAPZStateChange(const ViewID& aViewId,
 void
 TabChild::StartScrollbarDrag(const layers::AsyncDragMetrics& aDragMetrics)
 {
-  if (mAPZChild) {
-    mAPZChild->SendStartScrollbarDrag(aDragMetrics);
+  ScrollableLayerGuid guid(mLayersId, aDragMetrics.mPresShellId,
+                           aDragMetrics.mViewId);
+
+  if (mApzcTreeManager) {
+    mApzcTreeManager->StartScrollbarDrag(guid, aDragMetrics);
   }
 }
 
@@ -1844,8 +1840,10 @@ TabChild::ZoomToRect(const uint32_t& aPresShellId,
                      const CSSRect& aRect,
                      const uint32_t& aFlags)
 {
-  if (mAPZChild) {
-    mAPZChild->SendZoomToRect(aPresShellId, aViewId, aRect, aFlags);
+  ScrollableLayerGuid guid(mLayersId, aPresShellId, aViewId);
+
+  if (mApzcTreeManager) {
+    mApzcTreeManager->ZoomToRect(guid, aRect, aFlags);
   }
 }
 
@@ -1990,26 +1988,6 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
 }
 
 bool
-TabChild::RecvMouseScrollTestEvent(const uint64_t& aLayersId,
-                                   const FrameMetrics::ViewID& aScrollId, const nsString& aEvent)
-{
-  if (aLayersId != mLayersId) {
-    RefPtr<TabParent> browser = TabParent::GetTabParentFromLayersId(aLayersId);
-    if (!browser) {
-      return false;
-    }
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-      [aLayersId, browser, aScrollId, aEvent] () -> void {
-        Unused << browser->SendMouseScrollTestEvent(aLayersId, aScrollId, aEvent);
-      }));
-    return true;
-  }
-
-  APZCCallbackHelper::NotifyMozMouseScrollEvent(aScrollId, aEvent);
-  return true;
-}
-
-bool
 TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
                              const ScrollableLayerGuid& aGuid,
                              const uint64_t& aInputBlockId,
@@ -2024,11 +2002,11 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
       mPuppetWidget->GetDefaultScale());
 
   if (localEvent.mMessage == eTouchStart && AsyncPanZoomEnabled()) {
+    nsCOMPtr<nsIDocument> document = GetDocument();
     if (gfxPrefs::TouchActionEnabled()) {
       APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(mPuppetWidget,
-          localEvent, aInputBlockId, mSetAllowedTouchBehaviorCallback);
+          document, localEvent, aInputBlockId, mSetAllowedTouchBehaviorCallback);
     }
-    nsCOMPtr<nsIDocument> document = GetDocument();
     APZCCallbackHelper::SendSetTargetAPZCNotification(mPuppetWidget, document,
         localEvent, aGuid, aInputBlockId);
   }
@@ -2215,6 +2193,39 @@ TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
   Unused << SendOnEventNeedingAckHandled(event.mMessage);
   return true;
 }
+
+bool
+TabChild::RecvPasteTransferable(const IPCDataTransfer& aDataTransfer,
+                                const bool& aIsPrivateData,
+                                const IPC::Principal& aRequestingPrincipal)
+{
+  nsresult rv;
+  nsCOMPtr<nsITransferable> trans =
+    do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
+  NS_ENSURE_SUCCESS(rv, true);
+  trans->Init(nullptr);
+
+  rv = nsContentUtils::IPCTransferableToTransferable(aDataTransfer,
+                                                     aIsPrivateData,
+                                                     aRequestingPrincipal,
+                                                     trans, nullptr, this);
+  NS_ENSURE_SUCCESS(rv, true);
+
+  nsCOMPtr<nsIDocShell> ourDocShell = do_GetInterface(WebNavigation());
+  if (NS_WARN_IF(!ourDocShell)) {
+    return true;
+  }
+
+  nsCOMPtr<nsICommandParams> params = do_CreateInstance("@mozilla.org/embedcomp/command-params;1", &rv);
+  NS_ENSURE_SUCCESS(rv, true);
+
+  rv = params->SetISupportsValue("transferable", trans);
+  NS_ENSURE_SUCCESS(rv, true);
+
+  ourDocShell->DoCommandWithParams("cmd_pasteTransferable", params);
+  return true;
+}
+
 
 a11y::PDocAccessibleChild*
 TabChild::AllocPDocAccessibleChild(PDocAccessibleChild*, const uint64_t&)
@@ -2564,6 +2575,17 @@ TabChild::RecvPrint(const uint64_t& aOuterWindowID, const PrintData& aPrintData)
 }
 
 bool
+TabChild::RecvUpdateNativeWindowHandle(const uintptr_t& aNewHandle)
+{
+#if defined(XP_WIN) && defined(ACCESSIBILITY)
+  mNativeWindowHandle = aNewHandle;
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool
 TabChild::RecvDestroy()
 {
   MOZ_ASSERT(mDestroyed == false);
@@ -2618,41 +2640,85 @@ TabChild::RecvDestroy()
 }
 
 bool
-TabChild::RecvSetUpdateHitRegion(const bool& aEnabled)
+TabChild::RecvSetDocShellIsActive(const bool& aIsActive,
+                                  const bool& aPreserveLayers,
+                                  const uint64_t& aLayerObserverEpoch)
 {
-    mUpdateHitRegion = aEnabled;
-
-    // We need to trigger a repaint of the child frame to ensure that it
-    // recomputes and sends its region.
-    if (!mUpdateHitRegion) {
-      return true;
-    }
-
-    nsCOMPtr<nsIDocument> document(GetDocument());
-    NS_ENSURE_TRUE(document, true);
-    nsCOMPtr<nsIPresShell> presShell = document->GetShell();
-    NS_ENSURE_TRUE(presShell, true);
-    RefPtr<nsPresContext> presContext = presShell->GetPresContext();
-    NS_ENSURE_TRUE(presContext, true);
-    presContext->InvalidatePaintedLayers();
-
+  // Since SetDocShellIsActive requests come in from both the hang monitor
+  // channel and the PContent channel, we have an ordering problem. This code
+  // ensures that we respect the order in which the requests were made and
+  // ignore stale requests.
+  if (mLayerObserverEpoch >= aLayerObserverEpoch) {
     return true;
-}
+  }
+  mLayerObserverEpoch = aLayerObserverEpoch;
 
-bool
-TabChild::RecvSetDocShellIsActive(const bool& aIsActive, const bool& aIsHidden)
-{
-    // docshell is consider prerendered only if not active yet
-    mIsPrerendered &= !aIsActive;
-    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-    if (docShell) {
-      if (aIsHidden) {
-        docShell->SetIsActive(aIsActive);
-      } else {
-        docShell->SetIsActiveAndForeground(aIsActive);
+  MOZ_ASSERT(mPuppetWidget);
+  MOZ_ASSERT(mPuppetWidget->GetLayerManager());
+  MOZ_ASSERT(mPuppetWidget->GetLayerManager()->GetBackendType() ==
+             LayersBackend::LAYERS_CLIENT);
+
+  // We send the current layer observer epoch to the compositor so that
+  // TabParent knows whether a layer update notification corresponds to the
+  // latest SetDocShellIsActive request that was made.
+  ClientLayerManager *manager = mPuppetWidget->GetLayerManager()->AsClientLayerManager();
+  manager->SetLayerObserverEpoch(aLayerObserverEpoch);
+
+  // docshell is consider prerendered only if not active yet
+  mIsPrerendered &= !aIsActive;
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (docShell) {
+    bool wasActive;
+    docShell->GetIsActive(&wasActive);
+    if (aIsActive && wasActive) {
+      // This request is a no-op. In this case, we still want a MozLayerTreeReady
+      // notification to fire in the parent (so that it knows that the child has
+      // updated its epoch). ForcePaintNoOp does that.
+      if (IPCOpen()) {
+        Unused << SendForcePaintNoOp(aLayerObserverEpoch);
+        return true;
       }
     }
-    return true;
+
+    docShell->SetIsActive(aIsActive);
+  }
+
+  if (aIsActive) {
+    MakeVisible();
+
+    // We don't use TabChildBase::GetPresShell() here because that would create
+    // a content viewer if one doesn't exist yet. Creating a content viewer can
+    // cause JS to run, which we want to avoid. nsIDocShell::GetPresShell
+    // returns null if no content viewer exists yet.
+    if (nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell()) {
+      if (nsIFrame* root = presShell->FrameConstructor()->GetRootFrame()) {
+        FrameLayerBuilder::InvalidateAllLayersForFrame(
+          nsLayoutUtils::GetDisplayRootFrame(root));
+        root->SchedulePaint();
+      }
+
+      // If we need to repaint, let's do that right away. No sense waiting until
+      // we get back to the event loop again. We suppress the display port so that
+      // we only paint what's visible. This ensures that the tab we're switching
+      // to paints as quickly as possible.
+      APZCCallbackHelper::SuppressDisplayport(true, presShell);
+      if (nsContentUtils::IsSafeToRunScript()) {
+        WebWidget()->PaintNowIfNeeded();
+      } else {
+        RefPtr<nsViewManager> vm = presShell->GetViewManager();
+        if (nsView* view = vm->GetRootView()) {
+          presShell->Paint(view, view->GetBounds(),
+                           nsIPresShell::PAINT_LAYERS |
+                           nsIPresShell::PAINT_SYNC_DECODE_IMAGES);
+        }
+      }
+      APZCCallbackHelper::SuppressDisplayport(false, presShell);
+    }
+  } else if (!aPreserveLayers) {
+    MakeHidden();
+  }
+
+  return true;
 }
 
 bool
@@ -2797,6 +2863,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
                "PuppetWidget should have shadow manager");
     lf->IdentifyTextureHost(mTextureFactoryIdentifier);
     ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
+    gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
 
     mRemoteFrame = remoteFrame;
     if (aLayersId != 0) {
@@ -2807,6 +2874,8 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       sTabChildren->Put(aLayersId, this);
       mLayersId = aLayersId;
     }
+
+    mApzcTreeManager = CompositorBridgeChild::Get()->GetAPZCTreeManager(mLayersId);
 
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -2854,6 +2923,22 @@ TabChild::GetDefaultScale(double* aScale)
 }
 
 void
+TabChild::GetWidgetRounding(int32_t* aRounding)
+{
+  *aRounding = 1;
+  if (!mRemoteFrame) {
+    return;
+  }
+  if (mRounding > 0) {
+    *aRounding = mRounding;
+    return;
+  }
+
+  // Fallback to a sync call if needed.
+  SendGetWidgetRounding(aRounding);
+}
+
+void
 TabChild::GetMaxTouchPoints(uint32_t* aTouchPoints)
 {
   // Fallback to a sync call.
@@ -2872,9 +2957,8 @@ TabChild::NotifyPainted()
 void
 TabChild::MakeVisible()
 {
-  CompositorBridgeChild* compositor = CompositorBridgeChild::Get();
-  if (UsingCompositorLRU()) {
-    compositor->SendNotifyVisible(mLayersId);
+  if (mPuppetWidget && mPuppetWidget->IsVisible()) {
+    return;
   }
 
   if (mPuppetWidget) {
@@ -2885,27 +2969,18 @@ TabChild::MakeVisible()
 void
 TabChild::MakeHidden()
 {
-  CompositorBridgeChild* compositor = CompositorBridgeChild::Get();
-  if (UsingCompositorLRU()) {
-    compositor->SendNotifyHidden(mLayersId);
-  } else {
-    // Clear cached resources directly. This avoids one extra IPC
-    // round-trip from CompositorBridgeChild to CompositorBridgeParent when
-    // CompositorLRU is not used.
-    compositor->RecvClearCachedResources(mLayersId);
+  if (mPuppetWidget && !mPuppetWidget->IsVisible()) {
+    return;
   }
+
+  CompositorBridgeChild* compositor = CompositorBridgeChild::Get();
+
+  // Clear cached resources directly. This avoids one extra IPC
+  // round-trip from CompositorBridgeChild to CompositorBridgeParent.
+  compositor->RecvClearCachedResources(mLayersId);
 
   if (mPuppetWidget) {
     mPuppetWidget->Show(false);
-  }
-}
-
-void
-TabChild::UpdateHitRegion(const nsRegion& aRegion)
-{
-  mRemoteFrame->SendUpdateHitRegion(aRegion);
-  if (mAPZChild) {
-    mAPZChild->SendUpdateHitRegion(aRegion);
   }
 }
 
@@ -3019,6 +3094,21 @@ TabChild::DoSendAsyncMessage(JSContext* aCx,
   return NS_OK;
 }
 
+/* static */ nsTArray<RefPtr<TabChild>>
+TabChild::GetAll()
+{
+  nsTArray<RefPtr<TabChild>> list;
+  if (!sTabChildren) {
+    return list;
+  }
+
+  for (auto iter = sTabChildren->Iter(); !iter.Done(); iter.Next()) {
+    list.AppendElement(iter.Data());
+  }
+
+  return list;
+}
+
 TabChild*
 TabChild::GetFrom(nsIPresShell* aPresShell)
 {
@@ -3099,6 +3189,50 @@ TabChild::InvalidateLayers()
 }
 
 void
+TabChild::ReinitRendering()
+{
+  MOZ_ASSERT(mLayersId);
+
+  // Before we establish a new PLayerTransaction, we must connect our layer tree
+  // id, CompositorBridge, and the widget compositor all together again.
+  // Normally this happens in TabParent before TabChild is given rendering
+  // information.
+  //
+  // In this case, we will send a sync message to our TabParent, which in turn
+  // will send a sync message to the Compositor of the widget owning this tab.
+  // This guarantees the correct association is in place before our
+  // PLayerTransaction constructor message arrives on the cross-process
+  // compositor bridge.
+  SendEnsureLayersConnected();
+
+  RefPtr<CompositorBridgeChild> cb = CompositorBridgeChild::Get();
+
+  bool success;
+  nsTArray<LayersBackend> ignored;
+  PLayerTransactionChild* shadowManager =
+    cb->SendPLayerTransactionConstructor(ignored, LayersId(), &mTextureFactoryIdentifier, &success);
+  if (!success) {
+    NS_WARNING("failed to re-allocate layer transaction");
+    return;
+  }
+
+  if (!shadowManager) {
+    NS_WARNING("failed to re-construct LayersChild");
+    return;
+  }
+
+  RefPtr<LayerManager> lm = mPuppetWidget->RecreateLayerManager(shadowManager);
+  ShadowLayerForwarder* lf = lm->AsShadowForwarder();
+  lf->IdentifyTextureHost(mTextureFactoryIdentifier);
+
+  mApzcTreeManager = CompositorBridgeChild::Get()->GetAPZCTreeManager(mLayersId);
+  if (mApzcTreeManager) {
+    APZChild* apz = ContentProcessController::Create(mUniqueId);
+    CompositorBridgeChild::Get()->SendPAPZConstructor(apz, mLayersId);
+  }
+}
+
+void
 TabChild::CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier)
 {
   gfxPlatform::GetPlatform()->CompositorUpdated();
@@ -3142,12 +3276,15 @@ TabChild::RecvRequestNotifyAfterRemotePaint()
 }
 
 bool
-TabChild::RecvUIResolutionChanged(const float& aDpi, const double& aScale)
+TabChild::RecvUIResolutionChanged(const float& aDpi,
+                                  const int32_t& aRounding,
+                                  const double& aScale)
 {
   ScreenIntSize oldScreenSize = GetInnerSize();
   mDPI = 0;
+  mRounding = 0;
   mDefaultScale = 0;
-  static_cast<PuppetWidget*>(mPuppetWidget.get())->UpdateBackingScaleCache(aDpi, aScale);
+  static_cast<PuppetWidget*>(mPuppetWidget.get())->UpdateBackingScaleCache(aDpi, aRounding, aScale);
   nsCOMPtr<nsIDocument> document(GetDocument());
   nsCOMPtr<nsIPresShell> presShell = document->GetShell();
   if (presShell) {
@@ -3245,6 +3382,19 @@ TabChild::GetOuterRect()
   LayoutDeviceIntRect outerRect =
     RoundedToInt(mUnscaledOuterRect * mPuppetWidget->GetDefaultScale());
   return ViewAs<ScreenPixel>(outerRect, PixelCastJustification::LayoutDeviceIsScreenForTabDims);
+}
+
+void
+TabChild::ForcePaint(uint64_t aLayerObserverEpoch)
+{
+  if (!IPCOpen()) {
+    // Don't bother doing anything now. Better to wait until we receive the
+    // message on the PContent channel.
+    return;
+  }
+
+  nsAutoScriptBlocker scriptBlocker;
+  RecvSetDocShellIsActive(true, false, aLayerObserverEpoch);
 }
 
 TabChildGlobal::TabChildGlobal(TabChildBase* aTabChild)

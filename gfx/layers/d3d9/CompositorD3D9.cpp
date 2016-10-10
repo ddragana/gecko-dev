@@ -18,6 +18,7 @@
 #include "gfxCrashReporterUtils.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/WinCompositorWidget.h"
+#include "D3D9SurfaceImage.h"
 
 namespace mozilla {
 namespace layers {
@@ -42,7 +43,7 @@ CompositorD3D9::Initialize(nsCString* const out_failureReason)
 {
   ScopedGfxFeatureReporter reporter("D3D9 Layers");
 
-  mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
+  mDeviceManager = DeviceManagerD3D9::Get();
   if (!mDeviceManager) {
     *out_failureReason = "FEATURE_FAILURE_D3D9_DEVICE_MANAGER";
     return false;
@@ -196,6 +197,10 @@ CompositorD3D9::CreateRenderTargetFromSource(const gfx::IntRect &aRect,
                                              const gfx::IntPoint &aSourcePoint)
 {
   RefPtr<IDirect3DTexture9> texture = CreateTexture(aRect, aSource, aSourcePoint);
+
+  if (!texture) {
+    return nullptr;
+  }
 
   return MakeAndAddRef<CompositingRenderTargetD3D9>(texture,
                                                     INIT_MODE_NONE,
@@ -648,7 +653,7 @@ CompositorD3D9::Ready()
                "Shouldn't have any render targets around, they must be released before our device");
   mSwapChain = nullptr;
 
-  mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
+  mDeviceManager = DeviceManagerD3D9::Get();
   if (!mDeviceManager) {
     FailedToResetDevice();
     mParent->InvalidateRemoteLayers();
@@ -720,8 +725,6 @@ CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
 void
 CompositorD3D9::EndFrame()
 {
-  Compositor::EndFrame();
-
   if (mDeviceManager) {
     device()->EndScene();
 
@@ -735,6 +738,8 @@ CompositorD3D9::EndFrame()
       }
     }
   }
+
+  Compositor::EndFrame();
 
   mCurrentRT = nullptr;
   mDefaultRT = nullptr;

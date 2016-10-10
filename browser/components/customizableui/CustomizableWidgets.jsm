@@ -61,7 +61,7 @@ XPCOMUtils.defineLazyGetter(this, "log", () => {
 
 function setAttributes(aNode, aAttrs) {
   let doc = aNode.ownerDocument;
-  for (let [name, value] of Iterator(aAttrs)) {
+  for (let [name, value] of Object.entries(aAttrs)) {
     if (!value) {
       if (aNode.hasAttribute(name))
         aNode.removeAttribute(name);
@@ -181,7 +181,7 @@ const CustomizableWidgets = [
     onViewShowing: function(aEvent) {
       // Populate our list of history
       const kMaxResults = 15;
-      let doc = aEvent.detail.ownerDocument;
+      let doc = aEvent.target.ownerDocument;
       let win = doc.defaultView;
 
       let options = PlacesUtils.history.getNewQueryOptions();
@@ -466,6 +466,9 @@ const CustomizableWidgets = [
       // Create the element for the remote client.
       let clientItem = doc.createElementNS(kNSXUL, "label");
       clientItem.setAttribute("itemtype", "client");
+      let window = doc.defaultView;
+      clientItem.setAttribute("tooltiptext",
+        window.gSyncUI.formatLastSyncDate(new Date(client.lastModified)));
       clientItem.textContent = client.name;
 
       attachFragment.appendChild(clientItem);
@@ -504,12 +507,8 @@ const CustomizableWidgets = [
     shortcutId: "key_privatebrowsing",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(e) {
-      if (e.target && e.target.ownerDocument && e.target.ownerDocument.defaultView) {
-        let win = e.target.ownerDocument.defaultView;
-        if (typeof win.OpenBrowserWindow == "function") {
-          win.OpenBrowserWindow({private: true});
-        }
-      }
+      let win = e.target.ownerGlobal;
+      win.OpenBrowserWindow({private: true});
     }
   }, {
     id: "save-page-button",
@@ -517,12 +516,8 @@ const CustomizableWidgets = [
     tooltiptext: "save-page-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.saveBrowser == "function") {
-        win.saveBrowser(win.gBrowser.selectedBrowser);
-      }
+      let win = aEvent.target.ownerGlobal;
+      win.saveBrowser(win.gBrowser.selectedBrowser);
     }
   }, {
     id: "find-button",
@@ -530,10 +525,8 @@ const CustomizableWidgets = [
     tooltiptext: "find-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && win.gFindBar) {
+      let win = aEvent.target.ownerGlobal;
+      if (win.gFindBar) {
         win.gFindBar.onFindCommand();
       }
     }
@@ -543,12 +536,8 @@ const CustomizableWidgets = [
     tooltiptext: "open-file-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target
-                && aEvent.target.ownerDocument
-                && aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.BrowserOpenFileWindow == "function") {
-        win.BrowserOpenFileWindow();
-      }
+      let win = aEvent.target.ownerGlobal;
+      win.BrowserOpenFileWindow();
     }
   }, {
     id: "sidebar-button",
@@ -563,14 +552,8 @@ const CustomizableWidgets = [
       let win = doc.defaultView;
       let menu = doc.getElementById("viewSidebarMenu");
 
-      // First clear any existing menuitems then populate. Social sidebar
-      // options may not have been added yet, so we do that here. Add it to the
+      // First clear any existing menuitems then populate. Add it to the
       // standard menu first, then copy all sidebar options to the panel.
-      win.SocialSidebar.clearProviderMenus();
-      let providerMenuSeps = menu.getElementsByClassName("social-provider-menu");
-      if (providerMenuSeps.length > 0)
-        win.SocialSidebar.populateProviderMenu(providerMenuSeps[0]);
-
       let sidebarItems = doc.getElementById("PanelUI-sidebarItems");
       clearSubview(sidebarItems);
       fillSubviewFromMenuItems([...menu.children], sidebarItems);
@@ -587,7 +570,7 @@ const CustomizableWidgets = [
       node.setAttribute("label", CustomizableUI.getLocalizedProperty(this, "label"));
       node.setAttribute("tooltiptext", CustomizableUI.getLocalizedProperty(this, "tooltiptext"));
       node.setAttribute("removable", "true");
-      node.setAttribute("observes", "Social:PageShareOrMark");
+      node.setAttribute("observes", "Social:PageShareable");
       node.setAttribute("command", "Social:SharePage");
 
       let listener = {
@@ -622,12 +605,8 @@ const CustomizableWidgets = [
     tooltiptext: "add-ons-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.BrowserOpenAddonsMgr == "function") {
-        win.BrowserOpenAddonsMgr();
-      }
+      let win = aEvent.target.ownerGlobal;
+      win.BrowserOpenAddonsMgr();
     }
   }, {
     id: "zoom-controls",
@@ -758,6 +737,13 @@ const CustomizableWidgets = [
           updateZoomResetButton();
         }.bind(this),
 
+        onWidgetUndoMove: function(aWidgetNode) {
+          if (aWidgetNode != node)
+            return;
+          updateCombinedWidgetStyle(node, this.currentArea, true);
+          updateZoomResetButton();
+        }.bind(this),
+
         onWidgetMoved: function(aWidgetId, aArea) {
           if (aWidgetId != this.id)
             return;
@@ -869,6 +855,12 @@ const CustomizableWidgets = [
           updateCombinedWidgetStyle(node, this.currentArea);
         }.bind(this),
 
+        onWidgetUndoMove: function(aWidgetNode) {
+          if (aWidgetNode != node)
+            return;
+          updateCombinedWidgetStyle(node, this.currentArea);
+        }.bind(this),
+
         onWidgetMoved: function(aWidgetId, aArea) {
           if (aWidgetId != this.id)
             return;
@@ -900,7 +892,7 @@ const CustomizableWidgets = [
     tooltiptext: "feed-button.tooltiptext2",
     defaultArea: CustomizableUI.AREA_PANEL,
     onClick: function(aEvent) {
-      let win = aEvent.target.ownerDocument.defaultView;
+      let win = aEvent.target.ownerGlobal;
       let feeds = win.gBrowser.selectedBrowser.feeds;
 
       // Here, we only care about the case where we have exactly 1 feed and the
@@ -914,7 +906,7 @@ const CustomizableWidgets = [
       }
     },
     onViewShowing: function(aEvent) {
-      let doc = aEvent.detail.ownerDocument;
+      let doc = aEvent.target.ownerDocument;
       let container = doc.getElementById("PanelUI-feeds");
       let gotView = doc.defaultView.FeedHandler.buildFeedList(container, true);
 
@@ -926,7 +918,7 @@ const CustomizableWidgets = [
       }
     },
     onCreated: function(node) {
-      let win = node.ownerDocument.defaultView;
+      let win = node.ownerGlobal;
       let selectedBrowser = win.gBrowser.selectedBrowser;
       let feeds = selectedBrowser && selectedBrowser.feeds;
       if (!feeds || !feeds.length) {
@@ -1027,7 +1019,7 @@ const CustomizableWidgets = [
         return;
       }
 
-      let window = node.ownerDocument.defaultView;
+      let window = node.ownerGlobal;
       let section = node.section;
       let value = node.value;
 
@@ -1104,13 +1096,11 @@ const CustomizableWidgets = [
       let win = aEvent.view;
       win.MailIntegration.sendLinkForBrowser(win.gBrowser.selectedBrowser)
     }
-  }];
-
-if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
-  CustomizableWidgets.push({
+  }, {
     id: "containers-panelmenu",
     type: "view",
     viewId: "PanelUI-containers",
+    hasObserver: false,
     onCreated: function(aNode) {
       let doc = aNode.ownerDocument;
       let win = doc.defaultView;
@@ -1126,9 +1116,16 @@ if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
       if (PrivateBrowsingUtils.isWindowPrivate(win)) {
         aNode.setAttribute("disabled", "true");
       }
+
+      this.updateVisibility(aNode);
+
+      if (!this.hasObserver) {
+        Services.prefs.addObserver("privacy.userContext.enabled", this, true);
+        this.hasObserver = true;
+      }
     },
     onViewShowing: function(aEvent) {
-      let doc = aEvent.detail.ownerDocument;
+      let doc = aEvent.target.ownerDocument;
 
       let items = doc.getElementById("PanelUI-containersItems");
 
@@ -1140,7 +1137,7 @@ if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
 
       ContextualIdentityService.getIdentities().forEach(identity => {
         let bundle = doc.getElementById("bundle_browser");
-        let label = bundle.getString(identity.label);
+        let label = ContextualIdentityService.getUserContextLabel(identity.userContextId);
 
         let item = doc.createElementNS(kNSXUL, "toolbarbutton");
         item.setAttribute("label", label);
@@ -1152,20 +1149,33 @@ if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
       });
 
       items.appendChild(fragment);
-    }
-  });
-}
+    },
+
+    updateVisibility(aNode) {
+      aNode.hidden = !Services.prefs.getBoolPref("privacy.userContext.enabled");
+    },
+
+    observe(aSubject, aTopic, aData) {
+      let {instances} = CustomizableUI.getWidget("containers-panelmenu");
+      for (let {node} of instances) {
+	if (node) {
+	  this.updateVisibility(node);
+	}
+      }
+    },
+
+    QueryInterface: XPCOMUtils.generateQI([
+      Ci.nsISupportsWeakReference,
+      Ci.nsIObserver
+    ]),
+  }];
 
 let preferencesButton = {
   id: "preferences-button",
   defaultArea: CustomizableUI.AREA_PANEL,
   onCommand: function(aEvent) {
-    let win = aEvent.target &&
-              aEvent.target.ownerDocument &&
-              aEvent.target.ownerDocument.defaultView;
-    if (win && typeof win.openPreferences == "function") {
-      win.openPreferences();
-    }
+    let win = aEvent.target.ownerGlobal;
+    win.openPreferences();
   }
 };
 if (AppConstants.platform == "win") {
@@ -1254,9 +1264,7 @@ if (AppConstants.E10S_TESTING_ONLY) {
       },
       onCommand: function(aEvent) {
         let win = aEvent.view;
-        if (win && typeof win.OpenBrowserWindow == "function") {
-          win.OpenBrowserWindow({remote: false});
-        }
+        win.OpenBrowserWindow({remote: false});
       },
     });
   }

@@ -86,8 +86,6 @@ public class GeckoService extends Service {
     @Override // Service
     public void onCreate() {
         GeckoAppShell.ensureCrashHandling();
-        GeckoAppShell.setApplicationContext(getApplicationContext());
-        GeckoAppShell.setNotificationClient(new ServiceNotificationClient(getApplicationContext()));
         GeckoThread.onResume();
         super.onCreate();
 
@@ -146,12 +144,12 @@ public class GeckoService extends Service {
         final String profileName = intent.getStringExtra(INTENT_PROFILE_NAME);
         final String profileDir = intent.getStringExtra(INTENT_PROFILE_DIR);
 
-        if (profileName == null || profileDir == null) {
+        if (profileName == null) {
             throw new IllegalArgumentException("Intent must specify profile.");
         }
 
         if (!GeckoThread.initWithProfile(profileName != null ? profileName : "",
-                                         new File(profileDir))) {
+                                         profileDir != null ? new File(profileDir) : null)) {
             Log.w(LOGTAG, "Ignoring due to profile mismatch: " +
                           profileName + " [" + profileDir + ']');
 

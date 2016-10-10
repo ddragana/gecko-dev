@@ -80,9 +80,10 @@ public:
 
 // Reads over a CRLF and positions start after it.
 static bool
-PushOverLine(nsACString::const_iterator& aStart)
+PushOverLine(nsACString::const_iterator& aStart,
+	     const nsACString::const_iterator& aEnd)
 {
-  if (*aStart == nsCRT::CR && (aStart.size_forward() > 1) && *(++aStart) == nsCRT::LF) {
+  if (*aStart == nsCRT::CR && (aEnd - aStart > 1) && *(++aStart) == nsCRT::LF) {
     ++aStart; // advance to after CRLF
     return true;
   }
@@ -324,6 +325,7 @@ private:
       ErrorResult rv;
       mFormData->Append(name, *file, dummy, rv);
       if (NS_WARN_IF(rv.Failed())) {
+        rv.SuppressException();
         return false;
       }
     }
@@ -393,7 +395,7 @@ public:
             return true;
           }
 
-          if (!PushOverLine(start)) {
+          if (!PushOverLine(start, end)) {
             return false;
           }
           mState = PARSE_HEADER;
@@ -405,7 +407,7 @@ public:
             return false;
           }
 
-          if (emptyHeader && !PushOverLine(start)) {
+          if (emptyHeader && !PushOverLine(start, end)) {
             return false;
           }
 

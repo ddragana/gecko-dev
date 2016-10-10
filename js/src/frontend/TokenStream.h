@@ -175,24 +175,6 @@ struct Token
     ModifierException modifierException; // Exception for this modifier
 #endif
 
-    // This constructor is necessary only for MSVC 2013 and how it compiles the
-    // initialization of TokenStream::tokens.  That field is initialized as
-    // tokens() in the constructor init-list.  This *should* zero the entire
-    // array, then (because Token has a non-trivial constructor, because
-    // TokenPos has a user-provided constructor) call the implicit Token
-    // constructor on each element, which would call the TokenPos constructor
-    // for Token::pos and do nothing.  (All of which is equivalent to just
-    // zeroing TokenStream::tokens.)  But MSVC 2013 (2010/2012 don't have this
-    // bug) doesn't zero out each element, so we need this extra constructor to
-    // make it do the right thing.  (Token is used primarily by reference or
-    // pointer, and it's only initialized a very few places, so having a
-    // user-defined constructor won't hurt perf.)  See also bug 920318.
-    Token()
-      : pos(0, 0)
-    {
-        MOZ_MAKE_MEM_UNDEFINED(&type, sizeof(type));
-    }
-
     // Mutators
 
     void setName(PropertyName* name) {
@@ -351,8 +333,6 @@ class MOZ_STACK_CLASS TokenStream
     }
     const CharBuffer& getTokenbuf() const { return tokenbuf; }
     const char* getFilename() const { return filename; }
-    unsigned getLineno() const { return lineno; }
-    unsigned getColumn() const { return userbuf.offset() - linebase - 1; }
     bool getMutedErrors() const { return mutedErrors; }
     JSVersion versionNumber() const { return VersionNumber(options().version); }
     JSVersion versionWithFlags() const { return options().version; }
@@ -369,6 +349,13 @@ class MOZ_STACK_CLASS TokenStream
             return cx->names().yield;
         MOZ_ASSERT(nextToken().type == TOK_NAME);
         return nextToken().name();
+    }
+
+    bool nextNameContainsEscape() const {
+        if (nextToken().type == TOK_YIELD)
+            return false;
+        MOZ_ASSERT(nextToken().type == TOK_NAME);
+        return nextToken().nameContainsEscape();
     }
 
     bool isCurrentTokenAssignment() const {
@@ -754,10 +741,8 @@ class MOZ_STACK_CLASS TokenStream
     // If it is a reserved word in this version and strictness mode, and thus
     // can't be present in correct code, report a SyntaxError and return false.
     //
-    // If it is a keyword, like "if", the behavior depends on ttp. If ttp is
-    // null, report a SyntaxError ("if is a reserved identifier") and return
-    // false. If ttp is non-null, return true with the keyword's TokenKind in
-    // *ttp.
+    // If it is a keyword, like "if", return true with the keyword's TokenKind
+    // in *ttp.
     MOZ_MUST_USE bool checkForKeyword(JSAtom* atom, TokenKind* ttp);
 
     // Same semantics as above, but for the provided keyword.

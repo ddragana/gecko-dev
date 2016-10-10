@@ -18,10 +18,14 @@ const {nsIHttpActivityObserver, nsISocketTransport} = Ci;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
+                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
                                   "resource://gre/modules/BrowserUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "WebRequestCommon",
                                   "resource://gre/modules/WebRequestCommon.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "WebRequestUpload",
+                                  "resource://gre/modules/WebRequestUpload.jsm");
 
 function attachToChannel(channel, key, data) {
   if (channel instanceof Ci.nsIWritablePropertyBag2) {
@@ -367,6 +371,11 @@ HttpObserverManager = {
     let headers = [];
     let visitor = {
       visitHeader(name, value) {
+        try {
+          value = channel.getProperty(`webrequest-header-${name.toLowerCase()}`);
+        } catch (e) {
+          // This will throw if the property does not exist.
+        }
         headers.push({name, value});
       },
 
@@ -375,6 +384,7 @@ HttpObserverManager = {
     };
 
     try {
+      channel.QueryInterface(Ci.nsIPropertyBag);
       channel[method](visitor);
     } catch (e) {
       Cu.reportError(`webRequest Error: ${e} trying to perform ${method} in ${event}@${channel.name}`);
@@ -418,9 +428,11 @@ HttpObserverManager = {
       case "http-on-modify-request":
         this.modify(channel, topic, data);
         break;
-      case "http-on-examine-response":
       case "http-on-examine-cached-response":
       case "http-on-examine-merged-response":
+        getData(channel).fromCache = true;
+        // falls through
+      case "http-on-examine-response":
         this.examine(channel, topic, data);
         break;
     }
@@ -505,6 +517,8 @@ HttpObserverManager = {
     let requestHeaderNames;
     let responseHeaderNames;
 
+    let requestBody;
+
     let includeStatus = (
                           kind === "headersReceived" ||
                           kind === "onRedirect" ||
@@ -526,6 +540,7 @@ HttpObserverManager = {
           method: channel.requestMethod,
           browser: browser,
           type: WebRequestCommon.typeForPolicyType(policyType),
+          fromCache: getData(channel).fromCache,
         };
 
         if (loadInfo) {
@@ -567,6 +582,14 @@ HttpObserverManager = {
         data.responseHeaders = this.getHeaders(channel, "visitResponseHeaders", kind);
         responseHeaderNames = data.responseHeaders.map(h => h.name);
       }
+      if (opts.requestBody) {
+        if (requestBody === undefined) {
+          requestBody = WebRequestUpload.createRequestBody(channel);
+        }
+        if (requestBody) {
+          data.requestBody = requestBody;
+        }
+      }
       if (includeStatus) {
         mergeStatus(data, channel, kind);
       }
@@ -599,7 +622,20 @@ HttpObserverManager = {
       if (opts.responseHeaders && result.responseHeaders) {
         this.replaceHeaders(
           result.responseHeaders, responseHeaderNames,
-          (name, value) => channel.setResponseHeader(name, value, false)
+          (name, value) => {
+            if (name.toLowerCase() === "content-type" && value) {
+              // The Content-Type header value can't be modified, so we
+              // set the channel's content type directly, instead, and
+              // record that we made the change for the sake of
+              // subsequent observers.
+              channel.contentType = value;
+
+              channel.QueryInterface(Ci.nsIWritablePropertyBag);
+              channel.setProperty("webrequest-header-content-type", value);
+            } else {
+              channel.setResponseHeader(name, value, false);
+            }
+          }
         );
       }
     }
@@ -649,9 +685,16 @@ HttpObserverManager = {
 };
 
 var onBeforeRequest = {
+  get allowedOptions() {
+    delete this.allowedOptions;
+    this.allowedOptions = ["blocking"];
+    if (!AppConstants.RELEASE_OR_BETA) {
+      this.allowedOptions.push("requestBody");
+    }
+    return this.allowedOptions;
+  },
   addListener(callback, filter = null, opt_extraInfoSpec = null) {
-    // FIXME: Add requestBody support.
-    let opts = parseExtra(opt_extraInfoSpec, ["blocking"]);
+    let opts = parseExtra(opt_extraInfoSpec, this.allowedOptions);
     opts.filter = parseFilter(filter);
     ContentPolicyManager.addListener(callback, opts);
     HttpObserverManager.addListener("opening", callback, opts);

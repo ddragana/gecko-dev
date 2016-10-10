@@ -12,6 +12,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/camera/PCamerasChild.h"
 #include "mozilla/camera/PCamerasParent.h"
+#include "mozilla/media/DeviceChangeCallback.h"
 #include "mozilla/Mutex.h"
 #include "base/singleton.h"
 #include "nsCOMPtr.h"
@@ -31,16 +32,6 @@ class BackgroundChildImpl;
 }
 
 namespace camera {
-
-enum CaptureEngine : int {
-  InvalidEngine = 0,
-  ScreenEngine,
-  BrowserEngine,
-  WinEngine,
-  AppEngine,
-  CameraEngine,
-  MaxEngine
-};
 
 struct CapturerElement {
   CaptureEngine engine;
@@ -93,6 +84,11 @@ public:
     return gTheInstance.get()->mCamerasChildThread;
   }
 
+  static nsCOMPtr<nsIThread>& FakeDeviceChangeEventThread() {
+    Mutex().AssertCurrentThreadOwns();
+    return gTheInstance.get()->mFakeDeviceChangeEventThread;
+  }
+
 private:
   static Singleton<CamerasSingleton> gTheInstance;
 
@@ -109,6 +105,7 @@ private:
   // will be before actual destruction.
   CamerasChild* mCameras;
   nsCOMPtr<nsIThread> mCamerasChildThread;
+  nsCOMPtr<nsIThread> mFakeDeviceChangeEventThread;
 };
 
 // Get a pointer to a CamerasChild object we can use to do IPC with.
@@ -117,6 +114,8 @@ private:
 // thread to do IPC on. This will fail if we're in shutdown. On success
 // it will set up the CamerasSingleton.
 CamerasChild* GetCamerasChild();
+
+CamerasChild* GetCamerasChildIfExists();
 
 // Shut down the IPC channel and everything associated, like WebRTC.
 // This is a static call because the CamerasChild object may not even
@@ -138,6 +137,7 @@ int GetChildAndCall(MEM_FUN&& f, ARGS&&... args)
 }
 
 class CamerasChild final : public PCamerasChild
+                          ,public DeviceChangeCallback
 {
   friend class mozilla::ipc::BackgroundChildImpl;
   template <class T> friend class mozilla::camera::LockAndDispatch;
@@ -149,11 +149,15 @@ public:
 
   // IPC messages recevied, received on the PBackground thread
   // these are the actual callbacks with data
-  virtual bool RecvDeliverFrame(const int&, const int&, mozilla::ipc::Shmem&&,
+  virtual bool RecvDeliverFrame(const CaptureEngine&, const int&, mozilla::ipc::Shmem&&,
                                 const size_t&, const uint32_t&, const int64_t&,
                                 const int64_t&) override;
-  virtual bool RecvFrameSizeChange(const int&, const int&,
+  virtual bool RecvFrameSizeChange(const CaptureEngine&, const int&,
                                    const int& w, const int& h) override;
+
+  virtual bool RecvDeviceChange() override;
+  virtual int AddDeviceChangeCallback(DeviceChangeCallback* aCallback) override;
+  int SetFakeDeviceChangeEvents();
 
   // these are response messages to our outgoing requests
   virtual bool RecvReplyNumberOfCaptureDevices(const int&) override;
@@ -193,6 +197,7 @@ public:
                        char* unique_idUTF8,
                        const unsigned int unique_idUTF8Length);
   void ShutdownAll();
+  int EnsureInitialized(CaptureEngine aCapEngine);
 
   webrtc::ExternalRenderer* Callback(CaptureEngine aCapEngine, int capture_id);
 

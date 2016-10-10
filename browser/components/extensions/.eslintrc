@@ -3,11 +3,13 @@
 
   "globals": {
     "AllWindowEvents": true,
+    "browserActionFor": true,
     "currentWindow": true,
     "EventEmitter": true,
+    "getCookieStoreIdForTab": true,
+    "IconDetails": true,
     "makeWidgetId": true,
     "pageActionFor": true,
-    "IconDetails": true,
     "PanelPopup": true,
     "TabContext": true,
     "ViewPopup": true,
@@ -16,3 +18,5 @@
     "WindowManager": true,
   },
 }
+
+

@@ -138,9 +138,12 @@ class TaskGraphGenerator(object):
             if not os.path.isdir(path):
                 continue
             kind_name = os.path.basename(path)
-            logger.debug("loading kind `{}` from `{}`".format(kind_name, path))
 
             kind_yml = os.path.join(path, 'kind.yml')
+            if not os.path.exists(kind_yml):
+                continue
+
+            logger.debug("loading kind `{}` from `{}`".format(kind_name, path))
             with open(kind_yml) as f:
                 config = yaml.load(f)
 
@@ -162,10 +165,12 @@ class TaskGraphGenerator(object):
         for kind_name in kind_graph.visit_postorder():
             logger.debug("Loading tasks for kind {}".format(kind_name))
             kind = kinds[kind_name]
-            for task in kind.load_tasks(self.parameters, list(all_tasks.values())):
+            new_tasks = kind.load_tasks(self.parameters, list(all_tasks.values()))
+            for task in new_tasks:
                 if task.label in all_tasks:
                     raise Exception("duplicate tasks with label " + task.label)
                 all_tasks[task.label] = task
+            logger.info("Generated {} tasks for kind {}".format(len(new_tasks), kind_name))
         full_task_set = TaskGraph(all_tasks, Graph(set(all_tasks), set()))
         yield 'full_task_set', full_task_set
 
@@ -198,6 +203,7 @@ class TaskGraphGenerator(object):
         if not self.parameters.get('optimize_target_tasks', True):
             do_not_optimize = target_task_set.graph.nodes
         optimized_task_graph, label_to_taskid = optimize_task_graph(target_task_graph,
+                                                                    self.parameters,
                                                                     do_not_optimize)
         yield 'label_to_taskid', label_to_taskid
         yield 'optimized_task_graph', optimized_task_graph

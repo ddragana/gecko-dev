@@ -430,8 +430,6 @@ private:
   {
     bool ok = IDBObjectStore::DeserializeValue(aCx, *aCloneInfo, aResult);
 
-    aCloneInfo->mCloneBuffer.clear();
-
     if (NS_WARN_IF(!ok)) {
       return NS_ERROR_DOM_DATA_CLONE_ERR;
     }
@@ -1502,10 +1500,10 @@ BackgroundFactoryRequestChild::RecvBlocked(const uint64_t& aCurrentVersion)
   IDB_LOG_MARK("IndexedDB %s: Child  Request[%llu]: Firing \"blocked\" event",
                "IndexedDB %s: C R[%llu]: \"blocked\"",
                IDB_LOG_ID_STRING(),
-               mRequest->LoggingSerialNumber());
+               kungFuDeathGrip->LoggingSerialNumber());
 
   bool dummy;
-  if (NS_FAILED(mRequest->DispatchEvent(blockedEvent, &dummy))) {
+  if (NS_FAILED(kungFuDeathGrip->DispatchEvent(blockedEvent, &dummy))) {
     NS_WARNING("Failed to dispatch event!");
   }
 
@@ -1795,7 +1793,7 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   RefPtr<IDBDatabase> kungFuDeathGrip = mDatabase;
 
   // Handle bfcache'd windows.
-  if (nsPIDOMWindowInner* owner = mDatabase->GetOwner()) {
+  if (nsPIDOMWindowInner* owner = kungFuDeathGrip->GetOwner()) {
     // The database must be closed if the window is already frozen.
     bool shouldAbortAndClose = owner->IsFrozen();
 
@@ -1811,8 +1809,8 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
     if (shouldAbortAndClose) {
       // Invalidate() doesn't close the database in the parent, so we have
       // to call Close() and AbortTransactions() manually.
-      mDatabase->AbortTransactions(/* aShouldWarn */ false);
-      mDatabase->Close();
+      kungFuDeathGrip->AbortTransactions(/* aShouldWarn */ false);
+      kungFuDeathGrip->Close();
       return true;
     }
   }
@@ -1825,13 +1823,13 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
   switch (aNewVersion.type()) {
     case NullableVersion::Tnull_t:
       versionChangeEvent =
-        IDBVersionChangeEvent::Create(mDatabase, type, aOldVersion);
+        IDBVersionChangeEvent::Create(kungFuDeathGrip, type, aOldVersion);
       MOZ_ASSERT(versionChangeEvent);
       break;
 
     case NullableVersion::Tuint64_t:
       versionChangeEvent =
-        IDBVersionChangeEvent::Create(mDatabase,
+        IDBVersionChangeEvent::Create(kungFuDeathGrip,
                                       type,
                                       aOldVersion,
                                       aNewVersion.get_uint64_t());
@@ -1847,11 +1845,11 @@ BackgroundDatabaseChild::RecvVersionChange(const uint64_t& aOldVersion,
                IDB_LOG_ID_STRING());
 
   bool dummy;
-  if (NS_FAILED(mDatabase->DispatchEvent(versionChangeEvent, &dummy))) {
+  if (NS_FAILED(kungFuDeathGrip->DispatchEvent(versionChangeEvent, &dummy))) {
     NS_WARNING("Failed to dispatch event!");
   }
 
-  if (!mDatabase->IsClosed()) {
+  if (!kungFuDeathGrip->IsClosed()) {
     SendBlocked();
   }
 
@@ -2491,6 +2489,10 @@ BackgroundRequestChild::Recv__delete__(const RequestResponse& aResponse)
         HandleResponse(aResponse.get_ObjectStoreGetResponse().cloneInfo());
         break;
 
+      case RequestResponse::TObjectStoreGetKeyResponse:
+        HandleResponse(aResponse.get_ObjectStoreGetKeyResponse().key());
+        break;
+
       case RequestResponse::TObjectStoreGetAllResponse:
         HandleResponse(aResponse.get_ObjectStoreGetAllResponse().cloneInfos());
         break;
@@ -2643,8 +2645,7 @@ BackgroundCursorChild::AssertIsOnOwningThread() const
 #endif // DEBUG
 
 void
-BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams,
-                                            const Key& aKey)
+BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mRequest);
@@ -2661,66 +2662,7 @@ BackgroundCursorChild::SendContinueInternal(const CursorRequestParams& aParams,
 
   mTransaction->OnNewRequest();
 
-  CursorRequestParams params = aParams;
-  Key key = aKey;
-
-  switch (params.type()) {
-    case CursorRequestParams::TContinueParams: {
-      if (key.IsUnset()) {
-        break;
-      }
-      while (!mCachedResponses.IsEmpty()) {
-        if (mCachedResponses[0].mKey == key) {
-          break;
-        }
-        mCachedResponses.RemoveElementAt(0);
-      }
-      break;
-    }
-
-    case CursorRequestParams::TAdvanceParams: {
-      uint32_t& advanceCount = params.get_AdvanceParams().count();
-      while (advanceCount > 1 && !mCachedResponses.IsEmpty()) {
-        key = mCachedResponses[0].mKey;
-        mCachedResponses.RemoveElementAt(0);
-        --advanceCount;
-      }
-      break;
-    }
-
-    default:
-      MOZ_CRASH("Should never get here!");
-  }
-
-  if (!mCachedResponses.IsEmpty()) {
-    nsCOMPtr<nsIRunnable> continueRunnable = new DelayedActionRunnable(
-      this, &BackgroundCursorChild::SendDelayedContinueInternal);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(continueRunnable));
-  } else {
-    MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendContinue(params, key));
-  }
-}
-
-void
-BackgroundCursorChild::SendDelayedContinueInternal()
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(mTransaction);
-  MOZ_ASSERT(mCursor);
-  MOZ_ASSERT(mStrongCursor);
-  MOZ_ASSERT(!mCachedResponses.IsEmpty());
-
-  RefPtr<IDBCursor> cursor;
-  mStrongCursor.swap(cursor);
-
-  auto& item = mCachedResponses[0];
-  mCursor->Reset(Move(item.mKey), Move(item.mCloneInfo));
-  mCachedResponses.RemoveElementAt(0);
-
-  ResultHelper helper(mRequest, mTransaction, mCursor);
-  DispatchSuccessEvent(&helper);
-
-  mTransaction->OnRequestFinished(/* aActorDestroyedNormally */ true);
+  MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendContinue(aParams));
 }
 
 void
@@ -2741,14 +2683,6 @@ BackgroundCursorChild::SendDeleteMeInternal()
 
     MOZ_ALWAYS_TRUE(PBackgroundIDBCursorChild::SendDeleteMe());
   }
-}
-
-void
-BackgroundCursorChild::InvalidateCachedResponses()
-{
-  AssertIsOnOwningThread();
-
-  mCachedResponses.Clear();
 }
 
 void
@@ -2816,14 +2750,7 @@ BackgroundCursorChild::HandleResponse(
     RefPtr<IDBCursor> newCursor;
 
     if (mCursor) {
-      if (mCursor->IsContinueCalled()) {
-        mCursor->Reset(Move(response.key()), Move(cloneReadInfo));
-      } else {
-        CachedResponse cachedResponse;
-        cachedResponse.mKey = Move(response.key());
-        cachedResponse.mCloneInfo = Move(cloneReadInfo);
-        mCachedResponses.AppendElement(Move(cachedResponse));
-      }
+      mCursor->Reset(Move(response.key()), Move(cloneReadInfo));
     } else {
       newCursor = IDBCursor::Create(this,
                                     Move(response.key()),
@@ -3044,16 +2971,6 @@ DelayedActionRunnable::Cancel()
   Run();
 
   return NS_OK;
-}
-
-BackgroundCursorChild::CachedResponse::CachedResponse()
-{
-}
-
-BackgroundCursorChild::CachedResponse::CachedResponse(CachedResponse&& aOther)
-  : mKey(Move(aOther.mKey))
-{
-  mCloneInfo = Move(aOther.mCloneInfo);
 }
 
 /*******************************************************************************

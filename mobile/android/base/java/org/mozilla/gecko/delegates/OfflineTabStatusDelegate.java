@@ -14,7 +14,7 @@ import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.BrowserApp;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.SnackbarHelper;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.Telemetry;
@@ -63,9 +63,19 @@ public class OfflineTabStatusDelegate extends TabsTrayVisibilityAwareDelegate im
             return;
         }
 
+        // We only want to show these notifications for tabs that were loaded successfully.
+        if (tab.getState() != Tab.STATE_SUCCESS) {
+            return;
+        }
+
         switch (event) {
-            // Show offline notification if tab is visible, or queue it for display later.
-            case PAGE_SHOW:
+            // We listen specifically for the STOP event (as opposed to PAGE_SHOW), because we need
+            // to know if page load actually succeeded. When STOP is triggered, tab.getState()
+            // will return definitive STATE_SUCCESS or STATE_ERROR. When PAGE_SHOW is triggered,
+            // tab.getState() will return STATE_LOADING, which is ambiguous for our purposes.
+            // We don't want to show these notifications for 404 pages, for example. See Bug 1304914.
+            case STOP:
+                // Show offline notification if tab is visible, or queue it for display later.
                 if (!isTabsTrayVisible() && Tabs.getInstance().isSelectedTab(tab)) {
                     showLoadedOfflineSnackbar(activityReference.get());
                 } else {
@@ -100,13 +110,10 @@ public class OfflineTabStatusDelegate extends TabsTrayVisibilityAwareDelegate im
 
         Telemetry.sendUIEvent(TelemetryContract.Event.NETERROR, TelemetryContract.Method.TOAST, "usecache");
 
-        SnackbarHelper.showSnackbarWithActionAndColors(
-                activity,
-                activity.getResources().getString(R.string.tab_offline_version),
-                Snackbar.LENGTH_INDEFINITE,
-                null, null, null,
-                ContextCompat.getColor(activity, R.color.link_blue),
-                null
-        );
+        SnackbarBuilder.builder(activity)
+                .message(R.string.tab_offline_version)
+                .duration(Snackbar.LENGTH_INDEFINITE)
+                .backgroundColor(ContextCompat.getColor(activity, R.color.link_blue))
+                .buildAndShow();
     }
 }

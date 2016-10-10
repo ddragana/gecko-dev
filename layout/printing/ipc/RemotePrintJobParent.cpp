@@ -10,7 +10,7 @@
 
 #include "gfxContext.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDeviceContext.h"
 #include "nsIDeviceContextSpec.h"
@@ -112,7 +112,9 @@ RemotePrintJobParent::PrintPage(const Shmem& aStoredPage)
 
   std::istringstream recording(std::string(aStoredPage.get<char>(),
                                            aStoredPage.Size<char>()));
-  mPrintTranslator->TranslateRecording(recording);
+  if (!mPrintTranslator->TranslateRecording(recording)) {
+    return NS_ERROR_FAILURE;
+  }
 
   rv = mPrintDeviceContext->EndPage();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -128,10 +130,10 @@ RemotePrintJobParent::RecvFinalizePrint()
   // EndDocument is sometimes called in the child even when BeginDocument has
   // not been called. See bug 1223332.
   if (mPrintDeviceContext) {
-    nsresult rv = mPrintDeviceContext->EndDocument();
+    DebugOnly<nsresult> rv = mPrintDeviceContext->EndDocument();
 
     // Too late to abort the child just log.
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "EndDocument failed");
   }
 
 

@@ -53,6 +53,7 @@ class nsGlobalWindow;
 class nsICSSDeclaration;
 class nsISMILAttr;
 class nsDocument;
+class nsDOMStringMap;
 
 namespace mozilla {
 namespace dom {
@@ -135,6 +136,7 @@ class EventStateManager;
 namespace dom {
 
 class Animation;
+class CustomElementsRegistry;
 class Link;
 class UndoManager;
 class DOMRect;
@@ -192,6 +194,31 @@ public:
    * Method to update mState with link state information.  This does not notify.
    */
   void UpdateLinkState(EventStates aState);
+
+  virtual int32_t TabIndexDefault()
+  {
+    return -1;
+  }
+
+  /**
+   * Get tabIndex of this element. If not found, return TabIndexDefault.
+   */
+  int32_t TabIndex();
+
+  /**
+   * Set tabIndex value to this element.
+   */
+  void SetTabIndex(int32_t aTabIndex, mozilla::ErrorResult& aError);
+
+  /**
+   * Make focus on this element.
+   */
+  virtual void Focus(mozilla::ErrorResult& aError);
+
+  /**
+   * Show blur and clear focus.
+   */
+  virtual void Blur(mozilla::ErrorResult& aError);
 
   /**
    * The style state of this element. This is the real state of the element
@@ -398,7 +425,9 @@ private:
   friend class mozilla::EventStateManager;
   friend class ::nsGlobalWindow;
   friend class ::nsFocusManager;
-  friend class ::nsDocument;
+
+  // Allow CusomtElementRegistry to call AddStates.
+  friend class CustomElementsRegistry;
 
   // Also need to allow Link to call UpdateLinkState.
   friend class Link;
@@ -509,6 +538,7 @@ public:
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
                              bool aNotify) override;
   virtual const nsAttrName* GetAttrNameAt(uint32_t aIndex) const override;
+  virtual BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const override;
   virtual uint32_t GetAttrCount() const override;
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
 
@@ -719,16 +749,19 @@ public:
       return;
     }
     nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
-    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) && pointerCaptureInfo) {
-      // Call ReleasePointerCapture only on correct element
-      // (on element that have status pointer capture override
-      // or on element that have status pending pointer capture)
-      if (pointerCaptureInfo->mOverrideContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
-      } else if (pointerCaptureInfo->mPendingContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
-      }
+    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
+        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
+      nsIPresShell::ReleasePointerCapturingContent(aPointerId);
     }
+  }
+  bool HasPointerCapture(long aPointerId)
+  {
+    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
+    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
+        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
+      return true;
+    }
+    return false;
   }
   void SetCapture(bool aRetargetToElement)
   {
@@ -747,10 +780,8 @@ public:
     }
   }
 
-  // aCx == nullptr is allowed only if aOptions.isNullOrUndefined()
-  void RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
-                         ErrorResult& aError);
-  void MozRequestPointerLock();
+  void RequestFullscreen(ErrorResult& aError);
+  void RequestPointerLock();
   Attr* GetAttributeNode(const nsAString& aName);
   already_AddRefed<Attr> SetAttributeNode(Attr& aNewAttr,
                                           ErrorResult& aError);
@@ -766,6 +797,12 @@ public:
 
   already_AddRefed<ShadowRoot> CreateShadowRoot(ErrorResult& aError);
   already_AddRefed<DestinationInsertionPointList> GetDestinationInsertionPoints();
+
+  ShadowRoot *FastGetShadowRoot() const
+  {
+    nsDOMSlots* slots = GetExistingDOMSlots();
+    return slots ? slots->mShadowRoot.get() : nullptr;
+  }
 
   void ScrollIntoView();
   void ScrollIntoView(bool aTop);
@@ -938,20 +975,6 @@ public:
   // Work around silly C++ name hiding stuff
   nsIFrame* GetPrimaryFrame() const { return nsIContent::GetPrimaryFrame(); }
 
-  /**
-   * Struct that stores info on an attribute.  The name and value must
-   * either both be null or both be non-null.
-   */
-  struct nsAttrInfo {
-    nsAttrInfo(const nsAttrName* aName, const nsAttrValue* aValue) :
-      mName(aName), mValue(aValue) {}
-    nsAttrInfo(const nsAttrInfo& aOther) :
-      mName(aOther.mName), mValue(aOther.mValue) {}
-
-    const nsAttrName* mName;
-    const nsAttrValue* mValue;
-  };
-
   const nsAttrValue* GetParsedAttr(nsIAtom* aAttr) const
   {
     return mAttrsAndChildren.GetAttr(aAttr);
@@ -986,9 +1009,9 @@ public:
    * is, this should only be called from methods that only care about attrs
    * that effectively live in mAttrsAndChildren.
    */
-  virtual nsAttrInfo GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const;
+  virtual BorrowedAttrInfo GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const;
 
-  virtual void NodeInfoChanged(mozilla::dom::NodeInfo* aOldNodeInfo)
+  virtual void NodeInfoChanged()
   {
   }
 
@@ -1129,6 +1152,16 @@ public:
   float FontSizeInflation();
 
   net::ReferrerPolicy GetReferrerPolicyAsEnum();
+
+  /*
+   * Helpers for .dataset.  This is implemented on Element, though only some
+   * sorts of elements expose it to JS as a .dataset property
+   */
+  // Getter, to be called from bindings.
+  already_AddRefed<nsDOMStringMap> Dataset();
+  // Callback for destructor of dataset to ensure to null out our weak pointer
+  // to it.
+  void ClearDataset();
 
 protected:
   /*
@@ -1856,12 +1889,12 @@ NS_IMETHOD ReleaseCapture(void) final override                                \
 NS_IMETHOD MozRequestFullScreen(void) final override                          \
 {                                                                             \
   mozilla::ErrorResult rv;                                                    \
-  Element::RequestFullscreen(nullptr, JS::UndefinedHandleValue, rv);          \
+  Element::RequestFullscreen(rv);                                    \
   return rv.StealNSResult();                                                  \
 }                                                                             \
 NS_IMETHOD MozRequestPointerLock(void) final override                         \
 {                                                                             \
-  Element::MozRequestPointerLock();                                           \
+  Element::RequestPointerLock();                                              \
   return NS_OK;                                                               \
 }                                                                             \
 using nsINode::QuerySelector;                                                 \

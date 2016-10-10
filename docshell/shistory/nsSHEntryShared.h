@@ -70,7 +70,8 @@ private:
   // member here, be sure to update the Duplicate() implementation.
   uint64_t mDocShellID;
   nsCOMArray<nsIDocShellTreeItem> mChildShells;
-  nsCOMPtr<nsISupports> mOwner;
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
+  nsCOMPtr<nsIPrincipal> mPrincipalToInherit;
   nsCString mContentType;
   bool mIsFrameNavigation;
   bool mSaveLayoutState;

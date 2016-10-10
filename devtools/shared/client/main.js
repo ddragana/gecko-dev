@@ -6,9 +6,10 @@
 
 "use strict";
 
-const { Ci, Cu, components } = require("chrome");
+const { Ci, Cu } = require("chrome");
 const Services = require("Services");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const { getStack, callFunctionWithAsyncStack } = require("devtools/shared/platform/stack");
 
 const promise = Cu.import("resource://devtools/shared/deprecated-sync-thenables.js", {}).Promise;
 
@@ -144,7 +145,8 @@ function eventSource(aProto) {
 const ThreadStateTypes = {
   "paused": "paused",
   "resumed": "attached",
-  "detached": "detached"
+  "detached": "detached",
+  "running": "attached"
 };
 
 /**
@@ -353,9 +355,17 @@ DebuggerClient.prototype = {
    *
    * @param aOnClosed function
    *        If specified, will be called when the debugging connection
-   *        has been closed.
+   *        has been closed. This parameter is deprecated - please use
+   *        the returned Promise.
+   * @return Promise
+   *         Resolves after the underlying transport is closed.
    */
   close: function (aOnClosed) {
+    let deferred = promise.defer();
+    if (aOnClosed) {
+      deferred.promise.then(aOnClosed);
+    }
+
     // Disable detach event notifications, because event handlers will be in a
     // cleared scope by the time they run.
     this._eventsEnabled = false;
@@ -370,17 +380,11 @@ DebuggerClient.prototype = {
     // as we won't be able to send any message.
     if (this._closed) {
       cleanup();
-      if (aOnClosed) {
-        aOnClosed();
-      }
-      return;
+      deferred.resolve();
+      return deferred.promise;
     }
 
-    if (aOnClosed) {
-      this.addOneTimeListener("closed", function (aEvent) {
-        aOnClosed();
-      });
-    }
+    this.addOneTimeListener("closed", deferred.resolve);
 
     // Call each client's `detach` method by calling
     // lastly registered ones first to give a chance
@@ -401,6 +405,8 @@ DebuggerClient.prototype = {
       detachClients();
     };
     detachClients();
+
+    return deferred.promise;
   },
 
   /*
@@ -703,7 +709,7 @@ DebuggerClient.prototype = {
 
     let request = new Request(aRequest);
     request.format = "json";
-    request.stack = components.stack;
+    request.stack = getStack();
     if (aOnResponse) {
       request.on("json-reply", aOnResponse);
     }
@@ -942,6 +948,16 @@ DebuggerClient.prototype = {
       return;
     }
 
+    // Check for "forwardingCancelled" here instead of using a client to handle it.
+    // This is necessary because we might receive this event while the client is closing,
+    // and the clients have already been removed by that point.
+    if (this.mainRoot &&
+        aPacket.from == this.mainRoot.actor &&
+        aPacket.type == "forwardingCancelled") {
+      this.purgeRequests(aPacket.prefix);
+      return;
+    }
+
     if (this._clients.has(aPacket.from) && aPacket.type) {
       let client = this._clients.get(aPacket.from);
       let type = aPacket.type;
@@ -999,8 +1015,8 @@ DebuggerClient.prototype = {
     if (activeRequest) {
       let emitReply = () => activeRequest.emit("json-reply", aPacket);
       if (activeRequest.stack) {
-        Cu.callFunctionWithAsyncStack(emitReply, activeRequest.stack,
-                                      "DevTools RDP");
+        callFunctionWithAsyncStack(emitReply, activeRequest.stack,
+                                   "DevTools RDP");
       } else {
         emitReply();
       }
@@ -1072,35 +1088,11 @@ DebuggerClient.prototype = {
    *        The status code that corresponds to the reason for closing
    *        the stream.
    */
-  onClosed: function (aStatus) {
+  onClosed: function () {
     this._closed = true;
     this.emit("closed");
 
-    // Reject all pending and active requests
-    let reject = function (type, request, actor) {
-      // Server can send packets on its own and client only pass a callback
-      // to expectReply, so that there is no request object.
-      let msg;
-      if (request.request) {
-        msg = "'" + request.request.type + "' " + type + " request packet" +
-              " to '" + actor + "' " +
-              "can't be sent as the connection just closed.";
-      } else {
-        msg = "server side packet from '" + actor + "' can't be received " +
-              "as the connection just closed.";
-      }
-      let packet = { error: "connectionClosed", message: msg };
-      request.emit("json-reply", packet);
-    };
-
-    let pendingRequests = new Map(this._pendingRequests);
-    this._pendingRequests.clear();
-    pendingRequests.forEach((list, actor) => {
-      list.forEach(request => reject("pending", request, actor));
-    });
-    let activeRequests = new Map(this._activeRequests);
-    this._activeRequests.clear();
-    activeRequests.forEach(reject.bind(null, "active"));
+    this.purgeRequests();
 
     // The |_pools| array on the client-side currently is used only by
     // protocol.js to store active fronts, mirroring the actor pools found in
@@ -1122,6 +1114,51 @@ DebuggerClient.prototype = {
     for (let pool of this._pools) {
       pool.cleanup();
     }
+  },
+
+  /**
+   * Purge pending and active requests in this client.
+   *
+   * @param prefix string (optional)
+   *        If a prefix is given, only requests for actor IDs that start with the prefix
+   *        will be cleaned up.  This is useful when forwarding of a portion of requests
+   *        is cancelled on the server.
+   */
+  purgeRequests(prefix = "") {
+    let reject = function (type, request) {
+      // Server can send packets on its own and client only pass a callback
+      // to expectReply, so that there is no request object.
+      let msg;
+      if (request.request) {
+        msg = "'" + request.request.type + "' " + type + " request packet" +
+              " to '" + request.actor + "' " +
+              "can't be sent as the connection just closed.";
+      } else {
+        msg = "server side packet can't be received as the connection just closed.";
+      }
+      let packet = { error: "connectionClosed", message: msg };
+      request.emit("json-reply", packet);
+    };
+
+    let pendingRequestsToReject = [];
+    this._pendingRequests.forEach((requests, actor) => {
+      if (!actor.startsWith(prefix)) {
+        return;
+      }
+      this._pendingRequests.delete(actor);
+      pendingRequestsToReject = pendingRequestsToReject.concat(requests);
+    });
+    pendingRequestsToReject.forEach(request => reject("pending", request));
+
+    let activeRequestsToReject = [];
+    this._activeRequests.forEach((request, actor) => {
+      if (!actor.startsWith(prefix)) {
+        return;
+      }
+      this._activeRequests.delete(actor);
+      activeRequestsToReject = activeRequestsToReject.concat(request);
+    });
+    activeRequestsToReject.forEach(request => reject("active", request));
   },
 
   registerClient: function (client) {
@@ -1703,6 +1740,7 @@ ThreadClient.prototype = {
 
       // Put the client in a tentative "resuming" state so we can prevent
       // further requests that should only be sent in the paused state.
+      this._previousState = this._state;
       this._state = "resuming";
 
       if (this._pauseOnExceptions) {
@@ -1717,10 +1755,17 @@ ThreadClient.prototype = {
       return aPacket;
     },
     after: function (aResponse) {
-      if (aResponse.error) {
-        // There was an error resuming, back to paused state.
-        this._state = "paused";
+      if (aResponse.error && this._state == "resuming") {
+        // There was an error resuming, update the state to the new one
+        // reported by the server, if given (only on wrongState), otherwise
+        // reset back to the previous state.
+        if (aResponse.state) {
+          this._state = ThreadStateTypes[aResponse.state];
+        } else {
+          this._state = this._previousState;
+        }
       }
+      delete this._previousState;
       return aResponse;
     },
   }),
@@ -2848,7 +2893,7 @@ SourceClient.prototype = {
    * @param function aOnResponse
    *        Called with the thread's response.
    */
-  setBreakpoint: function ({ line, column, condition }, aOnResponse = noop) {
+  setBreakpoint: function ({ line, column, condition, noSliding }, aOnResponse = noop) {
     // A helper function that sets the breakpoint.
     let doSetBreakpoint = aCallback => {
       let root = this._client.mainRoot;
@@ -2861,7 +2906,8 @@ SourceClient.prototype = {
         to: this.actor,
         type: "setBreakpoint",
         location: location,
-        condition: condition
+        condition: condition,
+        noSliding: noSliding
       };
 
       // Backwards compatibility: send the breakpoint request to the

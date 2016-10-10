@@ -11,7 +11,7 @@
 // Helper Classes
 #include "nsStyleCoord.h"
 #include "nsSize.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/ReflowInput.h"
 #include "nsIServiceManager.h"
 #include "nsComponentManagerUtils.h"
 #include "nsXPIDLString.h"
@@ -444,6 +444,34 @@ nsDocShellTreeOwner::GetPrimaryTabParent(nsITabParent** aTab)
 }
 
 NS_IMETHODIMP
+nsDocShellTreeOwner::GetPrimaryContentSize(int32_t* aWidth,
+                                           int32_t* aHeight)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::SetPrimaryContentSize(int32_t aWidth,
+                                           int32_t aHeight)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::GetRootShellSize(int32_t* aWidth,
+                                      int32_t* aHeight)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::SetRootShellSize(int32_t aWidth,
+                                      int32_t aHeight)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 nsDocShellTreeOwner::SizeShellTo(nsIDocShellTreeItem* aShellItem,
                                  int32_t aCX, int32_t aCY)
 {
@@ -534,6 +562,13 @@ nsDocShellTreeOwner::GetTargetableShellCount(uint32_t* aResult)
     *aResult = 0;
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShellTreeOwner::GetHasPrimaryContent(bool* aResult)
+{
+  *aResult = mPrimaryTabParent || mPrimaryContentShell;
   return NS_OK;
 }
 
@@ -1027,11 +1062,34 @@ nsDocShellTreeOwner::HandleEvent(nsIDOMEvent* aEvent)
     } else if (eventType.EqualsLiteral("drop")) {
       nsIWebNavigation* webnav = static_cast<nsIWebNavigation*>(mWebBrowser);
 
-      nsAutoString link, name;
+      uint32_t linksCount;
+      nsIDroppedLinkItem** links;
       if (webnav &&
-          NS_SUCCEEDED(handler->DropLink(dragEvent, name, true, link))) {
-        if (!link.IsEmpty()) {
-          webnav->LoadURI(link.get(), 0, nullptr, nullptr, nullptr);
+          NS_SUCCEEDED(handler->DropLinks(dragEvent, true, &linksCount, &links))) {
+        if (linksCount >= 1) {
+          nsCOMPtr<nsIWebBrowserChrome> webBrowserChrome = GetWebBrowserChrome();
+          if (webBrowserChrome) {
+            nsCOMPtr<nsITabChild> tabChild = do_QueryInterface(webBrowserChrome);
+            if (tabChild) {
+              nsresult rv = tabChild->RemoteDropLinks(linksCount, links);
+              for (uint32_t i = 0; i < linksCount; i++) {
+                NS_RELEASE(links[i]);
+              }
+              free(links);
+              return rv;
+            }
+          }
+          nsAutoString url;
+          if (NS_SUCCEEDED(links[0]->GetUrl(url))) {
+            if (!url.IsEmpty()) {
+              webnav->LoadURI(url.get(), 0, nullptr, nullptr, nullptr);
+            }
+          }
+
+          for (uint32_t i = 0; i < linksCount; i++) {
+            NS_RELEASE(links[i]);
+          }
+          free(links);
         }
       } else {
         aEvent->StopPropagation();
@@ -1088,6 +1146,8 @@ ChromeTooltipListener::ChromeTooltipListener(nsWebBrowser* aInBrowser,
   , mTooltipListenerInstalled(false)
   , mMouseClientX(0)
   , mMouseClientY(0)
+  , mMouseScreenX(0)
+  , mMouseScreenY(0)
   , mShowingTooltip(false)
   , mTooltipShownOnce(false)
 {

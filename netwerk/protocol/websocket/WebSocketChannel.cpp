@@ -194,6 +194,9 @@ public:
 
     nsCOMPtr<nsIPrefBranch> prefService =
       do_GetService(NS_PREFSERVICE_CONTRACTID);
+    if (!prefService) {
+      return;
+    }
     bool boolpref = true;
     nsresult rv;
     rv = prefService->GetBoolPref("network.websocket.delay-failed-reconnects",
@@ -702,7 +705,7 @@ public:
       mListenerMT(mChannel->mListenerMT),
       mSize(aSize) {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mChannel->IsOnTargetThread());
 
@@ -1566,9 +1569,13 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
     LOG(("WebSocketChannel::ProcessInput: payload %lld avail %lu\n",
          payloadLength64, avail));
 
-    if (payloadLength64 + mFragmentAccumulator > mMaxMessageSize) {
+    CheckedInt<int64_t> payloadLengthChecked(payloadLength64);
+    payloadLengthChecked += mFragmentAccumulator;
+    if (!payloadLengthChecked.isValid() || payloadLengthChecked.value() >
+        mMaxMessageSize) {
       return NS_ERROR_FILE_TOO_BIG;
     }
+
     uint32_t payloadLength = static_cast<uint32_t>(payloadLength64);
 
     if (avail < payloadLength)
@@ -2176,14 +2183,16 @@ WebSocketChannel::PrimeNewOutgoingMessage()
     // Perform the sending mask. Never use a zero mask
     do {
       uint8_t *buffer;
-      nsresult rv = mRandomGenerator->GenerateRandomBytes(4, &buffer);
+      static_assert(4 == sizeof(mask), "Size of the mask should be equal to 4");
+      nsresult rv = mRandomGenerator->GenerateRandomBytes(sizeof(mask),
+                                                          &buffer);
       if (NS_FAILED(rv)) {
         LOG(("WebSocketChannel::PrimeNewOutgoingMessage(): "
              "GenerateRandomBytes failure %x\n", rv));
         StopSession(rv);
         return;
       }
-      mask = * reinterpret_cast<uint32_t *>(buffer);
+      memcpy(&mask, buffer, sizeof(mask));
       free(buffer);
     } while (!mask);
     NetworkEndian::writeUint32(payload - sizeof(uint32_t), mask);
@@ -2273,7 +2282,7 @@ public:
     : mChannel(aChannel)
   {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();

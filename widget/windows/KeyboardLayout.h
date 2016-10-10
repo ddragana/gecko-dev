@@ -118,6 +118,11 @@ public:
   typedef uint8_t ShiftState;
 
   static ShiftState ModifiersToShiftState(Modifiers aModifiers);
+  static ShiftState ModifierKeyStateToShiftState(
+                      const ModifierKeyState& aModKeyState)
+  {
+    return ModifiersToShiftState(aModKeyState.GetModifiers());
+  }
   static Modifiers ShiftStateToModifiers(ShiftState aShiftState);
 
 private:
@@ -167,8 +172,23 @@ public:
                                            uint32_t aEntries) const;
   inline char16_t GetCompositeChar(ShiftState aShiftState,
                                     char16_t aBaseChar) const;
+  char16_t GetCompositeChar(const ModifierKeyState& aModKeyState,
+                            char16_t aBaseChar) const
+  {
+    return GetCompositeChar(ModifierKeyStateToShiftState(aModKeyState),
+                            aBaseChar);
+  }
   UniCharsAndModifiers GetNativeUniChars(ShiftState aShiftState) const;
+  UniCharsAndModifiers GetNativeUniChars(
+                         const ModifierKeyState& aModKeyState) const
+  {
+    return GetNativeUniChars(ModifierKeyStateToShiftState(aModKeyState));
+  }
   UniCharsAndModifiers GetUniChars(ShiftState aShiftState) const;
+  UniCharsAndModifiers GetUniChars(const ModifierKeyState& aModKeyState) const
+  {
+    return GetUniChars(ModifierKeyStateToShiftState(aModKeyState));
+  }
 };
 
 class MOZ_STACK_CLASS NativeKey final
@@ -180,11 +200,16 @@ public:
   {
     UINT mCharCode;
     UINT mScanCode;
+    bool mIsSysKey;
     bool mIsDeadKey;
     bool mConsumed;
 
-    FakeCharMsg() :
-      mCharCode(0), mScanCode(0), mIsDeadKey(false), mConsumed(false)
+    FakeCharMsg()
+      : mCharCode(0)
+      , mScanCode(0)
+      , mIsSysKey(false)
+      , mIsDeadKey(false)
+      , mConsumed(false)
     {
     }
 
@@ -192,7 +217,10 @@ public:
     {
       MSG msg;
       msg.hwnd = aWnd;
-      msg.message = mIsDeadKey ? WM_DEADCHAR : WM_CHAR;
+      msg.message = mIsDeadKey && mIsSysKey ? WM_SYSDEADCHAR :
+                                 mIsDeadKey ? WM_DEADCHAR :
+                                  mIsSysKey ? WM_SYSCHAR :
+                                              WM_CHAR;
       msg.wParam = static_cast<WPARAM>(mCharCode);
       msg.lParam = static_cast<LPARAM>(mScanCode << 16);
       msg.time = 0;
@@ -219,11 +247,10 @@ public:
 
   /**
    * Handles WM_CHAR message or WM_SYSCHAR message.  The instance must be
-   * initialized with WM_KEYDOWN, WM_SYSKEYDOWN or them.
+   * initialized with them.
    * Returns true if dispatched keypress event is consumed.  Otherwise, false.
    */
-  bool HandleCharMessage(const MSG& aCharMsg,
-                         bool* aEventDispatched = nullptr) const;
+  bool HandleCharMessage(bool* aEventDispatched = nullptr) const;
 
   /**
    * Handles keyup message.  Returns true if the event is consumed.
@@ -244,11 +271,36 @@ public:
   void WillDispatchKeyboardEvent(WidgetKeyboardEvent& aKeyboardEvent,
                                  uint32_t aIndex);
 
+  /**
+   * Returns true if aChar is a control character which shouldn't be inputted
+   * into focused text editor.
+   */
+  static bool IsControlChar(char16_t aChar);
+
 private:
+  NativeKey* mLastInstance;
+  // mRemovingMsg is set at removing a char message from
+  // GetFollowingCharMessage().
+  MSG mRemovingMsg;
+  // mReceivedMsg is set when another instance starts to handle the message
+  // unexpectedly.
+  MSG mReceivedMsg;
   RefPtr<nsWindowBase> mWidget;
   RefPtr<TextEventDispatcher> mDispatcher;
   HKL mKeyboardLayout;
   MSG mMsg;
+  // mFollowingCharMsgs stores WM_CHAR, WM_SYSCHAR, WM_DEADCHAR or
+  // WM_SYSDEADCHAR message which follows WM_KEYDOWN.
+  // Note that the stored messaged are already removed from the queue.
+  nsTArray<MSG> mFollowingCharMsgs;
+  // mRemovedOddCharMsgs stores WM_CHAR messages which are caused by ATOK or
+  // WXG (they are Japanese IME) when the user tries to do "Kakutei-undo"
+  // (it means "undo the last commit").
+  nsTArray<MSG> mRemovedOddCharMsgs;
+  // If dispatching eKeyDown or eKeyPress event causes focus change,
+  // the instance shouldn't handle remaning char messages.  For checking it,
+  // this should store first focused window.
+  HWND mFocusedWndBeforeDispatch;
 
   uint32_t mDOMKeyCode;
   KeyNameIndex mKeyNameIndex;
@@ -314,12 +366,7 @@ private:
   }
 
   void InitWithAppCommand();
-
-  /**
-   * Returns true if aChar is a control character which shouldn't be inputted
-   * into focused text editor.
-   */
-  bool IsControlChar(char16_t aChar) const;
+  void InitWithKeyChar();
 
   /**
    * Returns true if the key event is caused by auto repeat.
@@ -361,6 +408,12 @@ private:
   uint32_t GetKeyLocation() const;
 
   /**
+   * RemoveFollowingOddCharMessages() removes odd WM_CHAR messages from the
+   * queue when IsIMEDoingKakuteiUndo() returns true.
+   */
+  void RemoveFollowingOddCharMessages();
+
+  /**
    * "Kakutei-Undo" of ATOK or WXG (both of them are Japanese IME) causes
    * strange WM_KEYDOWN/WM_KEYUP/WM_CHAR message pattern.  So, when this
    * returns true, the caller needs to be careful for processing the messages.
@@ -379,11 +432,11 @@ private:
             mMsg.message == WM_SYSKEYUP ||
             mMsg.message == MOZ_WM_KEYUP);
   }
-  bool IsPrintableCharMessage(const MSG& aMSG) const
+  bool IsCharOrSysCharMessage(const MSG& aMSG) const
   {
-    return IsPrintableCharMessage(aMSG.message);
+    return IsCharOrSysCharMessage(aMSG.message);
   }
-  bool IsPrintableCharMessage(UINT aMessage) const
+  bool IsCharOrSysCharMessage(UINT aMessage) const
   {
     return (aMessage == WM_CHAR || aMessage == WM_SYSCHAR);
   }
@@ -393,7 +446,7 @@ private:
   }
   bool IsCharMessage(UINT aMessage) const
   {
-    return (IsPrintableCharMessage(aMessage) || IsDeadCharMessage(aMessage));
+    return (IsCharOrSysCharMessage(aMessage) || IsDeadCharMessage(aMessage));
   }
   bool IsDeadCharMessage(const MSG& aMSG) const
   {
@@ -412,12 +465,30 @@ private:
     return (aMessage == WM_SYSCHAR || aMessage == WM_SYSDEADCHAR);
   }
   bool MayBeSameCharMessage(const MSG& aCharMsg1, const MSG& aCharMsg2) const;
+  bool IsFollowedByPrintableCharMessage() const;
   bool IsFollowedByDeadCharMessage() const;
   bool IsKeyMessageOnPlugin() const
   {
     return (mMsg.message == MOZ_WM_KEYDOWN ||
             mMsg.message == MOZ_WM_KEYUP);
   }
+  bool IsPrintableCharMessage(const MSG& aMSG) const
+  {
+    return aMSG.message == WM_CHAR &&
+           !IsControlChar(static_cast<char16_t>(aMSG.wParam));
+  }
+  bool IsControlCharMessage(const MSG& aMSG) const
+  {
+    return IsCharMessage(aMSG.message) &&
+           IsControlChar(static_cast<char16_t>(aMSG.wParam));
+  }
+
+  /**
+   * IsReservedBySystem() returns true if the key combination is reserved by
+   * the system.  Even if it's consumed by web apps, the message should be
+   * sent to next wndproc.
+   */
+  bool IsReservedBySystem() const;
 
   /**
    * GetFollowingCharMessage() returns following char message of handling
@@ -426,11 +497,8 @@ private:
    *
    * WARNING: Even if this returns true, aCharMsg may be WM_NULL or its
    *          hwnd may be different window.
-   *
-   * @param aRemove     true if the found message should be removed from the
-   *                    queue.  Otherwise, false.
    */
-  bool GetFollowingCharMessage(MSG& aCharMsg, bool aRemove = true) const;
+  bool GetFollowingCharMessage(MSG& aCharMsg);
 
   /**
    * Whether the key event can compute virtual keycode from the scancode value.
@@ -480,12 +548,12 @@ private:
   bool DispatchKeyPressEventsWithoutCharMessage() const;
 
   /**
-   * Remove all following WM_CHAR, WM_SYSCHAR and WM_DEADCHAR messages for the
-   * WM_KEYDOWN or WM_SYSKEYDOWN message.  Additionally, dispatches plugin
-   * events if it's necessary.
-   * Returns true if the widget is destroyed.  Otherwise, false.
+   * MaybeDispatchPluginEventsForRemovedCharMessages() dispatches plugin events
+   * for removed char messages when a windowless plugin has focus.
+   * Returns true if the widget is destroyed or blurred during dispatching a
+   * plugin event.
    */
-  bool DispatchPluginEventsAndDiscardsCharMessages() const;
+  bool MaybeDispatchPluginEventsForRemovedCharMessages() const;
 
   /**
    * DispatchKeyPressEventForFollowingCharMessage() dispatches keypress event
@@ -509,67 +577,49 @@ private:
    * state.
    */
   void ComputeInputtingStringWithKeyboardLayout();
+
+  /**
+   * IsFocusedWindowChanged() returns true if focused window is changed
+   * after the instance is created.
+   */
+  bool IsFocusedWindowChanged() const
+  {
+    return mFocusedWndBeforeDispatch != ::GetFocus();
+  }
+
+  /**
+   * Handles WM_CHAR message or WM_SYSCHAR message.  The instance must be
+   * initialized with WM_KEYDOWN, WM_SYSKEYDOWN or them.
+   * Returns true if dispatched keypress event is consumed.  Otherwise, false.
+   */
+  bool HandleCharMessage(const MSG& aCharMsg,
+                         bool* aEventDispatched = nullptr) const;
+
+  // Calls of PeekMessage() from NativeKey might cause nested message handling
+  // due to (perhaps) odd API hook.  NativeKey should do nothing if given
+  // message is tried to be retrieved by another instance.
+
+  /**
+   * sLatestInstacne is a pointer to the newest instance of NativeKey which is
+   * handling a key or char message(s).
+   */
+  static NativeKey* sLatestInstance;
+
+  static const MSG sEmptyMSG;
+
+  static bool IsEmptyMSG(const MSG& aMSG)
+  {
+    return !memcmp(&aMSG, &sEmptyMSG, sizeof(MSG));
+  }
+
+  bool IsAnotherInstanceRemovingCharMessage() const
+  {
+    return mLastInstance && !IsEmptyMSG(mLastInstance->mRemovingMsg);
+  }
 };
 
 class KeyboardLayout
 {
-  friend class NativeKey;
-
-private:
-  KeyboardLayout();
-  ~KeyboardLayout();
-
-  static KeyboardLayout* sInstance;
-  static nsIIdleServiceInternal* sIdleService;
-
-  struct DeadKeyTableListEntry
-  {
-    DeadKeyTableListEntry* next;
-    uint8_t data[1];
-  };
-
-  HKL mKeyboardLayout;
-
-  VirtualKey mVirtualKeys[NS_NUM_OF_KEYS];
-  DeadKeyTableListEntry* mDeadKeyTableListHead;
-  int32_t mActiveDeadKey;                 // -1 = no active dead-key
-  VirtualKey::ShiftState mDeadKeyShiftState;
-
-  bool mIsOverridden : 1;
-  bool mIsPendingToRestoreKeyboardLayout : 1;
-
-  static inline int32_t GetKeyIndex(uint8_t aVirtualKey);
-  static int CompareDeadKeyEntries(const void* aArg1, const void* aArg2,
-                                   void* aData);
-  static bool AddDeadKeyEntry(char16_t aBaseChar, char16_t aCompositeChar,
-                                DeadKeyEntry* aDeadKeyArray, uint32_t aEntries);
-  bool EnsureDeadKeyActive(bool aIsActive, uint8_t aDeadKey,
-                             const PBYTE aDeadKeyKbdState);
-  uint32_t GetDeadKeyCombinations(uint8_t aDeadKey,
-                                  const PBYTE aDeadKeyKbdState,
-                                  uint16_t aShiftStatesWithBaseChars,
-                                  DeadKeyEntry* aDeadKeyArray,
-                                  uint32_t aMaxEntries);
-  void DeactivateDeadKeyState();
-  const DeadKeyTable* AddDeadKeyTable(const DeadKeyEntry* aDeadKeyArray,
-                                      uint32_t aEntries);
-  void ReleaseDeadKeyTables();
-
-  /**
-   * Loads the specified keyboard layout. This method always clear the dead key
-   * state.
-   */
-  void LoadLayout(HKL aLayout);
-
-  /**
-   * InitNativeKey() must be called when actually widget receives WM_KEYDOWN or
-   * WM_KEYUP.  This method is stateful.  This saves current dead key state at
-   * WM_KEYDOWN.  Additionally, computes current inputted character(s) and set
-   * them to the aNativeKey.
-   */
-  void InitNativeKey(NativeKey& aNativeKey,
-                     const ModifierKeyState& aModKeyState);
-
 public:
   static KeyboardLayout* GetInstance();
   static void Shutdown();
@@ -585,10 +635,41 @@ public:
                  const ModifierKeyState& aModKeyState) const;
 
   /**
-   * GetUniCharsAndModifiers() returns characters which is inputted by the
+   * IsInDeadKeySequence() returns true when it's in a dead key sequence.
+   * It starts when a dead key is down and ends when another key down causes
+   * inactivating the dead key state.
+   */
+  bool IsInDeadKeySequence() const { return mActiveDeadKey >= 0; }
+
+  /**
+   * IsSysKey() returns true if aVirtualKey with aModKeyState causes WM_SYSKEY*
+   * or WM_SYS*CHAR messages.
+   */
+  bool IsSysKey(uint8_t aVirtualKey,
+                const ModifierKeyState& aModKeyState) const;
+
+  /**
+   * GetUniCharsAndModifiers() returns characters which are inputted by
    * aVirtualKey with aModKeyState.  This method isn't stateful.
+   * Note that if the combination causes text input, the result's Ctrl and
+   * Alt key state are never active.
    */
   UniCharsAndModifiers GetUniCharsAndModifiers(
+                         uint8_t aVirtualKey,
+                         const ModifierKeyState& aModKeyState) const
+  {
+    VirtualKey::ShiftState shiftState =
+      VirtualKey::ModifierKeyStateToShiftState(aModKeyState);
+    return GetUniCharsAndModifiers(aVirtualKey, shiftState);
+  }
+
+  /**
+   * GetNativeUniCharsAndModifiers() returns characters which are inputted by
+   * aVirtualKey with aModKeyState.  The method isn't stateful.
+   * Note that different from GetUniCharsAndModifiers(), this returns
+   * actual modifier state of Ctrl and Alt.
+   */
+  UniCharsAndModifiers GetNativeUniCharsAndModifiers(
                          uint8_t aVirtualKey,
                          const ModifierKeyState& aModKeyState) const;
 
@@ -657,6 +738,111 @@ public:
                                     uint32_t aModifierFlags,
                                     const nsAString& aCharacters,
                                     const nsAString& aUnmodifiedCharacters);
+
+private:
+  KeyboardLayout();
+  ~KeyboardLayout();
+
+  static KeyboardLayout* sInstance;
+  static nsIIdleServiceInternal* sIdleService;
+
+  struct DeadKeyTableListEntry
+  {
+    DeadKeyTableListEntry* next;
+    uint8_t data[1];
+  };
+
+  HKL mKeyboardLayout;
+
+  VirtualKey mVirtualKeys[NS_NUM_OF_KEYS];
+  DeadKeyTableListEntry* mDeadKeyTableListHead;
+  int32_t mActiveDeadKey;                 // -1 = no active dead-key
+  VirtualKey::ShiftState mDeadKeyShiftState;
+
+  bool mIsOverridden;
+  bool mIsPendingToRestoreKeyboardLayout;
+
+  static inline int32_t GetKeyIndex(uint8_t aVirtualKey);
+  static int CompareDeadKeyEntries(const void* aArg1, const void* aArg2,
+                                   void* aData);
+  static bool AddDeadKeyEntry(char16_t aBaseChar, char16_t aCompositeChar,
+                                DeadKeyEntry* aDeadKeyArray, uint32_t aEntries);
+  bool EnsureDeadKeyActive(bool aIsActive, uint8_t aDeadKey,
+                             const PBYTE aDeadKeyKbdState);
+  uint32_t GetDeadKeyCombinations(uint8_t aDeadKey,
+                                  const PBYTE aDeadKeyKbdState,
+                                  uint16_t aShiftStatesWithBaseChars,
+                                  DeadKeyEntry* aDeadKeyArray,
+                                  uint32_t aMaxEntries);
+  /**
+   * Activates or deactivates dead key state.
+   */
+  void ActivateDeadKeyState(const NativeKey& aNativeKey,
+                            const ModifierKeyState& aModKeyState);
+  void DeactivateDeadKeyState();
+
+  const DeadKeyTable* AddDeadKeyTable(const DeadKeyEntry* aDeadKeyArray,
+                                      uint32_t aEntries);
+  void ReleaseDeadKeyTables();
+
+  /**
+   * Loads the specified keyboard layout. This method always clear the dead key
+   * state.
+   */
+  void LoadLayout(HKL aLayout);
+
+  /**
+   * InitNativeKey() must be called when actually widget receives WM_KEYDOWN or
+   * WM_KEYUP.  This method is stateful.  This saves current dead key state at
+   * WM_KEYDOWN.  Additionally, computes current inputted character(s) and set
+   * them to the aNativeKey.
+   */
+  void InitNativeKey(NativeKey& aNativeKey,
+                     const ModifierKeyState& aModKeyState);
+
+  /**
+   * MaybeInitNativeKeyAsDeadKey() initializes aNativeKey only when aNativeKey
+   * is a dead key's event.
+   * When it's not in a dead key sequence, this activates the dead key state.
+   * When it's in a dead key sequence, this initializes aNativeKey with a
+   * composite character or a preceding dead char and a dead char which should
+   * be caused by aNativeKey.
+   * Returns true when this initializes aNativeKey.  Otherwise, false.
+   */
+  bool MaybeInitNativeKeyAsDeadKey(NativeKey& aNativeKey,
+                                   const ModifierKeyState& aModKeyState);
+
+  /**
+   * MaybeInitNativeKeyWithCompositeChar() may initialize aNativeKey with
+   * proper composite character when dead key produces a composite character.
+   * Otherwise, just returns false.
+   */
+  bool MaybeInitNativeKeyWithCompositeChar(
+         NativeKey& aNativeKey,
+         const ModifierKeyState& aModKeyState);
+
+  /**
+   * See the comment of GetUniCharsAndModifiers() below.
+   */
+  UniCharsAndModifiers GetUniCharsAndModifiers(
+                         uint8_t aVirtualKey,
+                         VirtualKey::ShiftState aShiftState) const;
+
+  /**
+   * GetCompositeChar() returns a composite character with dead character
+   * caused by aVirtualKeyOfDeadKey and aShiftStateOfDeadKey and a base
+   * character (aBaseChar).
+   * If the combination of the dead character and the base character doesn't
+   * cause a composite character, this returns 0.
+   */
+  char16_t GetCompositeChar(uint8_t aVirtualKeyOfDeadKey,
+                            VirtualKey::ShiftState aShiftStateOfDeadKey,
+                            char16_t aBaseChar) const;
+
+  // NativeKey class should access InitNativeKey() directly, but it shouldn't
+  // be available outside of NativeKey.  So, let's make NativeKey a friend
+  // class of this.
+  friend class NativeKey;
 };
 
 class RedirectedKeyDownMessageManager

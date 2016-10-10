@@ -30,7 +30,8 @@ loader.lazyRequireGetter(this, "BrowserMenus", "devtools/client/framework/browse
 loader.lazyImporter(this, "CustomizableUI", "resource:///modules/CustomizableUI.jsm");
 loader.lazyImporter(this, "AppConstants", "resource://gre/modules/AppConstants.jsm");
 
-const bundle = Services.strings.createBundle("chrome://devtools/locale/toolbox.properties");
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper("devtools/locale/toolbox.properties");
 
 const TABS_OPEN_PEAK_HISTOGRAM = "DEVTOOLS_TABS_OPEN_PEAK_LINEAR";
 const TABS_OPEN_AVG_HISTOGRAM = "DEVTOOLS_TABS_OPEN_AVERAGE_LINEAR";
@@ -140,6 +141,10 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
           }
         }
         break;
+      case "domwindowopened":
+        let win = subject.QueryInterface(Ci.nsIDOMEventTarget);
+        win.addEventListener("DOMContentLoaded", this, { once: true });
+        break;
     }
   },
 
@@ -227,7 +232,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
     }
   },
 
-  _getContentProcessTarget: function () {
+  _getContentProcessTarget: function (processId) {
     // Create a DebuggerServer in order to connect locally to it
     if (!DebuggerServer.initialized) {
       DebuggerServer.init();
@@ -240,49 +245,54 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
 
     let deferred = defer();
     client.connect().then(() => {
-      client.mainRoot.listProcesses(response => {
-        // Do nothing if there is only one process, the parent process.
-        let contentProcesses = response.processes.filter(p => (!p.parent));
-        if (contentProcesses.length < 1) {
-          let msg = bundle.GetStringFromName("toolbox.noContentProcess.message");
-          Services.prompt.alert(null, "", msg);
-          deferred.reject("No content processes available.");
-          return;
-        }
-        // Otherwise, arbitrary connect to the unique content process.
-        client.getProcess(contentProcesses[0].id)
-              .then(response => {
-                let options = {
-                  form: response.form,
-                  client: client,
-                  chrome: true,
-                  isTabActor: false
-                };
-                return TargetFactory.forRemoteTab(options);
-              })
-              .then(target => {
-                // Ensure closing the connection in order to cleanup
-                // the debugger client and also the server created in the
-                // content process
-                target.on("close", () => {
-                  client.close();
-                });
-                deferred.resolve(target);
+      client.getProcess(processId)
+            .then(response => {
+              let options = {
+                form: response.form,
+                client: client,
+                chrome: true,
+                isTabActor: false
+              };
+              return TargetFactory.forRemoteTab(options);
+            })
+            .then(target => {
+              // Ensure closing the connection in order to cleanup
+              // the debugger client and also the server created in the
+              // content process
+              target.on("close", () => {
+                client.close();
               });
-      });
+              deferred.resolve(target);
+            });
     });
 
     return deferred.promise;
   },
 
-   // Used by browser-sets.inc, command
-  openContentProcessToolbox: function () {
-    this._getContentProcessTarget()
-        .then(target => {
-          // Display a new toolbox, in a new window, with debugger by default
-          return gDevTools.showToolbox(target, "jsdebugger",
-                                       Toolbox.HostType.WINDOW);
-        });
+   // Used by menus.js
+  openContentProcessToolbox: function (gBrowser) {
+    let { childCount } = Services.ppmm;
+    // Get the process message manager for the current tab
+    let mm = gBrowser.selectedBrowser.messageManager.processMessageManager;
+    let processId = null;
+    for (let i = 1; i < childCount; i++) {
+      let child = Services.ppmm.getChildAt(i);
+      if (child == mm) {
+        processId = i;
+        break;
+      }
+    }
+    if (processId) {
+      this._getContentProcessTarget(processId)
+          .then(target => {
+            // Display a new toolbox, in a new window, with debugger by default
+            return gDevTools.showToolbox(target, "jsdebugger",
+                                         Toolbox.HostType.WINDOW);
+          });
+    } else {
+      let msg = L10N.getStr("toolbox.noContentProcessForTab.message");
+      Services.prompt.alert(null, "", msg);
+    }
   },
 
   /**
@@ -396,18 +406,36 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
   },
 
   /**
+   * Starts setting up devtools on a given browser window. This method is
+   * called on DOMContentLoaded, so earlier than registerBrowserWindow which
+   * is called after delayed-startup notification. This method should only do
+   * what has to be done early. Otherwise devtools should be initialized lazily
+   * to prevent overloading Firefox startup.
+   *
+   * @param {ChromeWindow} window
+   *        The window to which devtools should be hooked to.
+   */
+  _onBrowserWindowLoaded: function (win) {
+    // This method is called for all top level window, only consider firefox
+    // windows
+    if (!win.gBrowser || !win.location.href.endsWith("browser.xul")) {
+      return;
+    }
+    BrowserMenus.addMenus(win.document);
+    win.addEventListener("unload", this);
+  },
+
+  /**
    * Add this DevTools's presence to a browser window's document
    *
-   * @param {XULDocument} doc
-   *        The document to which devtools should be hooked to.
+   * @param {ChromeWindow} win
+   *        The window to which devtools should be hooked to.
    */
   _registerBrowserWindow: function (win) {
     if (gDevToolsBrowser._trackedBrowserWindows.has(win)) {
       return;
     }
     gDevToolsBrowser._trackedBrowserWindows.add(win);
-
-    BrowserMenus.addMenus(win.document);
 
     // Register the Developer widget in the Hamburger menu or navbar
     // only once menus are registered as it depends on it.
@@ -421,7 +449,6 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
 
     this.updateCommandAvailability(win);
     this.ensurePrefObserver();
-    win.addEventListener("unload", this);
 
     let tabContainer = win.gBrowser.tabContainer;
     tabContainer.addEventListener("TabSelect", this, false);
@@ -618,17 +645,20 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
    *         The window containing the menu entry
    */
   _forgetBrowserWindow: function (win) {
+    // _forgetBrowserWindow can only be called once for each window, but
+    // _registerBrowserWindow may not have been called. Instead, only
+    // _onBrowserWindowLoaded was and we only need to revert that.
+    win.removeEventListener("unload", this);
+    BrowserMenus.removeMenus(win.document);
+
     if (!gDevToolsBrowser._trackedBrowserWindows.has(win)) {
       return;
     }
     gDevToolsBrowser._trackedBrowserWindows.delete(win);
-    win.removeEventListener("unload", this);
-
-    BrowserMenus.removeMenus(win.document);
 
     // Destroy toolboxes for closed window
     for (let [target, toolbox] of gDevTools._toolboxes) {
-      if (toolbox.frame && toolbox.frame.ownerDocument.defaultView == win) {
+      if (toolbox.win.top == win) {
         toolbox.destroy();
       }
     }
@@ -673,6 +703,9 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
       case "TabSelect":
         gDevToolsBrowser._updateMenuCheckbox();
         break;
+      case "DOMContentLoaded":
+        gDevToolsBrowser._onBrowserWindowLoaded(event.target.defaultView);
+        break;
       case "unload":
         // top-level browser window unload
         gDevToolsBrowser._forgetBrowserWindow(event.target.defaultView);
@@ -702,6 +735,7 @@ var gDevToolsBrowser = exports.gDevToolsBrowser = {
    */
   destroy: function () {
     Services.prefs.removeObserver("devtools.", gDevToolsBrowser);
+    Services.ww.unregisterNotification(gDevToolsBrowser);
     Services.obs.removeObserver(gDevToolsBrowser, "browser-delayed-startup-finished");
     Services.obs.removeObserver(gDevToolsBrowser.destroy, "quit-application");
 
@@ -734,6 +768,7 @@ gDevTools.on("toolbox-ready", gDevToolsBrowser._updateMenuCheckbox);
 gDevTools.on("toolbox-destroyed", gDevToolsBrowser._updateMenuCheckbox);
 
 Services.obs.addObserver(gDevToolsBrowser.destroy, "quit-application", false);
+Services.ww.registerNotification(gDevToolsBrowser);
 Services.obs.addObserver(gDevToolsBrowser, "browser-delayed-startup-finished", false);
 
 // Fake end of browser window load event for all already opened windows
@@ -742,6 +777,7 @@ let enumerator = Services.wm.getEnumerator(gDevTools.chromeWindowType);
 while (enumerator.hasMoreElements()) {
   let win = enumerator.getNext();
   if (win.gBrowserInit && win.gBrowserInit.delayedStartupFinished) {
+    gDevToolsBrowser._onBrowserWindowLoaded(win);
     gDevToolsBrowser._registerBrowserWindow(win);
   }
 }

@@ -15,7 +15,7 @@
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "nsCOMPtr.h"
 #include "nsFontMetrics.h"
@@ -116,14 +116,14 @@ static bool HaveSpecifiedSize(const nsStylePosition* aStylePosition)
 
 // Decide whether we can optimize away reflows that result from the
 // image's intrinsic size changing.
-inline bool HaveFixedSize(const nsHTMLReflowState& aReflowState)
+inline bool HaveFixedSize(const ReflowInput& aReflowInput)
 {
-  NS_ASSERTION(aReflowState.mStylePosition, "crappy reflowState - null stylePosition");
+  NS_ASSERTION(aReflowInput.mStylePosition, "crappy reflowInput - null stylePosition");
   // Don't try to make this optimization when an image has percentages
   // in its 'width' or 'height'.  The percentages might be treated like
   // auto (especially for intrinsic width calculations and for heights).
-  return aReflowState.mStylePosition->mHeight.ConvertsToLength() &&
-         aReflowState.mStylePosition->mWidth.ConvertsToLength();
+  return aReflowInput.mStylePosition->mHeight.ConvertsToLength() &&
+         aReflowInput.mStylePosition->mWidth.ConvertsToLength();
 }
 
 nsIFrame*
@@ -718,7 +718,7 @@ nsImageFrame::MaybeDecodeForPredictedSize()
     return;  // We won't draw anything, so no point in decoding.
   }
 
-  if (!IsVisibleOrMayBecomeVisibleSoon()) {
+  if (GetVisibility() != Visibility::APPROXIMATELY_VISIBLE) {
     return;  // We're not visible, so don't decode.
   }
 
@@ -948,23 +948,23 @@ nsImageFrame::GetIntrinsicRatio()
 
 void
 nsImageFrame::Reflow(nsPresContext*          aPresContext,
-                     nsHTMLReflowMetrics&     aMetrics,
-                     const nsHTMLReflowState& aReflowState,
+                     ReflowOutput&     aMetrics,
+                     const ReflowInput& aReflowInput,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsImageFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsImageFrame::Reflow: availSize=%d,%d",
-                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
+                  aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
   // see if we have a frozen size (i.e. a fixed width and height)
-  if (HaveFixedSize(aReflowState)) {
+  if (HaveFixedSize(aReflowInput)) {
     mState |= IMAGE_SIZECONSTRAINED;
   } else {
     mState &= ~IMAGE_SIZECONSTRAINED;
@@ -977,19 +977,19 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
 
   mComputedSize = 
-    nsSize(aReflowState.ComputedWidth(), aReflowState.ComputedHeight());
+    nsSize(aReflowInput.ComputedWidth(), aReflowInput.ComputedHeight());
 
   aMetrics.Width() = mComputedSize.width;
   aMetrics.Height() = mComputedSize.height;
 
   // add borders and padding
-  aMetrics.Width()  += aReflowState.ComputedPhysicalBorderPadding().LeftRight();
-  aMetrics.Height() += aReflowState.ComputedPhysicalBorderPadding().TopBottom();
+  aMetrics.Width()  += aReflowInput.ComputedPhysicalBorderPadding().LeftRight();
+  aMetrics.Height() += aReflowInput.ComputedPhysicalBorderPadding().TopBottom();
   
   if (GetPrevInFlow()) {
     aMetrics.Width() = GetPrevInFlow()->GetSize().width;
     nscoord y = GetContinuationOffset();
-    aMetrics.Height() -= y + aReflowState.ComputedPhysicalBorderPadding().top;
+    aMetrics.Height() -= y + aReflowInput.ComputedPhysicalBorderPadding().top;
     aMetrics.Height() = std::max(0, aMetrics.Height());
   }
 
@@ -1009,11 +1009,11 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
   if (aPresContext->IsPaginated() &&
       ((loadStatus & imgIRequest::STATUS_SIZE_AVAILABLE) || (mState & IMAGE_SIZECONSTRAINED)) &&
-      NS_UNCONSTRAINEDSIZE != aReflowState.AvailableHeight() && 
-      aMetrics.Height() > aReflowState.AvailableHeight()) { 
+      NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableHeight() && 
+      aMetrics.Height() > aReflowInput.AvailableHeight()) { 
     // our desired height was greater than 0, so to avoid infinite
     // splitting, use 1 pixel as the min
-    aMetrics.Height() = std::max(nsPresContext::CSSPixelsToAppUnits(1), aReflowState.AvailableHeight());
+    aMetrics.Height() = std::max(nsPresContext::CSSPixelsToAppUnits(1), aReflowInput.AvailableHeight());
     aStatus = NS_FRAME_NOT_COMPLETE;
   }
 
@@ -1053,7 +1053,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsImageFrame::Reflow: size=%d,%d",
                   aMetrics.Width(), aMetrics.Height()));
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
 }
 
 bool
@@ -1265,9 +1265,7 @@ struct nsRecessedBorder : public nsStyleBorder {
     : nsStyleBorder(aPresContext)
   {
     NS_FOR_CSS_SIDES(side) {
-      // Note: use SetBorderColor here because we want to make sure
-      // the "special" flags are unset.
-      SetBorderColor(side, NS_RGB(0, 0, 0));
+      mBorderColor[side] = StyleComplexColor::FromColor(NS_RGB(0, 0, 0));
       mBorder.Side(side) = aBorderWidth;
       // Note: use SetBorderStyle here because we want to affect
       // mComputedBorder
@@ -1634,7 +1632,7 @@ nsDisplayImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                 bool* aSnap)
 {
   *aSnap = false;
-  if (mImage && mImage->IsOpaque()) {
+  if (mImage && mImage->WillDrawOpaqueNow()) {
     const nsRect frameContentBox = GetBounds(aSnap);
     return GetDestRect().Intersect(frameContentBox);
   }
@@ -2019,11 +2017,15 @@ nsImageFrame::HandleEvent(nsPresContext* aPresContext,
           // mouse is over the border.
           if (p.x < 0) p.x = 0;
           if (p.y < 0) p.y = 0;
+
           nsAutoCString spec;
-          uri->GetSpec(spec);
+          nsresult rv = uri->GetSpec(spec);
+          NS_ENSURE_SUCCESS(rv, rv);
+
           spec += nsPrintfCString("?%d,%d", p.x, p.y);
-          uri->SetSpec(spec);                
-          
+          rv = uri->SetSpec(spec);
+          NS_ENSURE_SUCCESS(rv, rv);
+
           bool clicked = false;
           if (aEvent->mMessage == eMouseClick && !aEvent->DefaultPrevented()) {
             *aEventStatus = nsEventStatus_eConsumeDoDefault;
@@ -2089,29 +2091,23 @@ nsImageFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 void
-nsImageFrame::OnVisibilityChange(Visibility aOldVisibility,
-                                 Visibility aNewVisibility,
+nsImageFrame::OnVisibilityChange(Visibility aNewVisibility,
                                  Maybe<OnNonvisible> aNonvisibleAction)
 {
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
   if (!imageLoader) {
     MOZ_ASSERT_UNREACHABLE("Should have an nsIImageLoadingContent");
-    nsAtomicContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                               aNonvisibleAction);
+    nsAtomicContainerFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
     return;
   }
 
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
+  imageLoader->OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 
-  if (aOldVisibility == Visibility::NONVISIBLE &&
-        (aNewVisibility == Visibility::MAY_BECOME_VISIBLE ||
-         aNewVisibility == Visibility::IN_DISPLAYPORT)) {
+  if (aNewVisibility == Visibility::APPROXIMATELY_VISIBLE) {
     MaybeDecodeForPredictedSize();
   }
 
-  nsAtomicContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                             aNonvisibleAction);
+  nsAtomicContainerFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 }
 
 nsIAtom*
@@ -2152,10 +2148,10 @@ nsImageFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 #endif
 
 nsIFrame::LogicalSides
-nsImageFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
+nsImageFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+                     StyleBoxDecorationBreak::Clone)) {
     return LogicalSides();
   }
   LogicalSides skip;

@@ -16,6 +16,7 @@
 #include "nsReadableUtils.h"
 #include "nsStringEnumerator.h"
 #include "nsIServiceManager.h" 
+#include "nsThreadUtils.h"
 
 #include "nsPSPrinters.h"
 #include "nsPaperPS.h"  /* Paper size list */
@@ -25,6 +26,7 @@
 #include "nsIFileStreams.h"
 #include "nsIFile.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
 
 #include "mozilla/Preferences.h"
 
@@ -160,7 +162,7 @@ already_AddRefed<PrintTarget> nsDeviceContextSpecGTK::MakePrintTarget()
     }
   }
 
-  IntSize size(width, height);
+  IntSize size = IntSize::Truncate(width, height);
 
   if (format == nsIPrintSettings::kOutputFormatPDF) {
     return PrintTargetPDF::CreateOrNull(stream, size);

@@ -111,8 +111,8 @@ class GamepadManager final : public nsIObserver,
   // Gamepad IPDL child
   // This pointer is only used by this singleton instance and
   // will be destroyed during the IPDL shutdown chain, so we
-  // don't need to refcount it here
-  GamepadEventChannelChild MOZ_NON_OWNING_REF *mChild;
+  // don't need to refcount it here.
+  nsTArray<GamepadEventChannelChild *> mChannelChildren;
 
  private:
 
@@ -124,7 +124,7 @@ class GamepadManager final : public nsIObserver,
   // explicitly interacted with a gamepad while this window
   // was focused, by pressing buttons or similar actions.
   bool WindowHasSeenGamepad(nsGlobalWindow* aWindow, uint32_t aIndex) const;
-  // Indicate that a window has recieved data from a gamepad.
+  // Indicate that a window has received data from a gamepad.
   void SetWindowHasSeenGamepad(nsGlobalWindow* aWindow, uint32_t aIndex,
                                bool aHasSeen = true);
 

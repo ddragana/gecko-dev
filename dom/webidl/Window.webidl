@@ -36,6 +36,8 @@ typedef any Transferable;
   [PutForwards=href, Unforgeable, Throws,
    CrossOriginReadable, CrossOriginWritable] readonly attribute Location? location;
   [Throws] readonly attribute History history;
+  [Func="CustomElementsRegistry::IsCustomElementsEnabled"]
+  readonly attribute CustomElementsRegistry customElements;
   [Replaceable, Throws] readonly attribute BarProp locationbar;
   [Replaceable, Throws] readonly attribute BarProp menubar;
   [Replaceable, Throws] readonly attribute BarProp personalbar;
@@ -57,7 +59,7 @@ typedef any Transferable;
   [Throws, CrossOriginReadable] attribute any opener;
   //[Throws] readonly attribute WindowProxy parent;
   [Replaceable, Throws, CrossOriginReadable] readonly attribute WindowProxy? parent;
-  [Throws] readonly attribute Element? frameElement;
+  [Throws, NeedsSubjectPrincipal] readonly attribute Element? frameElement;
   //[Throws] WindowProxy open(optional DOMString url = "about:blank", optional DOMString target = "_blank", [TreatNullAs=EmptyString] optional DOMString features = "", optional boolean replace = false);
   [Throws, UnsafeInPrerendering] WindowProxy? open(optional DOMString url = "", optional DOMString target = "", [TreatNullAs=EmptyString] optional DOMString features = "");
   // We think the indexed getter is a bug in the spec, it actually needs to live
@@ -73,16 +75,17 @@ typedef any Transferable;
   [Throws, Pref="browser.cache.offline.enable"] readonly attribute ApplicationCache applicationCache;
 
   // user prompts
-  [Throws, UnsafeInPrerendering] void alert();
-  [Throws, UnsafeInPrerendering] void alert(DOMString message);
-  [Throws, UnsafeInPrerendering] boolean confirm(optional DOMString message = "");
-  [Throws, UnsafeInPrerendering] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] void alert();
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] void alert(DOMString message);
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] boolean confirm(optional DOMString message = "");
+  [Throws, UnsafeInPrerendering, NeedsSubjectPrincipal] DOMString? prompt(optional DOMString message = "", optional DOMString default = "");
   [Throws, UnsafeInPrerendering] void print();
   //[Throws] any showModalDialog(DOMString url, optional any argument);
-  [Throws, Func="nsGlobalWindow::IsShowModalDialogEnabled", UnsafeInPrerendering]
+  [Throws, Func="nsGlobalWindow::IsShowModalDialogEnabled", UnsafeInPrerendering, NeedsSubjectPrincipal]
   any showModalDialog(DOMString url, optional any argument, optional DOMString options = "");
 
-  [Throws, CrossOriginCallable] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
+  [Throws, CrossOriginCallable, NeedsSubjectPrincipal]
+  void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
   // also has obsolete members
 };
@@ -126,7 +129,7 @@ Window implements WindowSessionStorage;
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject]
 interface WindowLocalStorage {
-  [Throws] readonly attribute Storage? localStorage;
+  [Throws, NeedsSubjectPrincipal] readonly attribute Storage? localStorage;
 };
 Window implements WindowLocalStorage;
 
@@ -269,8 +272,11 @@ Window implements SpeechSynthesisGetter;
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject]
 interface WindowModal {
-  [Throws, Func="nsGlobalWindow::IsModalContentWindow"] readonly attribute any dialogArguments;
-  [Throws, Func="nsGlobalWindow::IsModalContentWindow"] attribute any returnValue;
+  [Throws, Func="nsGlobalWindow::IsModalContentWindow", NeedsSubjectPrincipal]
+  readonly attribute any dialogArguments;
+
+  [Throws, Func="nsGlobalWindow::IsModalContentWindow", NeedsSubjectPrincipal]
+  attribute any returnValue;
 };
 Window implements WindowModal;
 
@@ -463,11 +469,11 @@ interface ChromeWindow {
   [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void                      setCursor(DOMString cursor);
 
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      maximize();
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      minimize();
-  [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
+  [Func="nsGlobalWindow::IsPrivilegedChromeWindow", UnsafeInPrerendering]
   void                      restore();
 
   /**
@@ -499,6 +505,15 @@ interface ChromeWindow {
    */
   [Throws, Func="nsGlobalWindow::IsPrivilegedChromeWindow"]
   void beginWindowMove(Event mouseDownEvent, optional Element? panel = null);
+};
+
+partial interface Window {
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplayconnect;
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplaydisconnect;
+  [Pref="dom.vr.enabled"]
+  attribute EventHandler onvrdisplaypresentchange;
 };
 
 Window implements ChromeWindow;

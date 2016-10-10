@@ -73,6 +73,11 @@ public:
 
   void Decrypted(GMPBuffer* aBuffer, GMPErr aResult) override;
 
+  void BatchedKeyStatusChanged(const char* aSessionId,
+                               uint32_t aSessionIdLength,
+                               const GMPMediaKeyInfo* aKeyInfos,
+                               uint32_t aKeyInfosLength) override;
+
   // GMPDecryptorHost
   void GetSandboxVoucher(const uint8_t** aVoucher,
                          uint32_t* aVoucherLength) override;
@@ -83,7 +88,8 @@ private:
   ~GMPDecryptorChild();
 
   // GMPDecryptorChild
-  bool RecvInit() override;
+  bool RecvInit(const bool& aDistinctiveIdentifierRequired,
+                const bool& aPersistentStateRequired) override;
 
   bool RecvCreateSession(const uint32_t& aCreateSessionToken,
                          const uint32_t& aPromiseId,

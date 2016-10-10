@@ -15,25 +15,38 @@ from .generator import TaskGraphGenerator
 from .create import create_tasks
 from .parameters import Parameters
 from .target_tasks import get_method
+from .taskgraph import TaskGraph
+
+from taskgraph.util.templates import Templates
+from taskgraph.util.time import (
+    json_time_from_now,
+    current_json_time,
+)
 
 logger = logging.getLogger(__name__)
+
 ARTIFACTS_DIR = 'artifacts'
-
-logger = logging.getLogger(__name__)
+GECKO = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
 
 # For each project, this gives a set of parameters specific to the project.
 # See `taskcluster/docs/parameters.rst` for information on parameters.
 PER_PROJECT_PARAMETERS = {
     'try': {
         'target_tasks_method': 'try_option_syntax',
-        # for try, if a task was specified as a target, it should
-        # not be optimized away
-        'optimize_target_tasks': False,
+        # Always perform optimization.  This makes it difficult to use try
+        # pushes to run a task that would otherwise be optimized, but is a
+        # compromise to avoid essentially disabling optimization in try.
+        'optimize_target_tasks': True,
+    },
+
+    'ash': {
+        'target_tasks_method': 'ash_tasks',
+        'optimize_target_tasks': True,
     },
 
     # the default parameters are used for projects that do not match above.
     'default': {
-        'target_tasks_method': 'all_builds_and_tests',
+        'target_tasks_method': 'default',
         'optimize_target_tasks': True,
     }
 }
@@ -64,8 +77,15 @@ def taskgraph_decision(options):
     # write out the parameters used to generate this graph
     write_artifact('parameters.yml', dict(**parameters))
 
+    # write out the yml file for action tasks
+    write_artifact('action.yml', get_action_yml(parameters))
+
     # write out the full graph for reference
-    write_artifact('full-task-graph.json', tgg.full_task_graph.to_json())
+    full_task_json = tgg.full_task_graph.to_json()
+    write_artifact('full-task-graph.json', full_task_json)
+
+    # this is just a test to check whether the from_json() function is working
+    _, _ = TaskGraph.from_json(full_task_json)
 
     # write out the target task set to allow reproducing this as input
     write_artifact('target-tasks.json', tgg.target_task_set.tasks.keys())
@@ -76,7 +96,7 @@ def taskgraph_decision(options):
     write_artifact('label-to-taskid.json', tgg.label_to_taskid)
 
     # actually create the graph
-    create_tasks(tgg.optimized_task_graph, tgg.label_to_taskid)
+    create_tasks(tgg.optimized_task_graph, tgg.label_to_taskid, parameters)
 
 
 def get_decision_parameters(options):
@@ -93,10 +113,17 @@ def get_decision_parameters(options):
         'message',
         'project',
         'pushlog_id',
+        'pushdate',
         'owner',
         'level',
+        'triggered_by',
         'target_tasks_method',
     ] if n in options}
+
+    # owner must be an email, but sometimes (e.g., for ffxbld) it is not, in which
+    # case, fake it
+    if '@' not in parameters['owner']:
+        parameters['owner'] += '@noreply.mozilla.org'
 
     project = parameters['project']
     try:
@@ -106,6 +133,10 @@ def get_decision_parameters(options):
                        "PER_PROJECT_PARAMETERS in {} to customize behavior "
                        "for this project".format(project, __file__))
         parameters.update(PER_PROJECT_PARAMETERS['default'])
+
+    # `target_tasks_method` has higher precedence than `project` parameters
+    if options.get('target_tasks_method'):
+        parameters['target_tasks_method'] = options['target_tasks_method']
 
     return Parameters(parameters)
 
@@ -123,3 +154,15 @@ def write_artifact(filename, data):
             json.dump(data, f, sort_keys=True, indent=2, separators=(',', ': '))
     else:
         raise TypeError("Don't know how to write to {}".format(filename))
+
+
+def get_action_yml(parameters):
+    templates = Templates(os.path.join(GECKO, "taskcluster/taskgraph"))
+    action_parameters = parameters.copy()
+    action_parameters.update({
+        "decision_task_id": "{{decision_task_id}}",
+        "task_labels": "{{task_labels}}",
+        "from_now": json_time_from_now,
+        "now": current_json_time()
+    })
+    return templates.load('action.yml', action_parameters)
