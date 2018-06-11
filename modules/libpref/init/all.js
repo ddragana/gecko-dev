@@ -1772,6 +1772,9 @@ pref("network.http.focused_window_transaction_ratio", "0.9");
 // Whether or not we give more priority to active tab.
 // Note that this requires restart for changes to take effect.
 pref("network.http.active_tab_priority", true);
+
+// Enable/disable sni encryption.
+pref("network.sts.esni_enabled", true);
 // </http>
 
 // default values for FTP
