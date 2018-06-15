@@ -812,10 +812,12 @@ nsHostResolver::ResolveHost(const char             *host,
                 // lookup in the background
                 ConditionallyRefreshRecord(rec, host);
 
-                if (rec->negative && !type) {
+                if (rec->negative) {
                     LOG(("  Negative cache entry for host [%s].\n", host));
-                    Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
-                                          METHOD_NEGATIVE_HIT);
+                    if (!type) {
+                        Telemetry::Accumulate(Telemetry::DNS_LOOKUP_METHOD2,
+                                              METHOD_NEGATIVE_HIT);
+                    }
                     status = NS_ERROR_UNKNOWN_HOST;
                 }
             } else if (rec->addr) {
