@@ -1318,6 +1318,8 @@ char* nsHttpTransaction::LocateHttpStart(char* buf, uint32_t len,
   static const uint32_t HTTPHeaderLen = sizeof(HTTPHeader) - 1;
   static const char HTTP2Header[] = "HTTP/2.0";
   static const uint32_t HTTP2HeaderLen = sizeof(HTTP2Header) - 1;
+  static const char HTTP3Header[] = "HTTP/3.0";
+  static const uint32_t HTTP3HeaderLen = sizeof(HTTP2Header) - 1;
   // ShoutCast ICY is treated as HTTP/1.0
   static const char ICYHeader[] = "ICY ";
   static const uint32_t ICYHeaderLen = sizeof(ICYHeader) - 1;
@@ -1367,6 +1369,12 @@ char* nsHttpTransaction::LocateHttpStart(char* buf, uint32_t len,
     if (firstByte && !mInvalidResponseBytesRead && len >= HTTP2HeaderLen &&
         (PL_strncasecmp(buf, HTTP2Header, HTTP2HeaderLen) == 0)) {
       LOG(("nsHttpTransaction:: Identified HTTP/2.0 treating as 1.x\n"));
+      return buf;
+    }
+
+    if (firstByte && !mInvalidResponseBytesRead && len >= HTTP3HeaderLen &&
+        (PL_strncasecmp(buf, HTTP3Header, HTTP3HeaderLen) == 0)) {
+      LOG(("nsHttpTransaction:: Identified HTTP/3.0 treating as 1.x\n"));
       return buf;
     }
 
@@ -1446,7 +1454,7 @@ nsresult nsHttpTransaction::ParseHead(char* buf, uint32_t count,
   nsresult rv;
   uint32_t len;
   char* eol;
-
+LOG(("DDDDD %s", buf));
   LOG(("nsHttpTransaction::ParseHead [count=%u]\n", count));
 
   *countRead = 0;
@@ -1480,6 +1488,7 @@ nsresult nsHttpTransaction::ParseHead(char* buf, uint32_t count,
       // tolerate only minor junk before the status line
       mHttpResponseMatched = true;
       char* p = LocateHttpStart(buf, std::min<uint32_t>(count, 11), true);
+LOG(("DDDDD %p", p));
       if (!p) {
         // Treat any 0.9 style response of a put as a failure.
         if (mRequestHead->IsPut()) return NS_ERROR_ABORT;
@@ -1489,6 +1498,7 @@ nsresult nsHttpTransaction::ParseHead(char* buf, uint32_t count,
         mHaveAllHeaders = true;
         return NS_OK;
       }
+LOG(("DDDDD %s", p));
       if (p > buf) {
         // skip over the junk
         mInvalidResponseBytesRead += p - buf;

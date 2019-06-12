@@ -1528,7 +1528,7 @@ nsresult nsHttpConnectionMgr::TryDispatchTransaction(
   // essentially pipelining without head of line blocking
 
   if (!(caps & NS_HTTP_DISALLOW_SPDY) && gHttpHandler->IsSpdyEnabled()) {
-    RefPtr<nsHttpConnection> conn = GetSpdyActiveConn(ent);
+    RefPtr<nsHttpConnection> conn = GetH2or3ActiveConn(ent);
     if (conn) {
       if (trans->IsWebsocketUpgrade() && !conn->CanAcceptWebsocket()) {
         // This is a websocket transaction and we already have a h2 connection
@@ -1756,7 +1756,7 @@ nsresult nsHttpConnectionMgr::DispatchTransaction(nsConnectionEntry* ent,
   // when a muxed connection (e.g. h2) becomes available.
   trans->CancelPacing(NS_OK);
 
-  if (conn->UsingSpdy()) {
+  if (conn->UsingSpdy() || conn->UsingHttp3()) {
     LOG(
         ("Spdy Dispatch Transaction via Activate(). Transaction host = %s, "
          "Connection host = %s\n",
@@ -2118,7 +2118,7 @@ void nsHttpConnectionMgr::DispatchSpdyPendingQ(
 // coalescing hash table
 
 void nsHttpConnectionMgr::ProcessSpdyPendingQ(nsConnectionEntry* ent) {
-  nsHttpConnection* conn = GetSpdyActiveConn(ent);
+  nsHttpConnection* conn = GetH2or3ActiveConn(ent);
   if (!conn || !conn->CanDirectlyActivate()) {
     return;
   }
@@ -2147,9 +2147,10 @@ void nsHttpConnectionMgr::OnMsgProcessAllSpdyPendingQ(int32_t, ARefBase*) {
   }
 }
 
+//TODO(dragana): this needs to allow one h2 and one h3 connection if we have DISABLE_QUIC flag also for a fallback.
 // Given a connection entry, return an active h2 connection
 // that can be directly activated or null
-nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
+nsHttpConnection* nsHttpConnectionMgr::GetH2or3ActiveConn(
     nsConnectionEntry* ent) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(ent);
@@ -2185,7 +2186,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
     for (int32_t index = ent->mHalfOpenFastOpenBackups.Length() - 1; index >= 0;
          --index) {
       LOG(
-          ("GetSpdyActiveConn() shutting down connection in fast "
+          ("GetH2or3ActiveConn() shutting down connection in fast "
            "open state (%p) because we have an experienced spdy "
            "connection (%p).\n",
            ent->mHalfOpenFastOpenBackups[index].get(), experienced));
@@ -2194,7 +2195,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
     }
 
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2or3ActiveConn() request for ent %p %s "
          "found an active experienced connection %p in native connection "
          "entry\n",
          ent, ci->HashKey().get(), experienced));
@@ -2203,7 +2204,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
 
   if (noExperience) {
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2or3ActiveConn() request for ent %p %s "
          "found an active but inexperienced connection %p in native connection "
          "entry\n",
          ent, ci->HashKey().get(), noExperience));
@@ -2215,14 +2216,14 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
   nsHttpConnection* existingConn = FindCoalescableConnection(ent, false);
   if (existingConn) {
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2or3ActiveConn() request for ent %p %s "
          "found an active connection %p in the coalescing hashtable\n",
          ent, ci->HashKey().get(), existingConn));
     return existingConn;
   }
 
   LOG(
-      ("GetSpdyActiveConn() request for ent %p %s "
+      ("GetH2or3ActiveConn() request for ent %p %s "
        "did not find an active connection\n",
        ent, ci->HashKey().get()));
   return nullptr;
@@ -3785,9 +3786,9 @@ nsHttpConnectionMgr::GetOrCreateConnectionEntry(
   anonInvertedCI->SetAnonymous(!specificCI->GetAnonymous());
   nsConnectionEntry* invertedEnt = mCT.GetWeak(anonInvertedCI->HashKey());
   if (invertedEnt) {
-    nsHttpConnection* h2conn = GetSpdyActiveConn(invertedEnt);
-    if (h2conn && h2conn->IsExperienced() && h2conn->NoClientCertAuth()) {
-      MOZ_ASSERT(h2conn->UsingSpdy());
+    nsHttpConnection* h2or3conn = GetH2or3ActiveConn(invertedEnt);
+    if (h2or3conn && h2or3conn->IsExperienced() && h2or3conn->NoClientCertAuth()) {
+      MOZ_ASSERT(h2or3conn->UsingSpdy() || h2or3conn->UsingHttp3());
       LOG(
           ("GetOrCreateConnectionEntry is coalescing h2 an/onymous "
            "connections, ent=%p",
@@ -3979,12 +3980,17 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
   const char* socketTypes[1];
   uint32_t typeCount = 0;
   const nsHttpConnectionInfo* ci = mEnt->mConnInfo;
-  if (ci->FirstHopSSL()) {
-    socketTypes[typeCount++] = "ssl";
+  if (!isBackup && ci->FirstHopSSL()) {
+    socketTypes[typeCount++] = "quic";
+    mHttp3Session = new Http3Session();
   } else {
-    socketTypes[typeCount] = gHttpHandler->DefaultSocketType();
-    if (socketTypes[typeCount]) {
-      typeCount++;
+    if (ci->FirstHopSSL()) {
+      socketTypes[typeCount++] = "ssl";
+    } else {
+      socketTypes[typeCount] = gHttpHandler->DefaultSocketType();
+      if (socketTypes[typeCount]) {
+        typeCount++;
+      }
     }
   }
 
@@ -4338,8 +4344,23 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnOutputStreamReady(
        mEnt->mConnInfo->Origin(), out == mStreamOut ? "primary" : "backup"));
 
   mEnt->mDoNotDestroy = true;
-  gHttpHandler->ConnMgr()->RecvdConnect();
 
+  if (mHttp3Session && (out == mStreamOut)) {
+    nsresult rv = NS_OK;
+    mHttp3Session->Process(out, mStreamIn);
+    if (mHttp3Session->IsConnected()) {
+      gHttpHandler->ConnMgr()->RecvdConnect();
+      rv = SetupConn(out, false, mHttp3Session);
+    } else {
+      out->AsyncWait(this, 0, 0, nullptr);
+    }
+    if (mEnt) {
+      mEnt->mDoNotDestroy = false;
+    }
+    return rv;
+  }
+
+  gHttpHandler->ConnMgr()->RecvdConnect();
   CancelBackupTimer();
 
   if (mFastOpenInProgress) {
@@ -4737,10 +4758,10 @@ void nsHttpConnectionMgr::nsHalfOpenSocket::FastOpenNotSupported() {
 }
 
 nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
-    nsIAsyncOutputStream* out, bool aFastOpen) {
+    nsIAsyncOutputStream* out, bool aFastOpen, Http3Session* aHttp3Session /* = nullptr */) {
   MOZ_ASSERT(!aFastOpen || (out == mStreamOut));
   // assign the new socket to the http connection
-  RefPtr<nsHttpConnection> conn = new nsHttpConnection();
+  RefPtr<nsHttpConnection> conn = new nsHttpConnection(aHttp3Session);
   LOG(
       ("nsHalfOpenSocket::SetupConn "
        "Created new nshttpconnection %p\n",
@@ -4845,7 +4866,14 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
 
   // if this is still in the pending list, remove it and dispatch it
   RefPtr<PendingTransactionInfo> pendingTransInfo = FindTransactionHelper(true);
-  if (pendingTransInfo) {
+  if (aHttp3Session) {
+    aHttp3Session->SetConnection(new ConnectionHandle(conn));
+    gHttpHandler->ConnMgr()->AddActiveConn(conn, mEnt);
+    if (pendingTransInfo) {
+      rv = gHttpHandler->ConnMgr()->DispatchTransaction(
+        mEnt, pendingTransInfo->mTransaction, conn);
+    }
+  } else if (pendingTransInfo) {
     MOZ_ASSERT(!mSpeculative, "Speculative Half Open found mTransaction");
 
     gHttpHandler->ConnMgr()->AddActiveConn(conn, mEnt);
@@ -5201,7 +5229,7 @@ bool nsHttpConnectionMgr::nsConnectionEntry::AvailableForDispatchNow() {
     return true;
   }
 
-  return gHttpHandler->ConnMgr()->GetSpdyActiveConn(this) ? true : false;
+  return gHttpHandler->ConnMgr()->GetH2or3ActiveConn(this) ? true : false;
 }
 
 bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
@@ -5221,6 +5249,8 @@ bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
       info.rtt = ent->mActiveConns[i]->Rtt();
       if (ent->mActiveConns[i]->UsingSpdy()) {
         info.SetHTTP2ProtocolVersion(ent->mActiveConns[i]->GetSpdyVersion());
+      } else if  (ent->mActiveConns[i]->UsingHttp3()) {
+        info.SetHTTP3ProtocolVersion();
       } else {
         info.SetHTTP1ProtocolVersion(
             ent->mActiveConns[i]->GetLastHttpResponseVersion());

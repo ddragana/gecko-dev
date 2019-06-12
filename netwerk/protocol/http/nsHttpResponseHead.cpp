@@ -1085,7 +1085,9 @@ void nsHttpResponseHead::ParseVersion(const char* str) {
   int major = atoi(str + 1);
   int minor = atoi(p);
 
-  if ((major > 2) || ((major == 2) && (minor >= 0)))
+  if ((major > 3) || ((major == 3) && (minor >= 0)))
+    mVersion = HttpVersion::v3_0;
+  else if ((major == 2) && (minor >= 0))
     mVersion = HttpVersion::v2_0;
   else if ((major == 1) && (minor >= 1))
     // at least HTTP/1.1

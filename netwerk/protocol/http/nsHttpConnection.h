@@ -24,6 +24,8 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsITimer.h"
 
+#include "Http3Session.h"
+
 class nsISocketTransport;
 class nsISSLSocketControl;
 
@@ -71,7 +73,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NUDGETUNNELCALLBACK
 
-  nsHttpConnection();
+  explicit nsHttpConnection(Http3Session* aHttp3Session = nullptr);
 
   // Initialize the connection:
   //  info        - specifies the connection parameters.
@@ -183,6 +185,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   bool UsingSpdy() { return (mUsingSpdyVersion != SpdyVersion::NONE); }
   SpdyVersion GetSpdyVersion() { return mUsingSpdyVersion; }
   bool EverUsedSpdy() { return mEverUsedSpdy; }
+  bool UsingHttp3() { return !!mHttp3Session; }
   PRIntervalTime Rtt() { return mRtt; }
 
   // true when connection SSL NPN phase is complete and we know
@@ -223,7 +226,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
 
   // Check active connections for traffic (or not). SPDY connections send a
   // ping, ordinary HTTP connections get some time to get traffic to be
-  // considered alive.
+  // considered alive. For http3 connection we do not need to do anything here.
   void CheckForTraffic(bool check);
 
   // NoTraffic() returns true if there's been no traffic on the (non-spdy)
@@ -442,6 +445,9 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
 
   nsTArray<HttpTrafficCategory> mTrafficCategory;
   bool mThroughCaptivePortal;
+
+  //QUIC
+  RefPtr<Http3Session> mHttp3Session;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpConnection, NS_HTTPCONNECTION_IID)

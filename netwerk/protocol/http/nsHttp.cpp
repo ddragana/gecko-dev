@@ -18,6 +18,7 @@
 #include "nsHttpHandler.h"
 #include "nsICacheEntry.h"
 #include "nsIRequest.h"
+#include "nsJSUtils.h"
 #include <errno.h>
 #include <functional>
 

@@ -20,6 +20,7 @@
 #include "ARefBase.h"
 #include "nsWeakReference.h"
 #include "TCPFastOpen.h"
+#include "Http3Session.h"
 
 #include "nsINamed.h"
 #include "nsIObserver.h"
@@ -452,7 +453,7 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
     void CancelFastOpenConnection();
 
    private:
-    nsresult SetupConn(nsIAsyncOutputStream* out, bool aFastOpen);
+    nsresult SetupConn(nsIAsyncOutputStream* out, bool aFastOpen, Http3Session* aHttp3Session = nullptr);
 
     // To find out whether |mTransaction| is still in the connection entry's
     // pending queue. If the transaction is found and |removeWhenFound| is
@@ -514,6 +515,8 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
     nsCOMPtr<nsISocketTransport> mBackupTransport;
     nsCOMPtr<nsIAsyncOutputStream> mBackupStreamOut;
     nsCOMPtr<nsIAsyncInputStream> mBackupStreamIn;
+
+    RefPtr<Http3Session> mHttp3Session;
   };
   friend class nsHalfOpenSocket;
 
@@ -651,7 +654,7 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
                                                        bool justKidding);
   void UpdateCoalescingForNewConn(nsHttpConnection* conn,
                                   nsConnectionEntry* ent);
-  nsHttpConnection* GetSpdyActiveConn(nsConnectionEntry* ent);
+  nsHttpConnection* GetH2or3ActiveConn(nsConnectionEntry* ent);
 
   void ProcessSpdyPendingQ(nsConnectionEntry* ent);
   void DispatchSpdyPendingQ(nsTArray<RefPtr<PendingTransactionInfo>>& pendingQ,

@@ -63,6 +63,8 @@ class nsSocketInputStream : public nsIAsyncInputStream {
   // called by the socket transport on the socket thread...
   void OnSocketReady(nsresult condition);
 
+//  void SetUseQuic(PRNetAddr *addr);
+
  private:
   nsSocketTransport* mTransport;
   ThreadSafeAutoRefCnt mReaderRefCnt;
@@ -72,6 +74,8 @@ class nsSocketInputStream : public nsIAsyncInputStream {
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   uint32_t mCallbackFlags;
   uint64_t mByteCount;
+//  PRNetAddr mAddr;
+//  bool mUsingQuic;
 };
 
 //-----------------------------------------------------------------------------
@@ -92,6 +96,8 @@ class nsSocketOutputStream : public nsIAsyncOutputStream {
   // called by the socket transport on the socket thread...
   void OnSocketReady(nsresult condition);
 
+//  void SetUseQuic(PRNetAddr *addr);
+
  private:
   static nsresult WriteFromSegments(nsIInputStream*, void*, const char*,
                                     uint32_t offset, uint32_t count,
@@ -105,6 +111,8 @@ class nsSocketOutputStream : public nsIAsyncOutputStream {
   nsCOMPtr<nsIOutputStreamCallback> mCallback;
   uint32_t mCallbackFlags;
   uint64_t mByteCount;
+//  PRNetAddr mAddr;
+//  bool mUsingQuic;
 };
 
 //-----------------------------------------------------------------------------
@@ -483,6 +491,8 @@ class nsSocketTransport final : public nsASocketHandler,
   // callback when mFD is nulled out to make sure the ssl layer cannot call
   // the callback after nsSocketTransport is destroyed.
   bool mSSLCallbackSet;
+
+  bool mUsingQuic;
 };
 
 }  // namespace net

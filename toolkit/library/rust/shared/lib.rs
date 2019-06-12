@@ -47,6 +47,8 @@ extern crate bookmark_sync;
 
 extern crate arrayvec;
 
+extern crate neqo_glue;
+
 use std::boxed::Box;
 use std::env;
 use std::ffi::{CStr, CString};

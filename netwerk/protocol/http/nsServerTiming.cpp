@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsServerTiming.h"
+#include "nsHttp.h"
 
 NS_IMPL_ISUPPORTS(nsServerTiming, nsIServerTiming)
 
