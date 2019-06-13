@@ -1454,7 +1454,7 @@ nsresult nsHttpTransaction::ParseHead(char* buf, uint32_t count,
   nsresult rv;
   uint32_t len;
   char* eol;
-LOG(("DDDDD %s", buf));
+
   LOG(("nsHttpTransaction::ParseHead [count=%u]\n", count));
 
   *countRead = 0;
@@ -1488,7 +1488,7 @@ LOG(("DDDDD %s", buf));
       // tolerate only minor junk before the status line
       mHttpResponseMatched = true;
       char* p = LocateHttpStart(buf, std::min<uint32_t>(count, 11), true);
-LOG(("DDDDD %p", p));
+
       if (!p) {
         // Treat any 0.9 style response of a put as a failure.
         if (mRequestHead->IsPut()) return NS_ERROR_ABORT;
@@ -1498,7 +1498,7 @@ LOG(("DDDDD %p", p));
         mHaveAllHeaders = true;
         return NS_OK;
       }
-LOG(("DDDDD %s", p));
+
       if (p > buf) {
         // skip over the junk
         mInvalidResponseBytesRead += p - buf;

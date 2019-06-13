@@ -92,93 +92,102 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
     bool* again) {
   Http3Event event = mHttp3Connection->get_event();
 
-  if (event.tag == Http3Event::Tag::NoEvent) {
-    *again = false;
-    Unused << ResumeRecv();
-    return NS_OK;
-  }
-
-  switch (event.tag) {
-    case Http3Event::Tag::HeaderReady:
-    case Http3Event::Tag::DataReadable:
-      {
-        MOZ_ASSERT(mConnected);
-        uint64_t id;
-        if (event.tag == Http3Event::Tag::HeaderReady) {
-          LOG(("Http3Session::ProcessEvent - HeaderReady"));
-          id = event.header_ready.stream_id;
-        } else {
-          LOG(("Http3Session::ProcessEvent - DataReadable"));
-          id = event.data_readable.stream_id;
-        }
-
-        Http3Stream* stream = mStreamIDHash.Get(id);
-        if (!stream) {
-          *again = false;
-          Unused << ResumeRecv();
-          return NS_OK;
-        }
-
-        nsresult rv = stream->WriteSegments(this, count, countWritten);
-        if (ASpdySession::SoftStreamError(rv)) {
-          CloseStream(stream,
-              (rv == NS_BINDING_RETARGETED) ? NS_BINDING_RETARGETED : NS_OK);
-          *again = false;
-          rv = ResumeRecv();
-          if (NS_FAILED(rv)) {
-            LOG3(("ResumeRecv returned code %x", static_cast<uint32_t>(rv)));
+  while (event.tag != Http3Event::Tag::NoEvent) {
+    switch (event.tag) {
+      case Http3Event::Tag::HeaderReady:
+      case Http3Event::Tag::DataReadable:
+        {
+          MOZ_ASSERT(mConnected);
+          uint64_t id;
+          if (event.tag == Http3Event::Tag::HeaderReady) {
+            LOG(("Http3Session::ProcessEvent - HeaderReady"));
+            id = event.header_ready.stream_id;
+          } else {
+            LOG(("Http3Session::ProcessEvent - DataReadable"));
+            id = event.data_readable.stream_id;
           }
-          return NS_OK;
-        }
 
-        if (stream->Done()) {
-          LOG3(("Http3Session::ProcessEvent session=%p stream=%p 0x%" PRIx64 "\n"
-                "cleanup stream.\n",
-                this, stream, stream->StreamID()));
-          CloseStream(stream, NS_OK);
-        }
+          Http3Stream* stream = mStreamIDHash.Get(id);
+          if (!stream) {
+            *again = false;
+            Unused << ResumeRecv();
+            return NS_OK;
+          }
 
-        if (NS_FAILED(rv)) {
-          LOG3(("Http3Session::ProcessEvent failed rv=%" PRIx32 " [this=%p].",
-                static_cast<uint32_t>(rv), this));
-          // maybe just blocked reading from network
-          if (rv == NS_BASE_STREAM_WOULD_BLOCK) rv = NS_OK;
+          nsresult rv = NS_OK;
+          bool pickupEOF = true; 
+          while (pickupEOF) {
+            rv = stream->WriteSegments(this, count, countWritten);
+            if (ASpdySession::SoftStreamError(rv)) {
+              CloseStream(stream,
+                  (rv == NS_BINDING_RETARGETED) ? NS_BINDING_RETARGETED : NS_OK);
+              *again = false;
+              rv = ResumeRecv();
+              if (NS_FAILED(rv)) {
+                LOG3(("ResumeRecv returned code %x", static_cast<uint32_t>(rv)));
+              }
+              return NS_OK;
+            }
+            if (!stream->RecvdFin()) {
+              // In RECEIVED_FIN state we need to give the httpTransaction the info
+              // that the transaction is closed. This may be done also by changing
+              // neqo-http3 events.
+              pickupEOF = false;
+            }
+          }
+
+          if (stream->Done()) {
+            LOG3(("Http3Session::ProcessEvent session=%p stream=%p 0x%" PRIx64 "\n"
+                  "cleanup stream.\n",
+                  this, stream, stream->StreamID()));
+            CloseStream(stream, NS_OK);
+          }
+
+          if (NS_FAILED(rv)) {
+            LOG3(("Http3Session::ProcessEvent failed rv=%" PRIx32 " [this=%p].",
+                  static_cast<uint32_t>(rv), this));
+            // maybe just blocked reading from network
+            if (rv == NS_BASE_STREAM_WOULD_BLOCK) rv = NS_OK;
+          }
+          return rv;
         }
-        return rv;
-      }
-      break;
-    case Http3Event::Tag::Reset:
-       LOG(("Http3Session::Process event - Reset"));
-       ResetRecvd(event.reset.stream_id, event.reset.error);
-       break;
-    case Http3Event::Tag::NewPushStream:
-       LOG(("Http3Session::Process event - NewPushStream"));
-       break;
-    case Http3Event::Tag::RequestsCreatable:
-       LOG(("Http3Session::Process event - StreamCreatable"));
-       ProcessPending();
-       break;
-    case Http3Event::Tag::ConnectionConnected:
-       LOG(("Http3Session::Process event - ConnectionConnected"));
-       mConnected = true;
-       break;
-    case Http3Event::Tag::GoawayReceived:
-       LOG(("Http3Session::Process event - GoawayReceived"));
-       MOZ_ASSERT(!mGoawayReceived);
-       mGoawayReceived = true;
-       break;
-    case Http3Event::Tag::ConnectionClosing:
-       LOG(("Http3Session::Process event - ConnectionClosing"));
-       mClosing = true;
-       break;
-    case Http3Event::Tag::ConnectionClosed:
-       LOG(("Http3Session::Process event - ConnectionClosed"));
-       CloseInternal(NS_OK, false);
-       break;
-    default:
-       break;
+        break;
+      case Http3Event::Tag::Reset:
+         LOG(("Http3Session::Process event - Reset"));
+         ResetRecvd(event.reset.stream_id, event.reset.error);
+         break;
+      case Http3Event::Tag::NewPushStream:
+         LOG(("Http3Session::Process event - NewPushStream"));
+         break;
+      case Http3Event::Tag::RequestsCreatable:
+         LOG(("Http3Session::Process event - StreamCreatable"));
+         ProcessPending();
+         break;
+      case Http3Event::Tag::ConnectionConnected:
+         LOG(("Http3Session::Process event - ConnectionConnected"));
+         mConnected = true;
+         break;
+      case Http3Event::Tag::GoawayReceived:
+         LOG(("Http3Session::Process event - GoawayReceived"));
+         MOZ_ASSERT(!mGoawayReceived);
+         mGoawayReceived = true;
+         break;
+      case Http3Event::Tag::ConnectionClosing:
+         LOG(("Http3Session::Process event - ConnectionClosing"));
+         mClosing = true;
+         break;
+      case Http3Event::Tag::ConnectionClosed:
+         LOG(("Http3Session::Process event - ConnectionClosed"));
+         CloseInternal(NS_OK, false);
+         break;
+      default:
+         break;
+    }
+    event = mHttp3Connection->get_event();
   }
 
+  *again = false;
+  Unused << ResumeRecv();
   return NS_OK;
 }
 
@@ -490,7 +499,7 @@ nsresult Http3Session::WriteSegments(nsAHttpSegmentWriter* writer,
 nsresult Http3Session::WriteSegmentsAgain(nsAHttpSegmentWriter* writer,
                                   uint32_t count,
                                   uint32_t* countWritten, bool* again) {
-  *again = false;
+  *again = true;
   if (writer) {
     mSegmentWriter = writer;
   }
