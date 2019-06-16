@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef QUIC_H__
-#define QUIC_H__
+#ifndef Http3Session_H__
+#define Http3Session_H__
 
 #include "nsISupportsImpl.h"
 #include "mozilla/net/NeqoHttp3Conn.h"
@@ -85,6 +85,11 @@ class Http3Session final : public nsAHttpTransaction,
   bool JoinConnection(const nsACString& hostname, int32_t port);
 
   void TransactionHasDataToWrite(nsAHttpTransaction* caller) override;
+
+  void SetSocketTransport(nsISocketTransport* aSocketTransport) {
+    mSocketTransport = aSocketTransport;
+  }
+  nsISocketTransport* SocketTransport() { return mSocketTransport; }
  private:
   ~Http3Session();
 
@@ -121,9 +126,12 @@ class Http3Session final : public nsAHttpTransaction,
 
   nsAHttpSegmentReader* mSegmentReader;
   nsAHttpSegmentWriter* mSegmentWriter;
+
+  // The underlying socket transport object is needed to propogate some events
+  nsISocketTransport* mSocketTransport;
 };
 
 }
 }
 
-#endif // QUIC_H__
+#endif // Http3Session_H__

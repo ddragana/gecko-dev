@@ -216,7 +216,9 @@ void nsHttpResponseHead::Flatten(nsACString& buf, bool pruneTransients) {
   if (mVersion == HttpVersion::v0_9) return;
 
   buf.AppendLiteral("HTTP/");
-  if (mVersion == HttpVersion::v2_0)
+  if (mVersion == HttpVersion::v3_0)
+    buf.AppendLiteral("3.0 ");
+  else if (mVersion == HttpVersion::v2_0)
     buf.AppendLiteral("2.0 ");
   else if (mVersion == HttpVersion::v1_1)
     buf.AppendLiteral("1.1 ");

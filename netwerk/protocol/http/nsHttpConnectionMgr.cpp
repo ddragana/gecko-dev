@@ -4152,6 +4152,10 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupPrimaryStreams() {
   rv = SetupStreams(getter_AddRefs(mSocketTransport), getter_AddRefs(mStreamIn),
                     getter_AddRefs(mStreamOut), false);
 
+  if (mHttp3Session) {
+    mHttp3Session->SetSocketTransport(mSocketTransport);
+  }
+
   LOG(("nsHalfOpenSocket::SetupPrimaryStream [this=%p ent=%s rv=%" PRIx32 "]",
        this, mEnt->mConnInfo->Origin(), static_cast<uint32_t>(rv)));
   if (NS_FAILED(rv)) {

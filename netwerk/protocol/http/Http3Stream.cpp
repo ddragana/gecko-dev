@@ -9,6 +9,7 @@
 #include "Http3Session.h"
 #include "Http3Stream.h"
 #include "nsHttpRequestHead.h"
+#include "nsISocketTransport.h"
 
 #include <stdio.h>
 
@@ -28,7 +29,10 @@ Http3Stream::Http3Stream(nsAHttpTransaction* httpTransaction,
     mDataReceived(false),
     mFlatResponseHeaders(nullptr),
     mFlatResponseHeadersLen(0),
-    mFlatResponseHeadersOffset(0)
+    mFlatResponseHeadersOffset(0),
+    mSocketTransport(session->SocketTransport()),
+    mTotalSent(0),
+    mTotalRead(0)
 {}
 
 void Http3Stream::Close(nsresult aResult) {
@@ -99,6 +103,11 @@ nsresult Http3Stream::OnReadSegment(const char* buf, uint32_t count,
     case PREPARING_HEADERS:
       GetHeadersString(buf, count, countRead);
 
+      if (*countRead) {
+        mTotalSent = *countRead;
+        mTransaction->OnTransportStatus(mSocketTransport, NS_NET_STATUS_SENDING_TO,
+            mTotalSent);
+      }
       if (mRequestHeadersDone && !mRequestStarted) {
         nsresult rv = TryActivating();
         if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
@@ -112,6 +121,9 @@ nsresult Http3Stream::OnReadSegment(const char* buf, uint32_t count,
       }
 
       if (mRequestStarted) {
+        mTransaction->OnTransportStatus(mSocketTransport, NS_NET_STATUS_WAITING_FOR,
+            0);
+
         mState = READING_HEADERS;
       }
       break;
@@ -146,6 +158,7 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
             count : mFlatResponseHeadersLen;
         memcpy(buf, mFlatResponseHeaders.get() + mFlatResponseHeadersOffset, *countWritten);
         mFlatResponseHeadersOffset += *countWritten;
+
         if (mFlatResponseHeadersLen == mFlatResponseHeadersOffset) {
           mFlatResponseHeadersLen = 0;
           mFlatResponseHeadersOffset = 0;
@@ -154,6 +167,10 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
         }
         if (*countWritten == 0 ) {
           rv = NS_BASE_STREAM_WOULD_BLOCK;
+        } else {
+          mTotalRead += *countWritten;
+          mTransaction->OnTransportStatus(mSocketTransport,
+              NS_NET_STATUS_RECEIVING_FROM, mTotalRead);
         }
       }
       break;
@@ -171,6 +188,10 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
           } else {
             rv = NS_BASE_STREAM_WOULD_BLOCK;
           }
+        } else {
+          mTotalRead += *countWritten;
+          mTransaction->OnTransportStatus(mSocketTransport,
+              NS_NET_STATUS_RECEIVING_FROM, mTotalRead);
         }
       }
       break;
