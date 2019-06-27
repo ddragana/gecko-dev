@@ -4,8 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(feature = "crypto")]
-pub use neqo_crypto::*;
+// Tracking of some useful statistics.
 
-#[cfg(not(feature = "crypto"))]
-pub use crate::nss_stub::*;
+#[derive(Default, Debug)]
+/// Connection statistics
+pub struct Stats {
+    /// Total packets received
+    pub packets_rx: u64,
+    /// Total packets sent
+    pub packets_tx: u64,
+    /// Duplicate packets received
+    pub dups_rx: u64,
+}

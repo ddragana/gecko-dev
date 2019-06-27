@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
 use crate::result;
@@ -59,7 +60,7 @@ impl Record {
                 self.epoch,
                 self.ct,
                 self.data.as_ptr(),
-                self.data.len() as c_uint,
+                to_c_uint(self.data.len())?,
             )
         };
         result::result(rv)
@@ -86,6 +87,11 @@ pub struct RecordList {
 impl RecordList {
     fn append(&mut self, epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) {
         self.records.push(Record::new(epoch, ct, data));
+    }
+
+    /// Filter out EndOfEarlyData messages.
+    pub fn remove_eoed(&mut self) {
+        self.records.retain(|rec| rec.epoch != 1);
     }
 }
 
@@ -172,7 +178,7 @@ impl AgentIoInput {
         qtrace!([self] "read {}", hex(src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(&src);
-        self.input = self.input.wrapping_offset(amount as isize);
+        self.input = self.input.wrapping_add(amount);
         self.available -= amount;
         Ok(amount)
     }
@@ -210,7 +216,8 @@ impl AgentIo {
         }
     }
 
-    unsafe fn borrow<'a>(fd: &'a PrFd) -> &'a mut AgentIo {
+    unsafe fn borrow(fd: &mut PrFd) -> &mut AgentIo {
+        #[allow(clippy::cast_ptr_alignment)]
         let io = (**fd).secret as *mut AgentIo;
         io.as_mut().unwrap()
     }
@@ -247,8 +254,8 @@ unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
     PR_SUCCESS
 }
 
-unsafe extern "C" fn agent_read(fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    let io = AgentIo::borrow(&fd);
+unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
+    let io = AgentIo::borrow(&mut fd);
     if amount <= 0 {
         return PR_FAILURE;
     }
@@ -259,13 +266,13 @@ unsafe extern "C" fn agent_read(fd: PrFd, buf: *mut c_void, amount: prio::PRInt3
 }
 
 unsafe extern "C" fn agent_recv(
-    fd: PrFd,
+    mut fd: PrFd,
     buf: *mut c_void,
     amount: prio::PRInt32,
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&fd);
+    let io = AgentIo::borrow(&mut fd);
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
     }
@@ -275,8 +282,12 @@ unsafe extern "C" fn agent_recv(
     }
 }
 
-unsafe extern "C" fn agent_write(fd: PrFd, buf: *const c_void, amount: prio::PRInt32) -> PrStatus {
-    let io = AgentIo::borrow(&fd);
+unsafe extern "C" fn agent_write(
+    mut fd: PrFd,
+    buf: *const c_void,
+    amount: prio::PRInt32,
+) -> PrStatus {
+    let io = AgentIo::borrow(&mut fd);
     if amount <= 0 {
         return PR_FAILURE;
     }
@@ -285,13 +296,13 @@ unsafe extern "C" fn agent_write(fd: PrFd, buf: *const c_void, amount: prio::PRI
 }
 
 unsafe extern "C" fn agent_send(
-    fd: PrFd,
+    mut fd: PrFd,
     buf: *const c_void,
     amount: prio::PRInt32,
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&fd);
+    let io = AgentIo::borrow(&mut fd);
 
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
@@ -300,13 +311,13 @@ unsafe extern "C" fn agent_send(
     amount as prio::PRInt32
 }
 
-unsafe extern "C" fn agent_available(fd: PrFd) -> prio::PRInt32 {
-    let io = AgentIo::borrow(&fd);
+unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
+    let io = AgentIo::borrow(&mut fd);
     io.input.available as prio::PRInt32
 }
 
-unsafe extern "C" fn agent_available64(fd: PrFd) -> prio::PRInt64 {
-    let io = AgentIo::borrow(&fd);
+unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
+    let io = AgentIo::borrow(&mut fd);
     io.input.available as prio::PRInt64
 }
 
@@ -327,7 +338,7 @@ unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionD
     PR_FAILURE
 }
 
-pub const METHODS: &'static prio::PRIOMethods = &prio::PRIOMethods {
+pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {
     file_type: prio::PRDescType::PR_DESC_LAYERED,
     close: Some(agent_close),
     read: Some(agent_read),

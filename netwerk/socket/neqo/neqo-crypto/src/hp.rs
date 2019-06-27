@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{
     PK11SymKey, PK11_Encrypt, PK11_GetBlockSize, PK11_GetMechanism, SECItem, SECItemType, SymKey,
@@ -49,9 +50,9 @@ pub fn extract_hp<S: Into<String>>(
     let mut secret: *mut PK11SymKey = null_mut();
 
     let (mech, key_size) = match cipher {
-        TLS_AES_128_GCM_SHA256 => (CKM_AES_ECB as CK_MECHANISM_TYPE, 16),
-        TLS_AES_256_GCM_SHA384 => (CKM_AES_ECB as CK_MECHANISM_TYPE, 32),
-        TLS_CHACHA20_POLY1305_SHA256 => (CKM_NSS_CHACHA20_CTR as CK_MECHANISM_TYPE, 32),
+        TLS_AES_128_GCM_SHA256 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 16),
+        TLS_AES_256_GCM_SHA384 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 32),
+        TLS_CHACHA20_POLY1305_SHA256 => (CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR), 32),
         _ => unreachable!(),
     };
 
@@ -65,7 +66,7 @@ pub fn extract_hp<S: Into<String>>(
             null(),
             0,
             l.as_ptr() as *const c_char,
-            l.len() as c_uint,
+            to_c_uint(l.len())?,
             mech,
             key_size,
             &mut secret,
@@ -92,12 +93,12 @@ impl HpKey {
         let mut item = SECItem {
             type_: SECItemType::siBuffer,
             data: sample.as_ptr() as *mut u8,
-            len: sample.len() as c_uint,
+            len: to_c_uint(sample.len())?,
         };
         let zero = vec![0u8; block_size];
         let (iv, inbuf) = match () {
-            _ if mech == CKM_AES_ECB as CK_MECHANISM_TYPE => (null_mut(), sample),
-            _ if mech == CKM_NSS_CHACHA20_CTR as CK_MECHANISM_TYPE => {
+            _ if mech == CK_MECHANISM_TYPE::from(CKM_AES_ECB) => (null_mut(), sample),
+            _ if mech == CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR) => {
                 (&mut item as *mut SECItem, &zero[..])
             }
             _ => unreachable!(),
@@ -109,9 +110,9 @@ impl HpKey {
                 iv,
                 output_slice.as_mut_ptr(),
                 &mut output_len,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
                 inbuf.as_ptr() as *const u8,
-                inbuf.len() as c_uint,
+                to_c_uint(inbuf.len())?,
             )
         };
         result::result(rv)?;

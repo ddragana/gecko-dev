@@ -138,10 +138,9 @@ void neqo_http3conn_process_http3(NeqoHttp3Conn *conn);
 
 void neqo_http3conn_process_input(NeqoHttp3Conn *conn,
                                   const uint8_t *packet,
-                                  uint32_t len,
-                                  uint64_t cur_time);
+                                  uint32_t len);
 
-uint64_t neqo_http3conn_process_output(NeqoHttp3Conn *conn, uint64_t cur_time);
+uint64_t neqo_http3conn_process_output(NeqoHttp3Conn *conn);
 
 nsresult neqo_http3conn_read_data(NeqoHttp3Conn *conn,
                                   uint64_t stream_id,

@@ -4,15 +4,14 @@ version = "0.1.0"
 authors = ["EKR <ekr@rtfm.com>"]
 edition = "2018"
 
-[features]
-default = ["crypto"]
-crypto = ["neqo-crypto"]
-
 [dependencies]
-neqo-crypto = { path = "../neqo-crypto", optional = true }
+neqo-crypto = { path = "../neqo-crypto" }
 neqo-common = { path = "../neqo-common" }
 derive_more = "0.13"
 lazy_static = "1.0"
 rand = "0.6"
 slice-deque = "0.1.16"
 log = "0.4.0"
+
+[dev-dependencies]
+test-fixture = { path = "../test-fixture" }

@@ -4,28 +4,33 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::now;
-use neqo_crypto::init_db;
-use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
-use neqo_transport::{Connection, Datagram};
-//use regex::Regex;
+#![deny(warnings)]
+
+use neqo_common::{now, qinfo, Datagram};
+use neqo_crypto::{init_db, AntiReplay};
+use neqo_http3::{Http3Connection, Http3State};
+use neqo_transport::Connection;
 use std::collections::HashMap;
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::io;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
+use std::time::{Duration, Instant};
+
 use structopt::StructOpt;
+
+use mio::net::UdpSocket;
+use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio_extras::timer::{Builder, Timeout};
+
+const TIMER_TOKEN: Token = Token(0xffff_ffff);
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
 struct Args {
-    #[structopt(short = "h", long)]
-    /// Optional local address to bind to, defaults to the unspecified address.
-    host: Option<String>,
-
-    /// Port number.
-    #[structopt(short = "p", long, default_value = "443")]
-    port: u16,
+    /// List of IP:port to listen on
+    #[structopt(default_value = "[::]:4433")]
+    hosts: Vec<String>,
 
     #[structopt(short = "t", long, default_value = "128")]
     max_table_size: u32,
@@ -38,92 +43,61 @@ struct Args {
     db: PathBuf,
 
     #[structopt(short = "k", long, default_value = "key")]
-    /// Name of keys from NSS database.
-    key: Vec<String>,
+    /// Name of key from NSS database.
+    key: String,
 
-    #[structopt(short = "a", long, default_value = "h3")]
+    #[structopt(short = "a", long, default_value = "h3-20")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
-    alpn: Vec<String>,
-
-    #[structopt(short = "6", long)]
-    /// Use IPv6 instead of IPv4.
-    ipv6: bool,
+    alpn: String,
 }
 
 impl Args {
-    fn bind(&self) -> SocketAddr {
-        match (&self.host, self.ipv6) {
-            (Some(..), ..) => self
-                .to_socket_addrs()
-                .expect("Remote address error")
-                .next()
-                .expect("No remote addresses"),
-            (None, true) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), self.port),
-            (None, false) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), self.port),
-        }
+    fn host_socket_addrs(&self) -> Vec<SocketAddr> {
+        self.hosts
+            .iter()
+            .filter_map(|host| host.to_socket_addrs().ok())
+            .flat_map(|x| x)
+            .collect()
     }
 }
 
-impl ToSocketAddrs for Args {
-    type Iter = ::std::vec::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        let dflt = String::from(match self.ipv6 {
-            true => "::",
-            false => "0.0.0.0",
-        });
-        let h = self.host.as_ref().unwrap_or(&dflt);
-        // This is idiotic.  There is no path from hostname: String to IpAddr.
-        // And no means of controlling name resolution either.
-        fmt::format(format_args!("{}:{}", h, self.port)).to_socket_addrs()
-    }
-}
-
-fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
+fn http_serve(
+    request_headers: &[(String, String)],
+    _error: bool,
+) -> (Vec<(String, String)>, Vec<u8>) {
     println!("Serve a request");
 
-    let request_headers = cr.get_request_headers();
     println!("Headers: {:?}", request_headers);
 
-    let mut resp = String::new();
+    let path_hdr = request_headers.iter().find(|(k, _)| k == ":path");
 
-    for header in request_headers {
-        if header.0 == String::from(":path") {
-            println!("path {}", header.1);
-            let length;
-            match header.1.trim_matches(|p| p == '/').parse::<u32>() {
-                Ok(v) => {
-                    length = v;
-                }
-                Err(_) => {
-                    length = 0;
-                }
-            };
+    let default_ret = b"Hello World".to_vec();
 
-            if length == 0 {
-                resp.push_str("Hello World");
-            } else {
-                for _i in 0..length {
-                    resp.push('a');
-                }
+    let response = match path_hdr {
+        Some((_, path)) if !path.is_empty() => {
+            match path.trim_matches(|p| p == '/').parse::<usize>() {
+                Ok(v) => vec![b'a'; v],
+                Err(_) => default_ret,
             }
         }
-    }
+        _ => default_ret,
+    };
 
-    cr.set_response(
-        &vec![
+    (
+        vec![
             (String::from(":status"), String::from("200")),
-            (String::from("content-length"), resp.len().to_string()),
+            (String::from("content-length"), response.len().to_string()),
         ],
-        &resp,
-    );
+        response,
+    )
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
-            .send_to(&d[..], d.destination())
+            .send_to(d, d.destination())
             .expect("Error sending datagram");
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -131,71 +105,160 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), io::Error> {
     let args = Args::from_args();
-    assert!(args.key.len() > 0, "Need at least one key");
+    assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
+    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        .expect("unable to setup anti-replay");
 
-    // TODO(mt): listen on both v4 and v6.
-    let socket = match UdpSocket::bind(args.bind()) {
-        Err(err) => {
-            eprintln!("Unable to bind UDP socket: {}", err);
-            exit(1)
-        }
-        Ok(s) => s,
-    };
+    let poll = Poll::new()?;
 
-    let local_addr = match socket.local_addr() {
-        Err(err) => {
-            eprintln!("Socket local address not bound: {}", err);
-            exit(1)
-        }
-        Ok(s) => s,
-    };
+    let hosts = args.host_socket_addrs();
+    if hosts.is_empty() {
+        eprintln!("No valid hosts defined");
+        exit(1);
+    }
 
-    println!("Server waiting for connection on: {:?}", local_addr);
+    let mut sockets = Vec::new();
 
-    let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
-    let mut connections: HashMap<SocketAddr, Http3Connection> = HashMap::new();
-    loop {
-        let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+    let mut timer = Builder::default().build::<SocketAddr>();
+    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
+
+    for (i, host) in hosts.iter().enumerate() {
+        let socket = match UdpSocket::bind(&host) {
             Err(err) => {
-                eprintln!("UDP recv error: {}", err);
+                eprintln!("Unable to bind UDP socket: {}", err);
                 exit(1)
             }
-            Ok(res) => res,
+            Ok(s) => s,
         };
 
-        if sz == buf.len() {
-            eprintln!("Might have received more than {} bytes", buf.len());
-            continue;
-        }
-        if sz > 0 {
-            in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
+        let local_addr = match socket.local_addr() {
+            Err(err) => {
+                eprintln!("Socket local address not bound: {}", err);
+                exit(1)
+            }
+            Ok(s) => s,
+        };
+
+        let res = socket.only_v6();
+        let also_v4 = if res.is_ok() && !res.unwrap() {
+            " as well as V4"
+        } else {
+            ""
+        };
+        println!(
+            "Server waiting for connection on: {:?}{}",
+            local_addr, also_v4
+        );
+
+        poll.register(
+            &socket,
+            Token(i),
+            Ready::readable() | Ready::writable(),
+            PollOpt::edge(),
+        )?;
+        sockets.push(socket);
+    }
+
+    let buf = &mut [0u8; 2048];
+    let mut connections: HashMap<SocketAddr, (Http3Connection, Option<Timeout>)> = HashMap::new();
+
+    let mut events = Events::with_capacity(1024);
+
+    loop {
+        poll.poll(&mut events, None)?;
+        let mut in_dgrams = HashMap::new();
+        let mut out_dgrams = Vec::new();
+        for event in &events {
+            if event.token() == TIMER_TOKEN {
+                while let Some(remote_addr) = timer.poll() {
+                    qinfo!("Timer expired for {:?}", remote_addr);
+                    // Adds an entry to in_dgrams but doesn't add any
+                    // packets. This will cause the Connection to be
+                    // process()ed.
+                    in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
+                }
+            } else if let Some(socket) = sockets.get(event.token().0) {
+                let local_addr = hosts[event.token().0];
+
+                if !event.readiness().is_readable() {
+                    continue;
+                }
+
+                // Read all datagrams and group by remote host
+                loop {
+                    let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                        Err(err) => {
+                            eprintln!("UDP recv error: {:?}", err);
+                            exit(1);
+                        }
+                        Ok(res) => res,
+                    };
+
+                    if sz == buf.len() {
+                        eprintln!("Might have received more than {} bytes", buf.len());
+                    }
+
+                    if sz == 0 {
+                        eprintln!("zero length datagram received?");
+                    } else {
+                        let conn_dgrams = in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
+                        conn_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
+                    }
+                }
+            }
         }
 
-        let server = connections.entry(remote_addr).or_insert_with(|| {
-            println!("New connection from {:?}", remote_addr);
-            Http3Connection::new(
-                Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed"),
-                args.max_table_size,
-                args.max_blocked_streams,
-            )
-        });
-        server.set_new_stream_callback(http_serve);
+        // Process each connections' packets
+        for (remote_addr, mut dgrams) in in_dgrams {
+            let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
+                println!("New connection from {:?}", remote_addr);
+                (
+                    Http3Connection::new(
+                        Connection::new_server(
+                            &[args.key.clone()],
+                            &[args.alpn.clone()],
+                            &anti_replay,
+                        )
+                        .expect("must succeed"),
+                        args.max_table_size,
+                        args.max_blocked_streams,
+                        Some(Box::new(http_serve)),
+                    ),
+                    None,
+                )
+            });
 
-        // TODO use timer to set socket.set_read_timeout.
-        server.process_input(in_dgrams.drain(..), now());
-        if let Http3State::Closed(e) = server.state() {
-            eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
-            connections.remove(&remote_addr);
-            continue;
+            server.process_input(dgrams.drain(..), now());
+            if let Http3State::Closed(e) = server.state() {
+                println!("Closed connection from {:?}: {:?}", remote_addr, e);
+                if let Some(svr_timeout) = svr_timeout {
+                    timer.cancel_timeout(svr_timeout);
+                }
+                connections.remove(&remote_addr);
+                continue;
+            }
+
+            server.process_http3(now());
+
+            let (conn_out_dgrams, maybe_timeout) = server.process_output(now());
+            *svr_timeout = maybe_timeout.map(|timeout| {
+                if let Some(svr_timeout) = svr_timeout {
+                    timer.cancel_timeout(svr_timeout);
+                }
+                qinfo!("Setting timeout of {:?} for {:?}", timeout, remote_addr);
+                timer.set_timeout(timeout, remote_addr)
+            });
+
+            out_dgrams.extend(conn_out_dgrams);
         }
 
-        server.process_http3();
-        let (out_dgrams, _timer) = server.process_output(now());
-        emit_packets(&socket, &out_dgrams);
+        // TODO: this maybe isn't cool?
+        let first_socket = sockets.first().expect("must have at least one");
+        emit_packets(&first_socket, &out_dgrams);
     }
 }

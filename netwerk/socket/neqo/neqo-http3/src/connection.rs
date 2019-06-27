@@ -5,24 +5,22 @@
 // except according to those terms.
 
 use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
-use crate::recvable::RecvableWrapper;
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
-use neqo_common::data::Data;
-use neqo_common::readbuf::ReadBuf;
-use neqo_common::varint::decode_varint;
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{
+    qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
+    IncrementalDecoderResult,
+};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::connection::Role;
+use neqo_transport::Role;
 
-use neqo_transport::connection::Connection;
-use neqo_transport::frame::StreamType;
-use neqo_transport::{AppError, ConnectionEvent, Datagram, State};
+use neqo_transport::{AppError, Connection, ConnectionEvent, State, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::{Error, Res};
 
@@ -36,21 +34,24 @@ const NUM_PLACEHOLDERS_DEFAULT: u64 = 0;
 #[derive(Default, Debug)]
 struct ControlStreamLocal {
     stream_id: Option<u64>,
-    buf: Data,
+    buf: Vec<u8>,
 }
 
 impl ControlStreamLocal {
     pub fn send_frame(&mut self, f: HFrame) {
-        f.encode(&mut self.buf).unwrap();
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        self.buf.append(&mut enc.into());
     }
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         if let Some(stream_id) = self.stream_id {
-            if self.buf.remaining() != 0 {
-                let sent = conn.stream_send(stream_id, self.buf.as_mut_vec())?;
-                if sent == self.buf.remaining() {
+            if !self.buf.is_empty() {
+                let sent = conn.stream_send(stream_id, &self.buf[..])?;
+                if sent == self.buf.len() {
                     self.buf.clear();
                 } else {
-                    self.buf.read(sent);
+                    let b = self.buf.split_off(sent);
+                    self.buf = b;
                 }
             }
             return Ok(());
@@ -84,7 +85,7 @@ impl ControlStreamRemote {
 
     pub fn add_remote_stream(&mut self, stream_id: u64) -> Res<()> {
         qinfo!([self] "A new control stream {}.", stream_id);
-        if let Some(_) = self.stream_id {
+        if self.stream_id.is_some() {
             qdebug!([self] "A control stream already exists");
             return Err(Error::WrongStreamCount);
         }
@@ -105,41 +106,44 @@ impl ControlStreamRemote {
 
 #[derive(Debug)]
 struct NewStreamTypeReader {
-    reader: ReadBuf,
+    reader: IncrementalDecoder,
     fin: bool,
 }
 
 impl NewStreamTypeReader {
     pub fn new() -> NewStreamTypeReader {
         NewStreamTypeReader {
-            reader: ReadBuf::new(),
+            reader: IncrementalDecoder::decode_varint(),
             fin: false,
         }
     }
     pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
         // On any error we will only close this stream!
-        let mut w = RecvableWrapper::wrap(conn, stream_id);
         loop {
-            match self.reader.get_varint(&mut w) {
-                Ok((rv, fin)) => {
-                    if fin || rv == 0 {
-                        self.fin = fin;
-                        break None;
-                    }
-
-                    if self.reader.done() {
-                        match decode_varint(&mut self.reader) {
-                            Ok(v) => {
-                                break Some(v);
-                            }
-                            Err(_) => {
-                                self.fin = true;
-                                break None;
-                            }
+            let to_read = self.reader.min_remaining();
+            let mut buf = vec![0; to_read];
+            match conn.stream_recv(stream_id, &mut buf[..]) {
+                Ok((_, true)) => {
+                    self.fin = true;
+                    break None;
+                }
+                Ok((0, false)) => {
+                    break None;
+                }
+                Ok((amount, false)) => {
+                    let mut dec = Decoder::from(&buf[..amount]);
+                    match self.reader.consume(&mut dec) {
+                        IncrementalDecoderResult::Uint(v) => {
+                            break Some(v);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => {
+                            break None;
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    qdebug!([conn] "Error reading stream type for stream {}: {:?}", stream_id, e);
                     self.fin = true;
                     break None;
                 }
@@ -167,15 +171,16 @@ pub struct Http3Connection {
     new_streams: HashMap<u64, NewStreamTypeReader>,
     qpack_encoder: QPackEncoder,
     qpack_decoder: QPackDecoder,
-    request_streams_client: HashMap<u64, RequestStreamClient>,
-    request_streams_server: HashMap<u64, RequestStreamServer>,
     settings_received: bool,
     streams_are_readable: BTreeSet<u64>,
     streams_have_data_to_send: BTreeSet<u64>,
     // Client only
     events: Rc<RefCell<Http3Events>>,
+    request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
-    new_stream_callback: Option<Box<FnMut(&mut RequestStreamServer, bool)>>,
+    #[allow(clippy::type_complexity)]
+    handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+    request_streams_server: HashMap<u64, RequestStreamServer>,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -185,7 +190,13 @@ impl ::std::fmt::Display for Http3Connection {
 }
 
 impl Http3Connection {
-    pub fn new(c: Connection, max_table_size: u32, max_blocked_streams: u16) -> Http3Connection {
+    #[allow(clippy::type_complexity)]
+    pub fn new(
+        c: Connection,
+        max_table_size: u32,
+        max_blocked_streams: u16,
+        handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+    ) -> Http3Connection {
         qinfo!(
             "Create new http connection with max_table_size: {} and max_blocked_streams: {}",
             max_table_size,
@@ -210,7 +221,7 @@ impl Http3Connection {
             streams_are_readable: BTreeSet::new(),
             streams_have_data_to_send: BTreeSet::new(),
             events: Rc::new(RefCell::new(Http3Events::default())),
-            new_stream_callback: None,
+            handler,
         }
     }
 
@@ -225,9 +236,9 @@ impl Http3Connection {
     fn create_control_stream(&mut self) -> Res<()> {
         qdebug!([self] "create_control_stream.");
         self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
-        self.control_stream_local
-            .buf
-            .encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        let mut enc = Encoder::default();
+        enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        self.control_stream_local.buf.append(&mut enc.into());
         Ok(())
     }
 
@@ -258,11 +269,11 @@ impl Http3Connection {
 
     // This function takes the provided result and check for an error.
     // An error results in closing the connection.
-    fn check_result<T>(&mut self, res: Res<T>) -> bool {
+    fn check_result<T>(&mut self, now: Instant, res: Res<T>) -> bool {
         match &res {
             Err(e) => {
                 qinfo!([self] "Connection error: {}.", e);
-                self.close(e.code(), format!("{}", e));
+                self.close(now, e.code(), format!("{}", e));
                 true
             }
             _ => false,
@@ -273,77 +284,74 @@ impl Http3Connection {
         self.conn.role()
     }
 
-    fn check_state_change(&mut self) {
+    pub fn check_state_change(&mut self, now: Instant) {
         match self.state {
             Http3State::Initializing => {
                 if self.conn.state().clone() == State::Connected {
                     self.state = Http3State::Connected;
                     self.events.borrow_mut().connected();
                     let res = self.initialize_http3_connection();
-                    self.check_result(res);
+                    self.check_result(now, res);
                 }
             }
             Http3State::Connected => {
-              if let State::Closing(err, ..) = self.conn.state().clone() {
-                self.events.borrow_mut().connection_closing();
-                self.state = Http3State::Closing(
-                    match err.app_code() {
-                      Some(c) => c,
-                      None => 0,
+                if let State::Closing { error, .. } = self.conn.state().clone() {
+                    self.events.borrow_mut().connection_closing();
+                    self.state = Http3State::Closing(match error.app_code() {
+                        Some(c) => c,
+                        None => 0,
                     });
-              }
-            }
-            Http3State::Closing(err) => {
-                if let State::Closed(..) = *self.conn.state() {
-                    self.events.borrow_mut().connection_closed();
-                    self.state = Http3State::Closed(err);
                 }
             }
             _ => {}
         }
     }
 
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    pub fn process<I>(&mut self, in_dgrams: I, now: Instant) -> (Vec<Datagram>, Option<Duration>)
     where
         I: IntoIterator<Item = Datagram>,
     {
         qdebug!([self] "Process.");
-        self.process_input(in_dgrams, cur_time);
-        self.process_http3();
-        self.process_output(cur_time)
+        self.process_input(in_dgrams, now);
+        self.process_http3(now);
+        self.process_output(now)
     }
 
-    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: u64)
+    pub fn process_input<I>(&mut self, in_dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = Datagram>,
     {
         qdebug!([self] "Process input.");
-        self.conn.process_input(in_dgrams, cur_time);
-        self.check_state_change();
+        self.conn.process_input(in_dgrams, now);
+        self.check_state_change(now);
     }
 
-    pub fn process_http3(&mut self) {
+    pub fn conn(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+
+    pub fn process_http3(&mut self, now: Instant) {
         qdebug!([self] "Process http3 internal.");
         match self.state {
             Http3State::Connected | Http3State::GoingAway => {
                 let res = self.check_connection_events();
-                if self.check_result(res) {
+                if self.check_result(now, res) {
                     return;
                 }
                 let res = self.process_reading();
-                if self.check_result(res) {
+                if self.check_result(now, res) {
                     return;
                 }
                 let res = self.process_sending();
-                self.check_result(res);
+                self.check_result(now, res);
             }
             _ => {}
         }
     }
 
-    pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
+    pub fn process_output(&mut self, now: Instant) -> (Vec<Datagram>, Option<Duration>) {
         qdebug!([self] "Process output.");
-        self.conn.process_output(cur_time)
+        self.conn.process_output(now)
     }
 
     // If this return an error the connection must be closed.
@@ -373,7 +381,7 @@ impl Http3Connection {
             for stream_id in to_send {
                 let mut remove_stream = false;
                 if let Some(cs) = &mut self.request_streams_server.get_mut(&stream_id) {
-                    cs.send(&mut self.conn, &mut self.qpack_encoder)?;
+                    cs.send(&mut self.conn)?;
                     if cs.has_data_to_send() {
                         self.streams_have_data_to_send.insert(stream_id);
                     } else {
@@ -419,9 +427,12 @@ impl Http3Connection {
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
                 }
-                ConnectionEvent::ConnectionClosed { .. } => {
-                    // Peer closed the connection.
-                    // TODO: Dragana, what should we do here?
+                ConnectionEvent::ConnectionClosed { error_code, .. } => {
+                    self.handle_connection_closed(error_code)?
+                }
+                ConnectionEvent::ZeroRttRejected => {
+                    // TODO(mt) work out what to do here.
+                    // Everything will have to be redone: SETTINGS, qpack streams, and requests.
                 }
             }
         }
@@ -433,7 +444,11 @@ impl Http3Connection {
         match stream_type {
             StreamType::BiDi => match self.role() {
                 Role::Server => self.handle_new_client_request(stream_id),
-                Role::Client => assert!(false, "Client received a new bidirectiona stream!"),
+                Role::Client => {
+                    qerror!("Client received a new bidirectional stream!");
+                    // TODO: passing app error of 0, check if there's a better value
+                    self.conn.stream_stop_sending(stream_id, 0)?;
+                }
             },
             StreamType::UniDi => {
                 let stream_type;
@@ -442,7 +457,7 @@ impl Http3Connection {
                     let ns = &mut self
                         .new_streams
                         .entry(stream_id)
-                        .or_insert(NewStreamTypeReader::new());
+                        .or_insert_with(NewStreamTypeReader::new);
                     stream_type = ns.get_type(&mut self.conn, stream_id);
                     fin = ns.fin;
                 }
@@ -460,11 +475,13 @@ impl Http3Connection {
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
         qdebug!([self] "Readable stream {}.", stream_id);
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         let mut unblocked_streams: Vec<u64> = Vec::new();
+
         if self.read_stream_client(stream_id, false)? {
             qdebug!([label] "Request/response stream {} read.", stream_id);
         } else if self.read_stream_server(stream_id, false)? {
@@ -498,26 +515,24 @@ impl Http3Connection {
                 stream_id
             );
             unblocked_streams = self.qpack_decoder.receive(&mut self.conn, stream_id)?;
-        } else {
-            if let Some(ns) = self.new_streams.get_mut(&stream_id) {
-                let stream_type = ns.get_type(&mut self.conn, stream_id);
-                let fin = ns.fin;
-                if fin {
-                    self.new_streams.remove(&stream_id);
-                }
-                if let Some(t) = stream_type {
-                    self.decode_new_stream(t, stream_id)?;
-                    self.new_streams.remove(&stream_id);
-                }
-            } else {
-                // For a new stream we receive NewStream event and a
-                // RecvStreamReadable event.
-                // In most cases we decode a new stream already on the NewStream
-                // event and remove it from self.new_streams.
-                // Therefore, while processing RecvStreamReadable there will be no
-                // entry for the stream in self.new_streams.
-                qdebug!("Unknown stream.");
+        } else if let Some(ns) = self.new_streams.get_mut(&stream_id) {
+            let stream_type = ns.get_type(&mut self.conn, stream_id);
+            let fin = ns.fin;
+            if fin {
+                self.new_streams.remove(&stream_id);
             }
+            if let Some(t) = stream_type {
+                self.decode_new_stream(t, stream_id)?;
+                self.new_streams.remove(&stream_id);
+            }
+        } else {
+            // For a new stream we receive NewStream event and a
+            // RecvStreamReadable event.
+            // In most cases we decode a new stream already on the NewStream
+            // event and remove it from self.new_streams.
+            // Therefore, while processing RecvStreamReadable there will be no
+            // entry for the stream in self.new_streams.
+            qdebug!("Unknown stream.");
         }
 
         for stream_id in unblocked_streams {
@@ -537,7 +552,6 @@ impl Http3Connection {
     }
 
     fn handle_stream_stop_sending(&mut self, _stream_id: u64, _app_err: AppError) -> Res<()> {
-        // TODO early response
         Ok(())
     }
 
@@ -547,8 +561,14 @@ impl Http3Connection {
 
     fn handle_stream_creatable(&mut self, stream_type: StreamType) -> Res<()> {
         if stream_type == StreamType::BiDi {
-          self.events.borrow_mut().new_requests_creatable();
+            self.events.borrow_mut().new_requests_creatable();
         }
+        Ok(())
+    }
+
+    fn handle_connection_closed(&mut self, error_code: u16) -> Res<()> {
+        self.events.borrow_mut().connection_closed(error_code);
+        self.state = Http3State::Closed(error_code);
         Ok(())
     }
 
@@ -556,9 +576,10 @@ impl Http3Connection {
         if self.role() != Role::Client {
             return Ok(false);
         }
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
 
         let mut found = false;
@@ -566,12 +587,11 @@ impl Http3Connection {
         if let Some(request_stream) = &mut self.request_streams_client.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
-            let res;
-            if unblocked {
-                res = request_stream.unblock(&mut self.qpack_decoder);
+            let res = if unblocked {
+                request_stream.unblock(&mut self.qpack_decoder)
             } else {
-                res = request_stream.receive(&mut self.conn, &mut self.qpack_decoder);
-            }
+                request_stream.receive(&mut self.conn, &mut self.qpack_decoder)
+            };
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
@@ -580,10 +600,8 @@ impl Http3Connection {
                 } else {
                     return Err(e);
                 }
-            } else {
-                if request_stream.done() {
-                    self.request_streams_client.remove(&stream_id);
-                }
+            } else if request_stream.done() {
+                self.request_streams_client.remove(&stream_id);
             }
         }
         Ok(found)
@@ -593,9 +611,10 @@ impl Http3Connection {
         if self.role() != Role::Server {
             return Ok(false);
         }
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
 
         let mut found = false;
@@ -603,12 +622,11 @@ impl Http3Connection {
         if let Some(request_stream) = &mut self.request_streams_server.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
-            let res;
-            if unblocked {
-                res = request_stream.unblock(&mut self.qpack_decoder);
+            let res = if unblocked {
+                request_stream.unblock(&mut self.qpack_decoder)
             } else {
-                res = request_stream.receive(&mut self.conn, &mut self.qpack_decoder);
-            }
+                request_stream.receive(&mut self.conn, &mut self.qpack_decoder)
+            };
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
@@ -619,8 +637,9 @@ impl Http3Connection {
                 }
             }
             if request_stream.done_reading_request() {
-                if let Some(cb) = &mut self.new_stream_callback {
-                    (cb)(request_stream, false);
+                if let Some(ref mut cb) = self.handler {
+                    let (headers, data) = (cb)(request_stream.get_request_headers(), false);
+                    request_stream.set_response(&headers, data, &mut self.qpack_encoder);
                 }
                 if request_stream.has_data_to_send() {
                     self.streams_have_data_to_send.insert(stream_id);
@@ -663,7 +682,7 @@ impl Http3Connection {
                 Ok(())
             }
             QPACK_UNI_STREAM_TYPE_DECODER => {
-                qinfo!([self] "A new remore qpack decoder stream {}", stream_id);
+                qinfo!([self] "A new remote qpack decoder stream {}", stream_id);
                 if self.qpack_encoder.has_recv_stream() {
                     qdebug!([self] "A qpack decoder stream already exists");
                     return Err(Error::WrongStreamCount);
@@ -681,25 +700,17 @@ impl Http3Connection {
         }
     }
 
-    pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
+    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
         qdebug!([self] "Closed.");
         self.state = Http3State::Closing(error);
-        if ((self.request_streams_client.len() > 0) | (self.request_streams_server.len() > 0))
+        if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
             && (error == 0)
         {
-            assert!(
-                false,
-                "We should not call close when we still have streams active."
-            );
-        }
-        for (id, _) in self.request_streams_client.iter() {
-            self.events
-                .borrow_mut()
-                .reset(*id, Error::RequestCancelled.code());
+            qwarn!("close() called when streams still active");
         }
         self.request_streams_client.clear();
         self.request_streams_server.clear();
-        self.conn.close(error, msg);
+        self.conn.close(now, error, msg);
     }
 
     pub fn fetch(
@@ -732,29 +743,33 @@ impl Http3Connection {
         match &mut self.request_streams_client.remove(&stream_id) {
             Some(cs) => {
                 if cs.has_data_to_send() {
-                  self.conn.stream_reset_send(stream_id, error)?;
-                  Ok(())
+                    self.conn.stream_reset_send(stream_id, error)?;
+                    Ok(())
                 } else {
-                  self.conn.stream_stop_sending(stream_id, error)?;
-                  Ok(())
+                    self.conn.stream_stop_sending(stream_id, error)?;
+                    Ok(())
                 }
-            },
-            None => Err(Error::TransportError(neqo_transport::Error::InvalidStreamId))
+            }
+            None => Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            )),
         }
     }
 
-    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+    pub fn stream_close_send(&mut self, now: Instant, stream_id: u64) -> Res<()> {
         qdebug!([self] "close_stream {}.", stream_id);
         if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
             match cs.close_send(&mut self.conn) {
                 Ok(()) => Ok(()),
                 Err(_) => {
-                  self.close(Error::InternalError.code(), "");
-                  Ok(())
+                    self.close(now, Error::InternalError.code(), "");
+                    Ok(())
                 }
             }
         } else {
-            return Err(Error::TransportError(neqo_transport::Error::InvalidStreamId));
+            return Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ));
         }
     }
 
@@ -771,11 +786,9 @@ impl Http3Connection {
                     return Err(Error::UnexpectedFrame);
                 }
                 self.settings_received = true;
-            } else {
-                if !self.settings_received {
-                    qdebug!([self] "SETTINGS frame not received");
-                    return Err(Error::MissingSettings);
-                }
+            } else if !self.settings_received {
+                qdebug!([self] "SETTINGS frame not received");
+                return Err(Error::MissingSettings);
             }
             return match f {
                 HFrame::Settings { settings } => self.handle_settings(&settings),
@@ -789,7 +802,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(&mut self, s: &Vec<(HSettingType, u64)>) -> Res<()> {
+    fn handle_settings(&mut self, s: &[(HSettingType, u64)]) -> Res<()> {
         qdebug!([self] "Handle SETTINGS frame.");
         for (t, v) in s {
             qdebug!([self] " {:?} = {:?}", t, v);
@@ -805,7 +818,7 @@ impl Http3Connection {
                     }
                 }
                 HSettingType::MaxTableSize => self.qpack_encoder.set_max_capacity(*v)?,
-                HSettingType::BlockedStreams => self.qpack_encoder.set_blocked_streams(*v)?,
+                HSettingType::BlockedStreams => self.qpack_encoder.set_max_blocked_streams(*v)?,
 
                 _ => {}
             }
@@ -813,66 +826,48 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_goaway(&mut self, stream_id: u64) -> Res<()> {
+    fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
         qdebug!([self] "handle_goaway");
         if self.role() == Role::Server {
             return Err(Error::UnexpectedFrame);
         } else {
-            let stream_reset = self
-                .request_streams_client
+            // Issue reset events for streams >= goaway stream id
+            self.request_streams_client
                 .iter()
-                .filter(|(id, _)| **id >= stream_id)
+                .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
-                .collect::<BTreeSet<_>>();
-            self.request_streams_client.retain(|id, _| *id < stream_id);
-            // we need to remove events for a reset stream.
-            let events = self.events.borrow_mut().events();
-            for e in events {
-                match e {
-                    Http3Event::HeaderReady { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().header_ready(stream_id);
-                        }
-                    },
-                    Http3Event::DataReadable { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().data_readable(stream_id);
-                        }
-                    },
-                    Http3Event::Reset { stream_id, error } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().reset(stream_id, error);
-                        }
-                    },
-                    Http3Event::NewPushStream { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().new_push_stream(stream_id);
-                        }
-                    },
-                    Http3Event::ConnectionConnected => {
-                      self.events.borrow_mut().connected();
-                    },
-                    Http3Event::GoawayReceived => {
-                      self.events.borrow_mut().goaway_received();
-                    },
-                    Http3Event::ConnectionClosing => {
-                      self.events.borrow_mut().connection_closing();
-                    },
-                    Http3Event::ConnectionClosed => {
-                      self.events.borrow_mut().connection_closed();
-                    },
-                    _ => {},
-                }
-            }
+                .for_each(|id| {
+                    self.events
+                        .borrow_mut()
+                        .reset(id, Error::RequestRejected.code())
+                });
 
-            for id in stream_reset {
-                self.events
-                    .borrow_mut()
-                    .reset(id, Error::RequestRejected.code());
-                if let Err(e) = self.conn.stream_reset_send(id, Error::RequestRejected.code()) {
-                  qdebug!([self] "handle_goaway - error reseting a strem {:?}", e);
-                }
-            }
+            // Actually remove (i.e. don't retain) these streams
+            self.request_streams_client
+                .retain(|id, _| *id < goaway_stream_id);
+
+            // Remove events for any of these streams by creating a new set of
+            // filtered events and then swapping with the original set.
+            let updated_events = self
+                .events
+                .borrow()
+                .events
+                .iter()
+                .filter(|evt| match evt {
+                    Http3Event::HeaderReady { stream_id }
+                    | Http3Event::DataReadable { stream_id }
+                    | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
+                    Http3Event::Reset { .. }
+                    | Http3Event::ConnectionConnected
+                    | Http3Event::GoawayReceived
+                    | Http3Event::ConnectionClosing
+                    | Http3Event::ConnectionClosed { .. } => true,
+                    Http3Event::RequestsCreatable => false,
+                })
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            mem::replace(&mut self.events.borrow_mut().events, updated_events);
+
             self.events.borrow_mut().goaway_received();
             if self.state == Http3State::Connected {
                 self.state = Http3State::GoingAway;
@@ -896,30 +891,32 @@ impl Http3Connection {
     }
 
     // API
-    pub fn get_headers(
-        &mut self,
-        stream_id: u64,
-    ) -> Res<Option<Vec<(String, String)>>> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+    pub fn get_headers(&mut self, stream_id: u64) -> Res<Option<Vec<(String, String)>>> {
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
             qdebug!([label] "get_header from stream {}.", stream_id);
             Ok(cs.get_header())
         } else {
-            Err(Error::TransportError(neqo_transport::Error::InvalidStreamId))
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ))
         }
     }
 
     pub fn read_data(
         &mut self,
+        now: Instant,
         stream_id: u64,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
             qdebug!([label] "read_data from stream {}.", stream_id);
@@ -935,13 +932,15 @@ impl Http3Connection {
                 }
                 Err(e) => {
                     if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
-                      self.close(e.code(), "");
+                        self.close(now, e.code(), "");
                     }
                     return Err(e);
                 }
             }
         } else {
-            return Err(Error::TransportError(neqo_transport::Error::InvalidStreamId));
+            return Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ));
         }
     }
 
@@ -955,31 +954,39 @@ impl Http3Connection {
         self.request_streams_server
             .insert(stream_id, RequestStreamServer::new(stream_id));
     }
-
-    pub fn set_new_stream_callback<CB: 'static + FnMut(&mut RequestStreamServer, bool)>(
-        &mut self,
-        c: CB,
-    ) {
-        self.new_stream_callback = Some(Box::new(c));
-    }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3Event {
     /// Space available in the buffer for an application write to succeed.
-    HeaderReady { stream_id: u64 },
+    HeaderReady {
+        stream_id: u64,
+    },
     /// New bytes available for reading.
-    DataReadable { stream_id: u64 },
+    DataReadable {
+        stream_id: u64,
+    },
     /// Peer reset the stream.
-    Reset { stream_id: u64, error: AppError },
+    Reset {
+        stream_id: u64,
+        error: AppError,
+    },
     /// A new push stream
-    NewPushStream { stream_id: u64 },
+    NewPushStream {
+        stream_id: u64,
+    },
     /// New stream can be created
     RequestsCreatable,
+    // Connection change state to Connected.
     ConnectionConnected,
+    // Client has received a GOAWAY frame
     GoawayReceived,
+    // Connection change state to Closing.
     ConnectionClosing,
-    ConnectionClosed,
+    // Connection change state to Closed.
+    ConnectionClosed {
+        error_code: AppError,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -989,29 +996,21 @@ pub struct Http3Events {
 
 impl Http3Events {
     pub fn header_ready(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::HeaderReady {
-            stream_id: stream_id,
-        });
+        self.events.insert(Http3Event::HeaderReady { stream_id });
     }
 
     pub fn data_readable(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::DataReadable {
-            stream_id: stream_id,
-        });
+        self.events.insert(Http3Event::DataReadable { stream_id });
     }
 
     pub fn reset(&mut self, stream_id: u64, error: AppError) {
-        self.events.insert(Http3Event::Reset {
-            stream_id: stream_id,
-            error: error,
-        });
+        self.events.insert(Http3Event::Reset { stream_id, error });
     }
 
     pub fn new_push_stream(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::NewPushStream {
-            stream_id: stream_id,
-        });
+        self.events.insert(Http3Event::NewPushStream { stream_id });
     }
+
     pub fn new_requests_creatable(&mut self) {
         self.events.insert(Http3Event::RequestsCreatable);
     }
@@ -1028,8 +1027,10 @@ impl Http3Events {
         self.events.insert(Http3Event::ConnectionClosing);
     }
 
-    pub fn connection_closed(&mut self) {
-        self.events.insert(Http3Event::ConnectionClosed);
+    pub fn connection_closed(&mut self, error_code: u16) {
+        self.events.clear();
+        self.events
+            .insert(Http3Event::ConnectionClosed { error_code });
     }
 
     pub fn events(&mut self) -> BTreeSet<Http3Event> {
@@ -1040,16 +1041,7 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_crypto::init_db;
-    use std::net::SocketAddr;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
-
-    fn now() -> u64 {
-        0
-    }
+    use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
         match hconn.state() {
@@ -1066,32 +1058,33 @@ mod tests {
         // side sends and also to simulate an incorrectly behaving http3
         // server/client.
 
-        init_db("./../neqo-transport/db");
         let mut hconn;
         let mut neqo_trans_conn;
         if client {
-            hconn = Http3Connection::new(
-                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap(),
-                100,
-                100,
-            );
-            neqo_trans_conn = Connection::new_server(&["key"], &["alpn"]).unwrap();
+            hconn = Http3Connection::new(default_client(), 100, 100, None);
+            neqo_trans_conn = default_server();
         } else {
-            hconn = Http3Connection::new(
-                Connection::new_server(&["key"], &["alpn"]).unwrap(),
-                100,
-                100,
-            );
-            neqo_trans_conn =
-                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+            hconn = Http3Connection::new(default_server(), 100, 100, None);
+            neqo_trans_conn = default_client();
         }
         if client {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let mut r = hconn.process(vec![], now());
+            assert_eq!(hconn.state(), Http3State::Initializing);
+            assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
             r = neqo_trans_conn.process(r.0, now());
+            assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
+            assert_eq!(hconn.state(), Http3State::Initializing);
             r = hconn.process(r.0, now());
-            neqo_trans_conn.process(r.0, now());
+            let http_events = hconn.events();
+            for e in http_events {
+                match e {
+                    Http3Event::ConnectionConnected => assert!(true),
+                    _ => assert!(false),
+                }
+            }
             assert_eq!(hconn.state(), Http3State::Connected);
+            neqo_trans_conn.process(r.0, now());
         } else {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let mut r = neqo_trans_conn.process(vec![], now());
@@ -1232,8 +1225,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), 0);
-        hconn.process(r.0, 0);
+        let r = neqo_trans_conn.process(Vec::new(), now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1248,8 +1241,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), 0);
-        hconn.process(r.0, 0);
+        let r = neqo_trans_conn.process(Vec::new(), now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1474,7 +1467,7 @@ mod tests {
             Ok(0)
         );
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1494,7 +1487,7 @@ mod tests {
         // Generate packet with the above bad h3 input
         r = neqo_trans_conn.process(vec![], now());
         // Process bad input and generate stop sending frame
-        r = hconn.process(r.0, 0);
+        r = hconn.process(r.0, now());
         // Process stop sending frame and generate an event and a reset frame
         r = neqo_trans_conn.process(r.0, now());
 
@@ -1516,7 +1509,7 @@ mod tests {
         assert_eq!(hconn.state(), Http3State::Connected);
 
         // Process reset frame
-        hconn.conn.process(r.0, 0);
+        hconn.conn.process(r.0, now());
         let mut reset_event_found = false;
         for e in hconn.conn.events() {
             match e {
@@ -1643,7 +1636,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1691,7 +1684,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1710,25 +1703,23 @@ mod tests {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn.read_data(stream_id, &mut buf).unwrap();
+                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                     assert_eq!(fin, false);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x61, 0x62, 0x63]);
                 }
-                _ => {
-                    assert! {false}
-                }
+                _ => {}
             }
         }
 
-        hconn.process_http3();
+        hconn.process_http3(now());
         let http_events = hconn.events();
         for e in http_events {
             match e {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn.read_data(stream_id, &mut buf).unwrap();
+                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x64, 0x65, 0x66]);
@@ -1742,13 +1733,16 @@ mod tests {
         // after this stream will be removed from hcoon. We will check this by trying to read
         // from the stream and that should fail.
         let mut buf = [0u8; 100];
-        if let Err(e) = hconn.read_data(request_stream_id, &mut buf) {
-            assert_eq!(e, Error::TransportError(neqo_transport::Error::InvalidStreamId));
+        if let Err(e) = hconn.read_data(now(), request_stream_id, &mut buf) {
+            assert_eq!(
+                e,
+                Error::TransportError(neqo_transport::Error::InvalidStreamId)
+            );
         } else {
             assert!(false);
         }
 
-        hconn.close(0, String::from(""));
+        hconn.close(now(), 0, String::from(""));
     }
 
     fn test_incomplet_frame(res: &[u8], error: Error) {
@@ -1764,7 +1758,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1800,7 +1794,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1808,7 +1802,7 @@ mod tests {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    match hconn.read_data(stream_id, &mut buf) {
+                    match hconn.read_data(now(), stream_id, &mut buf) {
                         Err(e) => {
                             assert_eq!(e, Error::MalformedFrame(H3_FRAME_TYPE_DATA));
                         }
@@ -1891,7 +1885,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id_3, 8);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         let _ = neqo_trans_conn.stream_send(
@@ -1931,7 +1925,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let mut stream_reset = false;
         let mut http_events = hconn.events();
@@ -1953,25 +1947,23 @@ mod tests {
                             stream_id == request_stream_id_1 || stream_id == request_stream_id_2
                         );
                         let mut buf = [0u8; 100];
-                        let (amount, _) = hconn.read_data(stream_id, &mut buf).unwrap();
+                        let (amount, _) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                         assert_eq!(amount, 3);
                     }
                     Http3Event::Reset { stream_id, error } => {
                         assert!(stream_id == request_stream_id_3);
-                        assert_eq!(error, Error::RequestRejected);
+                        assert_eq!(error, Error::RequestRejected.code());
                         stream_reset = true;
                     }
-                    _ => {
-                        assert! {false}
-                    }
+                    _ => {}
                 }
             }
-            hconn.process_http3();
+            hconn.process_http3(now());
             http_events = hconn.events();
         }
 
         assert!(stream_reset);
         assert_eq!(hconn.state(), Http3State::GoingAway);
-        hconn.close(0, String::from(""));
+        hconn.close(now(), 0, String::from(""));
     }
 }

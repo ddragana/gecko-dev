@@ -4,14 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Encoding and decoding packets off the wire.
+
 use derive_more::Deref;
 use rand::Rng;
 
-use neqo_common::data::{Data, DataBuf};
-use neqo_common::hex;
-use neqo_common::{matches, qtrace};
+use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
+use neqo_crypto::Epoch;
 
-use crate::nss_stub::Epoch;
 use crate::{Error, Res};
 
 const PACKET_TYPE_INITIAL: u8 = 0x0;
@@ -34,7 +34,7 @@ pub enum PacketType {
     Handshake,
     VN(Vec<Version>), // List of versions
     Initial(Vec<u8>), // Token
-    Retry(Vec<u8>),   // Token
+    Retry { odcid: ConnectionId, token: Vec<u8> },
 }
 
 impl Default for PacketType {
@@ -49,8 +49,8 @@ impl PacketType {
             PacketType::Initial(..) => PACKET_TYPE_INITIAL,
             PacketType::ZeroRTT => PACKET_TYPE_0RTT,
             PacketType::Handshake => PACKET_TYPE_HANDSHAKE,
-            PacketType::Retry(..) => PACKET_TYPE_RETRY,
-            _ => unimplemented!(),
+            PacketType::Retry { .. } => PACKET_TYPE_RETRY,
+            _ => panic!("shouldn't be here"),
         }
     }
 }
@@ -58,8 +58,23 @@ impl PacketType {
 pub type Version = u32;
 pub type PacketNumber = u64;
 
-#[derive(Default, Deref, Debug, PartialEq, Clone)]
+#[derive(Default, Deref, PartialEq, Clone)]
 pub struct ConnectionId(pub Vec<u8>);
+
+impl ConnectionId {
+    pub fn generate(len: usize) -> ConnectionId {
+        assert!(matches!(len, 4...18));
+        let mut v = vec![0; len];
+        rand::thread_rng().fill(&mut v[..]);
+        ConnectionId(v)
+    }
+}
+
+impl ::std::fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "CID {}", hex(&self.0))
+    }
+}
 
 #[derive(Default, Debug)]
 pub struct PacketHdr {
@@ -83,7 +98,6 @@ impl PacketHdr {
         scid: Option<ConnectionId>,
         pn: PacketNumber,
         epoch: Epoch,
-        hdr_len: usize,
     ) -> PacketHdr {
         PacketHdr {
             tbyte,
@@ -93,7 +107,7 @@ impl PacketHdr {
             scid,
             pn,
             epoch,
-            hdr_len,
+            hdr_len: 0,
             body_len: 0,
         }
     }
@@ -117,9 +131,9 @@ pub struct PacketNumberDecoder {
     expected: u64,
 }
 impl PacketNumberDecoder {
-    pub fn new(largest_acknowledged: u64) -> PacketNumberDecoder {
+    pub fn new(largest_acknowledged: Option<u64>) -> PacketNumberDecoder {
         PacketNumberDecoder {
-            expected: largest_acknowledged + 1,
+            expected: largest_acknowledged.map(|x| x + 1).unwrap_or(0),
         }
     }
 
@@ -152,14 +166,14 @@ fn encode_cidl(d: usize, s: usize) -> u8 {
     (encode_cidl_half(d) << 4) | encode_cidl_half(s)
 }
 
-fn decode_cidl_half(l: u8) -> u8 {
+fn decode_cidl_half(l: u8) -> usize {
     match l {
         0 => 0,
-        _ => l + 3,
+        _ => (l + 3) as usize,
     }
 }
 
-fn decode_cidl(l: u8) -> (u8, u8) {
+fn decode_cidl(l: u8) -> (usize, usize) {
     (decode_cidl_half(l >> 4), decode_cidl_half(l & 0xf))
 }
 
@@ -227,15 +241,40 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                          Payload (*)                        ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+  Retry
+  +-+-+-+-+-+-+-+-+
+  |1|1| 3 | ODCIL |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                         Version (32)                          |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |DCIL(4)|SCIL(4)|
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |               Destination Connection ID (0/32..144)         ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                 Source Connection ID (0/32..144)            ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |          Original Destination Connection ID (0/32..144)     ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                        Retry Token (*)                      ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
 pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
-    let mut p = PacketHdr::default();
+    macro_rules! d {
+        ($d:expr) => {
+            match $d {
+                Some(v) => v,
+                _ => return Err(Error::NoMoreData),
+            }
+        };
+    }
 
-    let mut d = Data::from_slice(pd);
+    let mut p = PacketHdr::default();
+    let mut d = Decoder::from(pd);
 
     // Get the type byte
-    p.tbyte = d.decode_byte()?;
+    p.tbyte = d!(d.decode_byte());
     if p.tbyte & 0x40 == 0 {
         return Err(Error::InvalidPacket);
     }
@@ -243,25 +282,24 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     if (p.tbyte & 0x80) == 0 {
         // Short Header.
         p.tipe = PacketType::Short;
-        p.dcid = ConnectionId(d.decode_data(dec.get_cid_len())?);
-        p.hdr_len = d.offset();
+        let cid = d!(d.decode(dec.get_cid_len()));
+        p.dcid = ConnectionId(cid.to_vec()); // TODO(mt) unnecessary copy
+        p.hdr_len = pd.len() - d.remaining();
         p.body_len = d.remaining();
         p.epoch = 3; // TODO(ekr@rtfm.com): Decode key phase bits.
         return Ok(p);
     }
 
-    p.version = Some(d.decode_uint(4)? as u32);
-    let (dest_len, src_len) = decode_cidl(d.decode_byte()?);
+    let version = d!(d.decode_uint(4)) as u32;
+    p.version = Some(version);
+    let (dest_len, src_len) = decode_cidl(d!(d.decode_byte()));
+    p.dcid = ConnectionId(d!(d.decode(dest_len)).to_vec());
+    p.scid = Some(ConnectionId(d!(d.decode(src_len)).to_vec()));
 
-    p.dcid = ConnectionId(d.decode_data(dest_len.into())?);
-    p.scid = Some(ConnectionId(d.decode_data(src_len.into())?));
-
-    if p.version == Some(0) {
+    if version == 0 {
         let mut vns = vec![];
-
         while d.remaining() > 0 {
-            let vn = d.decode_uint(4)? as u32;
-            vns.push(vn);
+            vns.push(d!(d.decode_uint(4)) as u32);
         }
         p.tipe = PacketType::VN(vns);
         // No need to set hdr_length and body_length
@@ -272,7 +310,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
             // TODO(ekr@rtfm.com): Check the 0 bits.
             PACKET_TYPE_INITIAL => {
                 p.epoch = 0;
-                PacketType::Initial(d.decode_data_and_len()?)
+                PacketType::Initial(d!(d.decode_vvec()).to_vec()) // TODO(mt) unnecessary copy
             }
             PACKET_TYPE_0RTT => {
                 p.epoch = 1;
@@ -282,18 +320,19 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
                 p.epoch = 2;
                 PacketType::Handshake
             }
-            // TODO(ekr@rtfm.com): Read ODCIL.
-            PACKET_TYPE_RETRY => PacketType::Retry(d.decode_remainder()?),
+            PACKET_TYPE_RETRY => {
+                let odcil = decode_cidl_half(p.tbyte & 0xf) as usize;
+                let odcid = ConnectionId(d!(d.decode(odcil)).to_vec()); // TODO(mt) unnecessary copy
+                let token = d.decode_remainder().to_vec(); // TODO(mt) unnecessary copy
+                p.tipe = PacketType::Retry { odcid, token };
+                return Ok(p);
+            }
             _ => unreachable!(),
         };
-
-        if matches!(p.tipe, PacketType::Retry(..)) {
-            return Ok(p);
-        }
     }
 
-    p.body_len = d.decode_varint()? as usize;
-    p.hdr_len = d.offset();
+    p.body_len = d!(d.decode_varint()) as usize;
+    p.hdr_len = pd.len() - d.remaining();
 
     Ok(p)
 }
@@ -306,7 +345,7 @@ pub fn decrypt_packet(
 ) -> Res<Vec<u8>> {
     assert!(!matches!(
         hdr.tipe,
-        PacketType::Retry(..) | PacketType::VN(..)
+        PacketType::Retry{..} | PacketType::VN(_)
     ));
 
     // First remove the header protection.
@@ -334,7 +373,7 @@ pub fn decrypt_packet(
     for i in 0..pn_len {
         hdrbytes[hdr.hdr_len + i] ^= mask[1 + i];
         pn_encoded <<= 8;
-        pn_encoded += hdrbytes[hdr.hdr_len + i] as u64;
+        pn_encoded += u64::from(hdrbytes[hdr.hdr_len + i]);
     }
     qtrace!("unmasked hdr={}", hex(&hdrbytes));
     hdr.hdr_len += pn_len;
@@ -352,91 +391,113 @@ pub fn decrypt_packet(
 }
 
 fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut enc = Encoder::default();
     // Leading byte.
     let pnl = pn_length(hdr.pn);
-    d.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
-    d.encode_vec(&hdr.dcid.0);
-    d.encode_uint(hdr.pn, pnl);
+    enc.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
+    enc.encode(&hdr.dcid.0);
+    enc.encode_uint(pnl, hdr.pn);
 
-    encrypt_packet(crypto, hdr, d, body)
+    encrypt_packet(crypto, hdr, enc, body)
 }
 
 fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut d = Encoder::default();
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | rand_byte[0]);
-    d.encode_uint(0u64, 4); // version
-    d.encode_vec(&*hdr.dcid);
-    d.encode_vec(hdr.scid.as_ref().unwrap());
+    d.encode_uint(4, 0u64); // version
+    d.encode(&*hdr.dcid);
+    d.encode(hdr.scid.as_ref().unwrap());
     for ver in vers {
-        d.encode_uint(*ver, 4)
+        d.encode_uint(4, *ver);
     }
-    d.into_vec()
+    d.into()
 }
 
 /* Handle Initial, 0-RTT, Handshake. */
 fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut enc = Encoder::default();
 
     let pnl = pn_length(hdr.pn);
-    d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl));
-    d.encode_uint(hdr.version.unwrap(), 4);
-    d.encode_byte(encode_cidl(
+    enc.encode_byte(
+        PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl),
+    );
+    enc.encode_uint(4, hdr.version.unwrap());
+    enc.encode_byte(encode_cidl(
         hdr.dcid.len(),
         hdr.scid.as_ref().unwrap().len(),
     ));
-    d.encode_vec(&*hdr.dcid);
-    d.encode_vec(&*hdr.scid.as_ref().unwrap());
+    enc.encode(&*hdr.dcid);
+    enc.encode(&*hdr.scid.as_ref().unwrap());
 
     if let PacketType::Initial(token) = &hdr.tipe {
-        d.encode_vec_and_len(&token);
+        enc.encode_vvec(&token);
     }
-    d.encode_varint((pnl + body.len() + AUTH_TAG_LEN) as u64);
-    d.encode_uint(hdr.pn, pnl);
+    enc.encode_varint((pnl + body.len() + AUTH_TAG_LEN) as u64);
+    enc.encode_uint(pnl, hdr.pn);
 
-    encrypt_packet(crypto, hdr, d, body)
+    encrypt_packet(crypto, hdr, enc, body)
 }
 
-fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut d: Data, body: &[u8]) -> Vec<u8> {
-    let hdr_len = d.remaining();
+fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut enc: Encoder, body: &[u8]) -> Vec<u8> {
+    let hdr_len = enc.len();
     // Encrypt the packet. This has too many copies.
-    let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
-    d.encode_vec(&ct);
-    let ret = d.as_mut_vec();
-    qtrace!("mask hdr={}", hex(&ret[0..hdr_len]));
+    let ct = crypto.aead_encrypt(hdr.pn, &enc, body).unwrap();
+    enc.encode(&ct);
+    qtrace!("mask hdr={}", hex(&enc[0..hdr_len]));
     let pn_start = hdr_len - pn_length(hdr.pn);
     let mask = crypto
-        .compute_mask(&ret[pn_start + 4..pn_start + SAMPLE_SIZE + 4])
+        .compute_mask(&enc[pn_start + 4..pn_start + SAMPLE_SIZE + 4])
         .unwrap();
-    ret[0] ^= mask[0]
+    enc[0] ^= mask[0]
         & match hdr.tipe {
             PacketType::Short => 0x1f,
             _ => 0x0f,
         };
     for i in 0..pn_length(hdr.pn) {
-        ret[pn_start + i] ^= mask[i + 1];
+        enc[pn_start + i] ^= mask[i + 1];
     }
-    qtrace!("masked hdr={}", hex(&ret[0..hdr_len]));
-    ret.to_vec()
+    qtrace!("masked hdr={}", hex(&enc[0..hdr_len]));
+    enc.into()
 }
 
 // TODO(ekr@rtfm.com): Minimal packet number lengths.
 fn pn_length(_pn: PacketNumber) -> usize {
-    return 3;
+    3
+}
+
+pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
+    if let PacketType::Retry { odcid, token } = &hdr.tipe {
+        let mut enc = Encoder::default();
+        let b0 = PACKET_BIT_LONG
+            | PACKET_BIT_FIXED_QUIC
+            | PACKET_TYPE_RETRY << 4
+            | encode_cidl_half(odcid.len());
+        enc.encode_byte(b0);
+        enc.encode_uint(4, hdr.version.unwrap());
+        enc.encode_byte(encode_cidl(
+            hdr.dcid.len(),
+            hdr.scid.as_ref().unwrap().len(),
+        ));
+        enc.encode(&hdr.dcid);
+        enc.encode(&hdr.scid.as_ref().unwrap());
+        enc.encode(odcid);
+        enc.encode(token);
+        enc.into()
+    } else {
+        unreachable!()
+    }
 }
 
 pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     match &hdr.tipe {
         PacketType::Short => encode_packet_short(crypto, hdr, body),
         PacketType::VN(vers) => encode_packet_vn(hdr, &vers),
-        /*
-        PacketType::Retry(..) => encode_retry(ctx, &d, hdr, body), */
-        PacketType::Initial(..) | PacketType::Handshake | PacketType::Retry(..) => {
+        PacketType::Retry { .. } => encode_retry(hdr),
+        PacketType::Initial(..) | PacketType::ZeroRTT | PacketType::Handshake => {
             encode_packet_long(crypto, hdr, body)
         }
-        _ => unimplemented!(),
     }
 }
 
@@ -479,14 +540,15 @@ mod tests {
         }
 
         fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-            let mut d = Data::from_slice(body);
-            d.encode_vec(&TestFixture::auth_tag(hdr, body));
-            let v = d.as_mut_vec();
-            for i in 0..v.len() {
-                v[i] ^= AEAD_MASK;
+            let tag = TestFixture::auth_tag(hdr, body);
+            let mut enc = Encoder::with_capacity(body.len() + tag.len());
+            enc.encode(body);
+            enc.encode(&tag);
+            for i in 0..enc.len() {
+                enc[i] ^= AEAD_MASK;
             }
 
-            Ok(v.to_vec())
+            Ok(enc.into())
         }
     }
 
@@ -519,7 +581,7 @@ mod tests {
 
     fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
         let mut phdr = decode_packet_hdr(f, &packet)?;
-        let body = decrypt_packet(f, PacketNumberDecoder::new(0), &mut phdr, &packet)?;
+        let body = decrypt_packet(f, PacketNumberDecoder::new(Some(0)), &mut phdr, &packet)?;
         Ok((phdr, body))
     }
 
@@ -590,42 +652,21 @@ mod tests {
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
     }
+
+    #[test]
+    fn test_retry() {
+        let mut hdr = default_hdr();
+        hdr.tipe = PacketType::Retry {
+            odcid: ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]),
+            token: vec![99, 88, 77, 66, 55, 44, 33],
+        };
+        hdr.scid = Some(ConnectionId(vec![1, 2, 3, 4, 5]));
+        let packet = encode_retry(&mut hdr);
+        let f = TestFixture {};
+        let decoded = decode_packet_hdr(&f, &packet).expect("should decode");
+        assert_eq!(decoded.tipe, hdr.tipe);
+        assert_eq!(decoded.version, hdr.version);
+        assert_eq!(decoded.dcid, hdr.dcid);
+        assert_eq!(decoded.scid, hdr.scid);
+    }
 }
-
-/*
-if matches!(hdr.tipe, PacketType::Short) {
-    return
-}
-
-
-    t = 0x12;
-    // TODO(ekr@rtfm.com): Key phase.
-    t |= 0x3; // 32-bit packet number.
-} else {
-    // Look up the type bits.
-    let tf = match hdr.tipe {
-        PacketType::ZeroRTT => PACKET_TYPE_0RTT,
-        PacketType::Handshake => PACKET_TYPE_HANDSHAKE,
-        PacketType::Initial(..) => PACKET_TYPE_INITIAL,
-        PacketType::Retry(..) => PACKET_TYPE_RETRY,
-        // TODO(ekr@rtfm.com): Randomize VN.
-        _ => unimplemented!()
-    };
-
-    // This is the top-half of the header byte.
-    t = 0x40 | tf << 4;
-
-    // Now the type-specific low-order bits.
-    t |= match hdr.tipe {
-        // Always use the 32-bit packet # size.
-        PacketType::ZeroRTT | PacketType::Handshake | PacketType::Initial(..) => 0x3,
-        PacketType::Retry(..) => unimplemented!(), // ODCIL.
-        _ => unimplemented!()
-    };
-}
-
-// Finally, encode the byte.
-d.encode_byte(t);
-
-
-Err(Error::Internal)*/

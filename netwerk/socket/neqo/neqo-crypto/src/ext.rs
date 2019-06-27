@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::Res;
 use crate::result;
 use crate::ssl::{
@@ -81,7 +82,7 @@ impl ExtensionTracker {
         ExtensionTracker::wrap_handler_call(arg, |handler| {
             match handler.write(message as HandshakeMessage, d) {
                 ExtensionWriterResult::Write(sz) => {
-                    *len = sz as c_uint;
+                    *len = to_c_uint(sz).expect("integer overflow from extension writer");
                     1
                 }
                 ExtensionWriterResult::Skip => 0,
@@ -109,7 +110,7 @@ impl ExtensionTracker {
         })
     }
 
-    pub fn new(
+    pub unsafe fn new(
         fd: *mut PRFileDesc,
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
@@ -126,16 +127,14 @@ impl ExtensionTracker {
             handler: Box::new(Box::new(handler)),
         };
         let p = &mut *tracker.handler as *mut Box<Rc<RefCell<dyn ExtensionHandler>>> as *mut c_void;
-        let rv = unsafe {
-            SSL_InstallExtensionHooks(
-                fd,
-                extension,
-                Some(ExtensionTracker::extension_writer),
-                p,
-                Some(ExtensionTracker::extension_handler),
-                p,
-            )
-        };
+        let rv = SSL_InstallExtensionHooks(
+            fd,
+            extension,
+            Some(ExtensionTracker::extension_writer),
+            p,
+            Some(ExtensionTracker::extension_handler),
+            p,
+        );
         result::result(rv)?;
         Ok(tracker)
     }

@@ -8,7 +8,6 @@
 
 pub mod connection;
 pub mod hframe;
-mod recvable;
 mod request_stream_client;
 pub mod request_stream_server;
 
@@ -53,7 +52,6 @@ pub enum Error {
     Unexpected,
     // So we can wrap and report these errors.
     TransportError(neqo_transport::Error),
-    IoError(neqo_common::Error),
     QpackError(neqo_qpack::Error),
 }
 
@@ -91,8 +89,7 @@ impl Error {
             | Error::DecodingFrame
             | Error::NotEnoughData
             | Error::Unexpected
-            | Error::TransportError(..)
-            | Error::IoError(..) => 3,
+            | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code() as neqo_transport::AppError,
         }
     }
@@ -121,13 +118,14 @@ impl Error {
             19 => Error::UnexpectedFrame,
             20 => Error::RequestRejected,
             0xff => Error::GeneralProtocolError,
-            0x100...0x1ff => Error::MalformedFrame((error - 0x100) as u64),
+            0x100...0x1ff => Error::MalformedFrame(u64::from(error - 0x100)),
             0x200 => Error::QpackError(neqo_qpack::Error::DecompressionFailed),
             0x201 => Error::QpackError(neqo_qpack::Error::EncoderStreamError),
             0x202 => Error::QpackError(neqo_qpack::Error::DecoderStreamError),
             _ => Error::InternalError,
         }
     }
+
     pub fn is_stream_error(&self) -> bool {
         // TODO(mt): check that these are OK.  They all look fatal to me.
         *self == Error::UnexpectedFrame
@@ -145,12 +143,6 @@ impl From<neqo_transport::Error> for Error {
 impl From<neqo_qpack::Error> for Error {
     fn from(err: neqo_qpack::Error) -> Self {
         Error::QpackError(err)
-    }
-}
-
-impl From<neqo_common::Error> for Error {
-    fn from(err: neqo_common::Error) -> Self {
-        Error::IoError(err)
     }
 }
 

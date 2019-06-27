@@ -12,10 +12,13 @@ types = [
     "SSLExtensionHandler",
     "SSLExtensionType",
     "SSLExtensionWriter",
+    "SSLHelloRetryRequestAction",
+    "SSLHelloRetryRequestCallback",
     "SSLProtocolVariant",
+    "SSLRecordWriteCallback",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
-    "SSLRecordWriteCallback",
+    "SSLTimeFunc",
 ]
 functions = [
     "SSL_AlertSentCallback",
@@ -47,6 +50,7 @@ enums = [
     "SSLContentType",
     "SSLExtensionType",
     "SSLHandshakeType",
+    "SSLHelloRetryRequestAction",
     "SSLKEAType",
     "SSLMACAlgorithm",
     "SSLNamedGroup",
@@ -186,11 +190,9 @@ variables = [
 [nspr_io]
 types = ["PRIOMethods"]
 functions = [
+    "PR_Close",
     "PR_CreateIOLayerStub",
     "PR_GetUniqueIdentity",
-    # These aren't being used yet.
-    # "PR_Read",
-    # "PR_Write",
 ]
 variables = [
     "PR_AF_INET",
@@ -210,3 +212,7 @@ enums = [
     "PRSockOption",
     "PRTransmitFileFlags",
 ]
+
+[nspr_time]
+types = ["PRTime"]
+functions = ["PR_Now"]

@@ -11,7 +11,8 @@ use crate::qpack_helper::read_prefixed_encoded_int_with_connection;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
-use neqo_transport::connection::Connection;
+use neqo_common::{qdebug, qtrace};
+use neqo_transport::Connection;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -61,7 +62,7 @@ impl QPackEncoder {
             remote_stream_id: None,
             max_blocked_streams: 0,
             blocked_streams: Vec::new(),
-            use_huffman: use_huffman,
+            use_huffman,
         }
     }
 
@@ -77,10 +78,11 @@ impl QPackEncoder {
         Ok(())
     }
 
-    pub fn set_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
+    pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
         if blocked_streams > (1 << 16) - 1 {
             return Err(Error::EncoderStreamError);
         }
+        qdebug!([self] "Set max blocked streams to {}.", blocked_streams);
         self.max_blocked_streams = blocked_streams as u16;
         Ok(())
     }
@@ -176,7 +178,7 @@ impl QPackEncoder {
                 DecoderInstructions::InsertCountIncrement => {
                     self.table.increment_acked(self.instruction_reader_value);
                     let inserts = self.table.get_acked_inserts_cnt();
-                    self.blocked_streams.retain(|req| req <= &inserts);
+                    self.blocked_streams.retain(|req| *req <= inserts);
                 }
                 DecoderInstructions::HeaderAck => {
                     self.table.header_ack(self.instruction_reader_value)
@@ -249,25 +251,23 @@ impl QPackEncoder {
     }
 
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        if self.send_buf.len() == 0 {
+        if self.send_buf.is_empty() {
             Ok(())
-        } else {
-            if let Some(stream_id) = self.local_stream_id {
-                match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
-                    Err(_) => Err(Error::EncoderStreamError),
-                    Ok(r) => {
-                        qdebug!([self] "{} bytes sent.", r);
-                        self.send_buf.read(r as usize);
-                        Ok(())
-                    }
+        } else if let Some(stream_id) = self.local_stream_id {
+            match conn.stream_send(stream_id, &self.send_buf[..]) {
+                Err(_) => Err(Error::EncoderStreamError),
+                Ok(r) => {
+                    qdebug!([self] "{} bytes sent.", r);
+                    self.send_buf.read(r as usize);
+                    Ok(())
                 }
-            } else {
-                Ok(())
             }
+        } else {
+            Ok(())
         }
     }
 
-    pub fn encode_header_block(&mut self, h: &Vec<(String, String)>, stream_id: u64) -> QPData {
+    pub fn encode_header_block(&mut self, h: &[(String, String)], stream_id: u64) -> QPData {
         qdebug!([self] "encoding headers.");
         let mut encoded_h = QPData::default();
         let base = self.table.base();
@@ -390,10 +390,11 @@ impl QPackEncoder {
             delta,
             fix
         );
-        let mut enc_insert_cnt = 0;
-        if req_insert_cnt != 0 {
-            enc_insert_cnt = (req_insert_cnt % (2 * self.max_entries)) + 1;
-        }
+        let enc_insert_cnt = if req_insert_cnt != 0 {
+            (req_insert_cnt % (2 * self.max_entries)) + 1
+        } else {
+            0
+        };
 
         let mut offset = 0; // this is for fixing header_block only.
         if !fix {
@@ -485,7 +486,7 @@ impl QPackEncoder {
     }
 
     pub fn add_send_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.local_stream_id {
+        if self.local_stream_id.is_some() {
             panic!("Adding multiple local streams");
         }
         self.local_stream_id = Some(stream_id);
@@ -494,17 +495,14 @@ impl QPackEncoder {
     }
 
     pub fn add_recv_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.remote_stream_id {
+        if self.remote_stream_id.is_some() {
             panic!("Adding multiple remote streams");
         }
         self.remote_stream_id = Some(stream_id);
     }
 
     pub fn has_recv_stream(&self) -> bool {
-        match self.remote_stream_id {
-            Some(_) => true,
-            None => false,
-        }
+        self.remote_stream_id.is_some()
     }
 }
 
@@ -532,24 +530,13 @@ impl ::std::fmt::Display for QPackEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_crypto::init_db;
-    use neqo_transport::frame::StreamType;
-    use neqo_transport::{AppError, ConnectionEvent, Res};
-    use std::net::SocketAddr;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
-
-    fn now() -> u64 {
-        0
-    }
+    use neqo_transport::ConnectionEvent;
+    use neqo_transport::StreamType;
+    use test_fixture::*;
 
     fn connect(huffman: bool) -> (QPackEncoder, Connection, Connection, u64, u64) {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -851,12 +838,9 @@ mod tests {
 
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_blocked_streams(100) {
-            assert!(false);
-        }
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        encoder.set_max_blocked_streams(100).unwrap();
+        encoder.set_max_capacity(200).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -868,8 +852,8 @@ mod tests {
         );
 
         for t in &test_cases {
-            let mut buf = encoder.encode_header_block(&t.headers, 1);
-            assert_eq!(buf.as_mut_vec(), t.header_block);
+            let buf = encoder.encode_header_block(&t.headers, 1);
+            assert_eq!(&buf[..], t.header_block);
             test_sent_instructions(
                 &mut encoder,
                 &mut conn_c,
@@ -939,12 +923,9 @@ mod tests {
 
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(true);
 
-        if let Err(_) = encoder.set_blocked_streams(100) {
-            assert!(false);
-        }
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        encoder.set_max_blocked_streams(100).unwrap();
+        encoder.set_max_capacity(200).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -956,8 +937,8 @@ mod tests {
         );
 
         for t in &test_cases {
-            let mut buf = encoder.encode_header_block(&t.headers, 1);
-            assert_eq!(buf.as_mut_vec(), t.header_block);
+            let buf = encoder.encode_header_block(&t.headers, 1);
+            assert_eq!(&buf[..], t.header_block);
             test_sent_instructions(
                 &mut encoder,
                 &mut conn_c,
@@ -974,9 +955,8 @@ mod tests {
     fn test_insertion_blocked_on_insert_count_feedback() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(60) {
-            assert!(false);
-        }
+        encoder.set_max_capacity(60).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -1118,11 +1098,11 @@ mod tests {
         }
 
         // send a header block
-        let mut buf = encoder.encode_header_block(
+        let buf = encoder.encode_header_block(
             &vec![(String::from("content-length"), String::from("1234"))],
             1,
         );
-        assert_eq!(buf.as_mut_vec(), &[0x02, 0x00, 0x80]);
+        assert_eq!(&buf[..], &[0x02, 0x00, 0x80]);
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,

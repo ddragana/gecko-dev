@@ -4,18 +4,24 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Buffering data to send until it is acked.
+
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::mem;
 use std::rc::Rc;
+use std::time::Instant;
 
-use neqo_common::{qinfo, qtrace, qwarn};
+use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 use slice_deque::SliceDeque;
 
-use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
-
+use crate::flow_mgr::FlowMgr;
+use crate::frame::TxMode;
+use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken};
+use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
+use crate::{Connection, ConnectionEvents};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
 
@@ -341,6 +347,10 @@ impl TxBuffer {
         self.send_buf.len()
     }
 
+    fn avail(&self) -> usize {
+        TX_STREAM_BUFFER - self.buffered()
+    }
+
     fn highest_sent(&self) -> u64 {
         self.ranges.highest_offset()
     }
@@ -447,62 +457,36 @@ impl SendStream {
 
     /// Return the next range to be sent, if any.
     pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        let stream_credit_avail = self.credit_avail();
-        let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
-        let credit_avail = min(stream_credit_avail, conn_credit_avail);
-
-        if let Some(tx_buf) = self.state.tx_buf() {
-            qtrace!(
-                "next_bytes max_stream_data {}, data_limit {}, credit_avail {}",
-                self.max_stream_data,
-                tx_buf.data_limit(),
-                credit_avail
-            );
-            if let Some((offset, data)) = tx_buf.next_bytes(mode) {
-                // Restrict slice of data offered for sending by remaining
-                // flow control credits
-                let data = &data[..min(credit_avail as usize, data.len())];
-                qtrace!("next_bytes after flowc: {} {}", offset, data.len());
-
-                if data.len() == 0 {
-                    // We had some bytes to send but were blocked by flow
-                    // control.
-                    assert!(stream_credit_avail == 0 || conn_credit_avail == 0);
-                    if stream_credit_avail == 0 {
-                        self.flow_mgr
-                            .borrow_mut()
-                            .stream_data_blocked(self.stream_id, self.max_stream_data);
-                    }
-                    if conn_credit_avail == 0 {
-                        self.flow_mgr.borrow_mut().data_blocked();
-                    }
-                    return None;
+        match self.state {
+            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(mode),
+            SendStreamState::DataSent {
+                ref send_buf,
+                fin_sent,
+                final_size,
+            } => {
+                let bytes = send_buf.next_bytes(mode);
+                if bytes.is_some() {
+                    // Must be a resend
+                    bytes
+                } else if !fin_sent {
+                    // Send empty stream frame with fin set
+                    Some((final_size, &[]))
                 } else {
-                    return Some((offset, data));
+                    None
                 }
             }
+            SendStreamState::Ready
+            | SendStreamState::DataRecvd { .. }
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => None,
         }
-
-        // No actual data to send, but we may need a 0-length frame with FIN
-        // to indicate stream is complete.
-        if let SendStreamState::DataSent {
-            final_size,
-            fin_sent,
-            ..
-        } = self.state
-        {
-            if !fin_sent {
-                return Some((final_size, &[]));
-            }
-        }
-
-        None
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_sent(offset, len));
+        if let Some(buf) = self.state.tx_buf_mut() {
+            buf.mark_as_sent(offset, len)
+        };
+
         if fin {
             if let SendStreamState::DataSent {
                 ref mut fin_sent, ..
@@ -511,10 +495,6 @@ impl SendStream {
                 *fin_sent = true
             }
         }
-
-        self.flow_mgr
-            .borrow_mut()
-            .conn_increase_credit_used(len as u64);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
@@ -533,15 +513,12 @@ impl SendStream {
                 ..
             } => {
                 send_buf.mark_as_acked(offset, len);
-                if fin {
-                    if send_buf.buffered() == 0 {
-                        self.conn_events
-                            .borrow_mut()
-                            .send_stream_complete(self.stream_id);
-                        self.state.transition(SendStreamState::DataRecvd {
-                            final_size: final_size,
-                        });
-                    }
+                if fin && send_buf.buffered() == 0 {
+                    self.conn_events
+                        .borrow_mut()
+                        .send_stream_complete(self.stream_id);
+                    self.state
+                        .transition(SendStreamState::DataRecvd { final_size });
                 }
             }
             _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
@@ -549,9 +526,10 @@ impl SendStream {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_lost(offset, len));
+        if let Some(buf) = self.state.tx_buf_mut() {
+            buf.mark_as_lost(offset, len)
+        };
+
         if fin {
             if let SendStreamState::DataSent {
                 ref mut fin_sent, ..
@@ -566,12 +544,21 @@ impl SendStream {
         self.state.final_size()
     }
 
+    /// Stream credit available
     pub fn credit_avail(&self) -> u64 {
-        if let Some(tx_buf) = self.state.tx_buf() {
-            self.max_stream_data - tx_buf.data_limit()
-        } else {
-            0
-        }
+        self.state
+            .tx_buf()
+            .map(|tx| self.max_stream_data - tx.data_limit())
+            .unwrap_or(0)
+    }
+
+    /// Bytes sendable on stream. Constrained by both stream credit available
+    /// and space in the tx buffer.
+    pub fn avail(&self) -> u64 {
+        self.state
+            .tx_buf()
+            .map(|tx| min(self.credit_avail(), tx.avail() as u64))
+            .unwrap_or(0)
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -603,19 +590,52 @@ impl SendStream {
     }
 
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
-        let sent = match self.state {
-            SendStreamState::Ready => {
-                let mut send_buf = TxBuffer::new();
-                let sent = send_buf.send(buf);
-                self.state.transition(SendStreamState::Send { send_buf });
-                sent
+        if buf.is_empty() {
+            qerror!("zero-length send on stream {}", self.stream_id.as_u64());
+            return Err(Error::InvalidInput);
+        }
+
+        if let SendStreamState::Ready = self.state {
+            self.state.transition(SendStreamState::Send {
+                send_buf: TxBuffer::new(),
+            });
+        }
+
+        let stream_credit_avail = self.credit_avail();
+        let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
+        let credit_avail = min(stream_credit_avail, conn_credit_avail);
+        let buff_avail = self.state.tx_buf().map(|tx| tx.avail()).unwrap_or(0);
+        let space_avail = min(credit_avail, buff_avail as u64);
+        let can_send_bytes = min(space_avail, buf.len() as u64);
+
+        if can_send_bytes != buf.len() as u64 {
+            // We had some bytes to send but may have been blocked by flow
+            // credits. If so, send data blocked frame(s) to peer.
+            if stream_credit_avail < buf.len() as u64 {
+                self.flow_mgr
+                    .borrow_mut()
+                    .stream_data_blocked(self.stream_id, self.max_stream_data);
             }
+            if conn_credit_avail < buf.len() as u64 {
+                self.flow_mgr.borrow_mut().data_blocked();
+            }
+        }
+
+        if can_send_bytes == 0 {
+            return Ok(0);
+        }
+
+        let buf = &buf[..can_send_bytes as usize];
+
+        let sent = match self.state {
+            SendStreamState::Ready => unreachable!(),
             SendStreamState::Send { ref mut send_buf } => send_buf.send(buf),
-            SendStreamState::DataSent { .. } => return Err(Error::FinalSizeError),
-            SendStreamState::DataRecvd { .. } => return Err(Error::FinalSizeError),
-            SendStreamState::ResetSent => return Err(Error::FinalSizeError),
-            SendStreamState::ResetRecvd => return Err(Error::FinalSizeError),
+            _ => return Err(Error::FinalSizeError),
         };
+
+        self.flow_mgr
+            .borrow_mut()
+            .conn_increase_credit_used(sent as u64);
 
         Ok(sent)
     }
@@ -671,6 +691,110 @@ impl SendStream {
             SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
+    }
+}
+
+/// Calculate the frame header size so we know how much data we can fit
+fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += Encoder::varint_len(stream_id.as_u64());
+    if offset > 0 {
+        hdr_len += Encoder::varint_len(offset);
+    }
+
+    // We always include a length field.
+    hdr_len + Encoder::varint_len(remaining as u64)
+}
+
+#[derive(Default)]
+pub(crate) struct StreamGenerator {}
+
+impl FrameGenerator for StreamGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        _now: Instant,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        if epoch != 3 && epoch != 1 {
+            return None;
+        }
+
+        for (stream_id, stream) in &mut conn.send_streams {
+            let fin = stream.final_size();
+            if let Some((offset, data)) = stream.next_bytes(mode) {
+                qtrace!(
+                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                    stream_id.as_u64(),
+                    offset,
+                    offset + data.len() as u64,
+                    epoch,
+                    mode,
+                    remaining
+                );
+                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
+                let data_len = min(data.len(), remaining - frame_hdr_len);
+                let fin = match fin {
+                    None => false,
+                    Some(fin) => fin == offset + data_len as u64,
+                };
+                let frame = Frame::Stream {
+                    fin,
+                    stream_id: stream_id.as_u64(),
+                    offset,
+                    data: data[..data_len].to_vec(),
+                };
+                stream.mark_as_sent(offset, data_len, fin);
+                return Some((
+                    frame,
+                    Some(Box::new(StreamGeneratorToken {
+                        id: *stream_id,
+                        offset,
+                        length: data_len as u64,
+                        fin,
+                    })),
+                ));
+            }
+        }
+        None
+    }
+}
+
+struct StreamGeneratorToken {
+    id: StreamId,
+    offset: u64,
+    length: u64,
+    fin: bool,
+}
+
+impl FrameGeneratorToken for StreamGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            [conn]
+            "Acked frame stream={} offset={} length={} fin={}",
+            self.id.as_u64(),
+            self.offset,
+            self.length,
+            self.fin
+        );
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_acked(self.offset, self.length as usize, self.fin);
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {
+        qinfo!(
+            [conn]
+            "Lost frame stream={} offset={} length={} fin={}",
+            self.id.as_u64(),
+            self.offset,
+            self.length,
+            self.fin
+        );
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_lost(self.offset, self.length as usize, self.fin);
+        }
     }
 }
 
@@ -748,11 +872,27 @@ mod tests {
         s.mark_as_sent(0, 50, false);
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
-        // Should fill up send buffer
+        // Should hit stream flow control limit before filling up send buffer
         let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
-        assert_eq!(res, TX_STREAM_BUFFER - 100);
+        assert_eq!(res, 1024 - 100);
 
-        // TODO(agrover@mozilla.com): test flow control somehow
+        // should do nothing, max stream data already 1024
+        s.set_max_stream_data(1024);
+        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        assert_eq!(res, 0);
+
+        // should now hit the conn flow control (4096)
+        s.set_max_stream_data(1048576);
+        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        assert_eq!(res, 3072);
+
+        // should now hit the tx buffer size
+        flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(TX_STREAM_BUFFER as u64);
+        let res = s.send(&vec![4; TX_STREAM_BUFFER + 100]).unwrap();
+        assert_eq!(res, TX_STREAM_BUFFER - 4096);
+
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);
     }

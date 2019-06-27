@@ -20,8 +20,8 @@ class NeqoHttp3Conn final {
     neqo_http3conn_close(this, aError);
   }
 
-  void process_input(uint8_t *aPacket, uint32_t aLen, uint64_t aCurTime) {
-    neqo_http3conn_process_input(this, aPacket, aLen, aCurTime);
+  void process_input(uint8_t *aPacket, uint32_t aLen) {
+    neqo_http3conn_process_input(this, aPacket, aLen);
     
   }
 
@@ -29,9 +29,9 @@ class NeqoHttp3Conn final {
     neqo_http3conn_process_http3(this);
   }
 
-  void process_output(uint64_t aCurTime) {
+  void process_output() {
 
-    neqo_http3conn_process_output(this, aCurTime);
+    neqo_http3conn_process_output(this);
   }
 
   void get_data_to_send(nsTArray<uint8_t> &data) {

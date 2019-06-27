@@ -4,14 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::now;
-use neqo_crypto::init_db;
-use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
+#![deny(warnings)]
+
+use neqo_common::{now, Datagram};
+use neqo_crypto::{init_db, AntiReplay};
+use neqo_transport::{Connection, ConnectionEvent, State};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -29,7 +32,7 @@ struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     /// NSS database directory.
     db: PathBuf,
-    #[structopt(short = "k", long)]
+    #[structopt(short = "k", long, default_value = "key")]
     /// Name of keys from NSS database.
     key: Vec<String>,
 
@@ -91,24 +94,25 @@ fn http_serve(server: &mut Connection, stream: u64) {
         println!("Invalid HTTP request: {}", msg);
         return;
     }
+    let m = m.unwrap();
 
     let mut resp: Vec<u8> = vec![];
-    if m.as_ref().unwrap().get(1).is_some() {
-        let path = m.as_ref().unwrap().get(1).unwrap().as_str().clone();
+    if let Some(path) = m.get(1) {
+        let path = path.as_str();
         println!("Path = {}", path);
         let count = u32::from_str_radix(path, 10).unwrap();
         for _i in 0..count {
             resp.push(0x58);
         }
     } else {
-        resp = "Hello World".as_bytes().to_vec();
+        resp = b"Hello World".to_vec();
     }
     // TODO(ekr@rtfm.com): This won't work with flow control blocks.
     server.stream_send(stream, &resp).expect("Successful write");
     server.stream_close_send(stream).expect("Stream closed");
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
             .send_to(&d[..], d.destination())
@@ -121,9 +125,11 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
 
 fn main() {
     let args = Args::from_args();
-    assert!(args.key.len() > 0, "Need at least one key");
+    assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
+    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        .expect("unable to setup anti-replay");
 
     // TODO(mt): listen on both v4 and v6.
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
@@ -147,7 +153,8 @@ fn main() {
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
             println!("New connection from {:?}", remote_addr);
-            Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed")
+            Connection::new_server(args.key.clone(), args.alpn.clone(), &anti_replay)
+                .expect("can't create connection")
         });
 
         // TODO use timer to set socket.set_read_timeout.
@@ -157,12 +164,15 @@ fn main() {
             connections.remove(&remote_addr);
             continue;
         }
-
+        if let State::Closing { error, .. } = server.state() {
+            eprintln!("Closing connection from {:?}: {:?}", remote_addr, error);
+            // TOOD(ekr@rtfm.com): Do I need to remove?
+            continue;
+        }
         let mut streams = Vec::new();
         for event in server.events() {
-            match event {
-                ConnectionEvent::RecvStreamReadable { stream_id } => streams.push(stream_id),
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = event {
+                streams.push(stream_id)
             }
         }
 

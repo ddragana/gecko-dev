@@ -8,11 +8,10 @@ use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEAD
 
 use crate::connection::Http3Events;
 
-use neqo_common::data::Data;
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 
 use crate::{Error, Res};
 use std::cell::RefCell;
@@ -26,7 +25,7 @@ struct Request {
     host: String,
     path: String,
     headers: Vec<(String, String)>,
-    buf: Option<Data>,
+    buf: Option<Vec<u8>>,
 }
 
 impl Request {
@@ -55,14 +54,14 @@ impl Request {
 
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!([self] "Encoding headers for {}/{}", self.host, self.path);
-        let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
+        let encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
-        let mut d = Data::default();
-        f.encode(&mut d).unwrap();
-        d.encode_vec(encoded_headers.as_mut_vec());
-        self.buf = Some(d);
+        let mut d = Encoder::default();
+        f.encode(&mut d);
+        d.encode(&encoded_headers[..]);
+        self.buf = Some(d.into());
     }
 }
 
@@ -144,34 +143,36 @@ impl RequestStreamClient {
         qinfo!("Create a request stream_id={}", stream_id);
         RequestStreamClient {
             state: RequestStreamClientState::SendingRequest,
-            stream_id: stream_id,
+            stream_id,
             request: Request::new(method, scheme, host, path, headers),
             response: Response::new(),
             frame_reader: HFrameReader::new(),
-            conn_events: conn_events,
+            conn_events,
         }
     }
 
     // TODO: Currently we cannot send data along with a request
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         if self.state == RequestStreamClientState::SendingRequest {
-            if let None = self.request.buf {
+            if self.request.buf.is_none() {
                 self.request.encode_request(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.request.buf {
-                let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
+                let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
-                if sent == d.remaining() {
+                if sent == d.len() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = RequestStreamClientState::WaitingForResponseHeaders;
                     qdebug!([label] "done sending request");
                 } else {
-                    d.read(sent);
+                    let b = d.split_off(sent);
+                    self.request.buf = Some(b);
                 }
             }
         }
@@ -186,9 +187,10 @@ impl RequestStreamClient {
     }
 
     pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         loop {
             qdebug!([label] "state={:?}.", self.state);
@@ -240,7 +242,7 @@ impl RequestStreamClient {
                     }
                     // we have read the headers.
                     self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
-                    if let None = self.response.headers {
+                    if self.response.headers.is_none() {
                         qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
@@ -313,7 +315,7 @@ impl RequestStreamClient {
             self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
             self.conn_events.borrow_mut().header_ready(self.stream_id);
             self.state = RequestStreamClientState::WaitingForData;
-            if let None = self.response.headers {
+            if self.response.headers.is_none() {
                 panic!("We must not be blocked again!");
             }
         } else {
@@ -323,9 +325,9 @@ impl RequestStreamClient {
     }
 
     pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
-      self.state = RequestStreamClientState::WaitingForResponseHeaders;
-      conn.stream_close_send(self.stream_id)?;
-      Ok(())
+        self.state = RequestStreamClientState::WaitingForResponseHeaders;
+        conn.stream_close_send(self.stream_id)?;
+        Ok(())
     }
 
     pub fn done(&self) -> bool {
@@ -350,7 +352,7 @@ impl RequestStreamClient {
                 } else {
                     *remaining_data_len
                 };
-                let (amount, fin) =  conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
+                let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
                 assert!(amount <= to_read);
                 *remaining_data_len -= amount;
 
@@ -359,11 +361,10 @@ impl RequestStreamClient {
                         return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
                     }
                     self.state = RequestStreamClientState::Closed;
-                } else {
-                    if *remaining_data_len == 0 {
-                        self.state = RequestStreamClientState::WaitingForData;
-                    }
+                } else if *remaining_data_len == 0 {
+                    self.state = RequestStreamClientState::WaitingForData;
                 }
+
                 Ok((amount, fin))
             }
             _ => Ok((0, false)),

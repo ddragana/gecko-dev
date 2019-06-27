@@ -4,13 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
-
 use crate::static_table::{StaticTableEntry, HEADER_STATIC_TABLE};
 use crate::{Error, QPackSide, Res};
 use std::collections::{HashMap, VecDeque};
-
-const QPACK_MAX_TABLE_CAPACITY: u64 = 0;
 
 #[derive(Debug)]
 pub struct DynamicTableEntry {
@@ -21,12 +17,8 @@ pub struct DynamicTableEntry {
 }
 
 impl DynamicTableEntry {
-    pub fn base(&self) -> u64 {
-        self.base
-    }
-
     pub fn can_reduce(&self, first_not_acked: u64) -> bool {
-        self.refs.len() == 0 && self.base < first_not_acked
+        self.refs.is_empty() && self.base < first_not_acked
     }
 
     pub fn size(&self) -> u64 {
@@ -97,10 +89,6 @@ impl HeaderTable {
         self.capacity = c;
     }
 
-    pub fn used(&self) -> u64 {
-        self.used
-    }
-
     pub fn get_static(&self, index: u64) -> Res<&StaticTableEntry> {
         if index > HEADER_STATIC_TABLE.len() as u64 {
             return Err(Error::HeaderLookupError);
@@ -151,7 +139,7 @@ impl HeaderTable {
                     return (Some(iter), None, true);
                 }
 
-                if let None = name_match_s {
+                if name_match_s.is_none() {
                     name_match_s = Some(iter);
                 }
             }
@@ -164,10 +152,8 @@ impl HeaderTable {
                     return (None, Some(iter), true);
                 }
 
-                if let None = name_match_s {
-                    if let None = name_match_d {
-                        name_match_d = Some(iter);
-                    }
+                if name_match_s.is_none() && name_match_d.is_none() {
+                    name_match_d = Some(iter);
                 }
             }
         }
@@ -176,7 +162,7 @@ impl HeaderTable {
     }
 
     pub fn evict_to(&mut self, reduce: u64) -> bool {
-        while (self.dynamic.len() > 0) && self.used > reduce {
+        while (!self.dynamic.is_empty()) && self.used > reduce {
             if let Some(e) = self.dynamic.back() {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
@@ -185,13 +171,13 @@ impl HeaderTable {
                 self.dynamic.pop_back();
             }
         }
-        return true;
+        true
     }
 
     pub fn insert(&mut self, name: Vec<u8>, value: Vec<u8>) -> Res<()> {
         let entry = DynamicTableEntry {
-            name: name,
-            value: value,
+            name,
+            value,
             base: self.base,
             refs: HashMap::new(),
         };
@@ -234,7 +220,7 @@ impl HeaderTable {
             name = entry.name().to_vec();
             value = entry.value().to_vec();
         }
-        let _ = self.insert(name, value)?;
+        self.insert(name, value)?;
         Ok(())
     }
 

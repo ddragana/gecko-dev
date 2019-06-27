@@ -7,9 +7,9 @@
 use std::ptr::{null_mut, NonNull};
 
 use crate::p11::{
-    CERTCertList, CERTCertListNode, /*CERT_GetCertificateDer,*/ CertList, PRCList, SECItem, SECItemType,
+    CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem, SECItemType,
 };
-//use crate::result;
+use crate::result;
 use crate::ssl::{PRFileDesc, SSL_PeerCertificateChain};
 
 pub struct CertificateChain {
@@ -41,17 +41,16 @@ impl<'a> Iterator for &'a mut CertificateChain {
         if self.cursor == CertificateChain::head(&self.certs) {
             return None;
         }
-        let item = SECItem {
+        let mut item = SECItem {
             type_: SECItemType::siBuffer,
             data: null_mut(),
             len: 0,
         };
-/*        let cert = unsafe { *self.cursor }.cert;
+        let cert = unsafe { *self.cursor }.cert;
         let rv = unsafe { CERT_GetCertificateDer(cert, &mut item) };
-        match result::result(rv) {
-            Err(_) => panic!("Error getting DER from certificate"),
-            _ => {}
-        };*/
+        if result::result(rv).is_err() {
+            panic!("Error getting DER from certificate");
+        }
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
     }
 }

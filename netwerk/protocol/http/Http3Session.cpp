@@ -9,6 +9,7 @@
 #include "nsHttpHandler.h"
 #include "mozilla/RefPtr.h"
 #include "ASpdySession.h" // because of SoftStreamError()
+#include "nsSocketTransportService2.h"
 
 namespace mozilla {
 namespace net {
@@ -77,7 +78,7 @@ nsresult Http3Session::ProcessInput(nsIAsyncInputStream *aIn) {
   } else {
     rv = mSegmentWriter->OnWriteSegment((char*)packet, 2000, &read);
   }
-  mHttp3Connection->process_input(packet, read, 0);
+  mHttp3Connection->process_input(packet, read);
   mHttp3Connection->process_http3();
   LOG(("Http3Session::Process status: connected=%d", mConnected));
   if (!mConnected) {
@@ -224,7 +225,7 @@ nsresult Http3Session::ProcessOutput(nsIAsyncOutputStream *aOut) {
     mPacketToSend = nullptr;
   }
   mHttp3Connection->process_http3();
-  mHttp3Connection->process_output(0);
+  mHttp3Connection->process_output();
   Buffer buf = neqo_http3conn_get_data_to_send(mHttp3Connection);
   while (buf.len > 0) {
     uint32_t written = 0;
@@ -402,7 +403,7 @@ void Http3Session::OnTransportStatus(nsITransport* aTransport, nsresult aStatus,
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 }
 
-bool Http3Session::IsDone() { return false; }//TODO return !mStreamTransactionHash.Count(); }
+bool Http3Session::IsDone() { return mClosed; }
 
 nsresult Http3Session::Status() {
   MOZ_ASSERT(false, "Http3Session::Status()");

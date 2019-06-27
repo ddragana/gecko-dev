@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
 use crate::result;
@@ -61,10 +64,10 @@ impl Aead {
         prefix: S,
     ) -> Res<Aead> {
         let s: *mut PK11SymKey = **secret;
-        Aead::from_raw(version, cipher, s, prefix)
+        unsafe { Aead::from_raw(version, cipher, s, prefix) }
     }
 
-    pub fn from_raw<S: Into<String>>(
+    unsafe fn from_raw<S: Into<String>>(
         version: Version,
         cipher: Cipher,
         secret: *mut PK11SymKey,
@@ -73,16 +76,14 @@ impl Aead {
         let prefix_str = prefix.into();
         let p = prefix_str.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
-        let rv = unsafe {
-            SSL_MakeAead(
-                version,
-                cipher,
-                secret,
-                p.as_ptr() as *const i8,
-                p.len() as u32,
-                &mut ctx,
-            )
-        };
+        let rv = SSL_MakeAead(
+            version,
+            cipher,
+            secret,
+            p.as_ptr() as *const i8,
+            p.len() as u32,
+            &mut ctx,
+        );
         result::result(rv)?;
         match NonNull::new(ctx) {
             Some(ctx_ptr) => Ok(Aead {
@@ -105,16 +106,16 @@ impl Aead {
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                aad.len() as c_uint,
+                to_c_uint(aad.len())?,
                 input.as_ptr(),
-                input.len() as c_uint,
+                to_c_uint(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
             )
         };
         result::result(rv)?;
-        return Ok(&output[0..l as usize]);
+        Ok(&output[0..l as usize])
     }
 
     pub fn decrypt<'a>(
@@ -130,16 +131,16 @@ impl Aead {
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                aad.len() as c_uint,
+                to_c_uint(aad.len())?,
                 input.as_ptr(),
-                input.len() as c_uint,
+                to_c_uint(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
             )
         };
         result::result(rv)?;
-        return Ok(&output[0..l as usize]);
+        Ok(&output[0..l as usize])
     }
 }
 

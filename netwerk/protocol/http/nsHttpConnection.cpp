@@ -1808,7 +1808,7 @@ void nsHttpConnection::BeginIdleMonitoring() {
   MOZ_ASSERT(!mTransaction, "BeginIdleMonitoring() while active");
   MOZ_ASSERT(mUsingSpdyVersion == SpdyVersion::NONE,
              "Idle monitoring of spdy not allowed");
-  MOZ_ASSERT(mHttp3Session,
+  MOZ_ASSERT(!mHttp3Session,
              "Idle monitoring of http3 not allowed");
 
   LOG(("Entering Idle Monitoring Mode [this=%p]", this));

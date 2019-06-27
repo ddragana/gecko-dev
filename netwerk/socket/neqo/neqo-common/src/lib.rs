@@ -6,11 +6,17 @@
 
 #![deny(warnings)]
 
-pub mod data;
+mod codec;
+mod datagram;
+mod incrdecoder;
 pub mod log;
-pub mod readbuf;
-pub mod varint;
-use std::time::SystemTime;
+pub mod once;
+
+pub use self::codec::{Decoder, Encoder};
+pub use self::datagram::Datagram;
+pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
+
+use std::time::Instant;
 
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
@@ -23,31 +29,8 @@ macro_rules! matches {
     }
 }
 
-type Res<T> = Result<T, Error>;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Error {
-    NoMoreData,
-    ReadError, // TODO (mt): Copy the reader error through.
-}
-
-impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Reader error: {:?}", self)
-    }
-}
-
-pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
+pub fn now() -> Instant {
+    Instant::now()
 }
 
 pub fn hex(buf: &[u8]) -> String {

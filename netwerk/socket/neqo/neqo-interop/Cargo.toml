@@ -1,7 +1,7 @@
 [package]
-name = "neqo-http3-client"
+name = "neqo-interop"
 version = "0.1.0"
-authors = ["Dragana Damjanovic <dragana.damjano@gmail.com>"]
+authors = ["EKR <ekr@rtfm.com>"]
 edition = "2018"
 
 [dependencies]
@@ -9,5 +9,5 @@ neqo-crypto = { version = "0.1", path = "./../neqo-crypto" }
 neqo-transport = { version = "0.1", path = "./../neqo-transport" }
 neqo-common = { version="0.1", path="./../neqo-common" }
 neqo-http3 = { version = "0.1", path = "./../neqo-http3" }
+
 structopt = "0.2.15"
-url = "1.7.2"

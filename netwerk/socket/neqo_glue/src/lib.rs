@@ -4,7 +4,8 @@
 
 //extern crate neqo_http3;
 use neqo_http3::Http3Connection;
-use neqo_transport::connection::{Connection, Datagram};
+use neqo_transport::connection::Connection;
+use neqo_common::Datagram;
 
 extern crate xpcom;
 use std::net::SocketAddr;
@@ -22,6 +23,7 @@ use nsstring::*;
 use std::ops;
 use std::ptr;
 use std::slice;
+use std::time::Instant;
 
 fn loopback() -> SocketAddr {
     "127.0.0.1:443".parse().unwrap()
@@ -37,13 +39,14 @@ pub struct NeqoHttp3Conn {
 
 impl NeqoHttp3Conn {
     pub fn new() -> RefPtr<NeqoHttp3Conn> {
-        init_db(" /Users/draganadamjanovic/dragana_work/gecko-dev/netwerk/socket/neqo/neqo-transport/db");
+        init_db(" /Users/draganadamjanovic/dragana_work/gecko-dev/netwerk/socket/neqo/test-fixture/db");
         unsafe {
             RefPtr::from_raw(Box::into_raw(Box::new(NeqoHttp3Conn {
                 conn: Http3Connection::new(
                     Connection::new_client("", &["h3"], loopback(), loopback()).unwrap(),
                     100,
                     100,
+                    None,
                 ),
                 refcnt: AtomicRefcnt::new(),
                 packets_to_send: Vec::new(),
@@ -104,26 +107,28 @@ pub extern "C" fn neqo_http3conn_process_input(
     conn: &mut NeqoHttp3Conn,
     packet: *const u8,
     len: u32,
-    cur_time: u64,
 ) {
     let mut input = Vec::new();
     unsafe {
         let array: &[u8] = slice::from_raw_parts(packet, len as usize);
         input.push(Datagram::new(loopback(), loopback(), array.to_vec()));
     }
-    conn.conn.process_input(input.drain(..), cur_time);
+    conn.conn.process_input(input.drain(..), Instant::now());
 }
 
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_process_http3(conn: &mut NeqoHttp3Conn) {
-    conn.conn.process_http3();
+    conn.conn.process_http3(Instant::now());
 }
 
 #[no_mangle]
-pub extern "C" fn neqo_http3conn_process_output(conn: &mut NeqoHttp3Conn, cur_time: u64) -> u64 {
-    let (mut datagrams, timeout) = conn.conn.process_output(cur_time);
+pub extern "C" fn neqo_http3conn_process_output(conn: &mut NeqoHttp3Conn) -> u64 {
+    let (mut datagrams, timeout) = conn.conn.process_output(Instant::now());
     conn.packets_to_send.append(&mut datagrams);
-    timeout
+    match timeout {
+        Some(t) => (t.as_micros() as u64),
+        None => std::u64::MAX,
+    }
 }
 
 #[repr(C)]
@@ -163,7 +168,7 @@ pub extern "C" fn neqo_http3conn_forget_buffer(buf: Buffer) {
 
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_close(conn: &mut NeqoHttp3Conn, error: Http3AppError) {
-    conn.conn.close(error.code(), "");
+    conn.conn.close(Instant::now(), error.code(), "");
 }
 
 #[no_mangle]
@@ -339,7 +344,7 @@ pub extern "C" fn neqo_http3conn_reset_stream(
 // TODO when sending request body has been implemented.
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_close_stream(conn: &mut NeqoHttp3Conn, stream_id: u64) -> nsresult {
-    match conn.conn.stream_close_send(stream_id) {
+    match conn.conn.stream_close_send(Instant::now(), stream_id) {
       Ok(()) => NS_OK,
       Err(_) => NS_ERROR_INVALID_ARG
     }
@@ -402,7 +407,7 @@ impl From<neqo_http3::Http3Event> for Http3Event {
             neqo_http3::Http3Event::ConnectionConnected => Http3Event::ConnectionConnected,
             neqo_http3::Http3Event::GoawayReceived => Http3Event::GoawayReceived,
             neqo_http3::Http3Event::ConnectionClosing => Http3Event::ConnectionClosing,
-            neqo_http3::Http3Event::ConnectionClosed => Http3Event::ConnectionClosed,
+            neqo_http3::Http3Event::ConnectionClosed { .. } => Http3Event::ConnectionClosed,
         }
     }
 }
@@ -456,7 +461,7 @@ pub extern "C" fn neqo_http3conn_read_data(
 ) -> nsresult {
     unsafe {
         let array: &mut [u8] = slice::from_raw_parts_mut(buf, len as usize);
-        match conn.conn.read_data(stream_id, &mut array[..]) {
+        match conn.conn.read_data(Instant::now(), stream_id, &mut array[..]) {
             Ok(r) => {
                 *read = r.0 as u32;
                 *fin = r.1;

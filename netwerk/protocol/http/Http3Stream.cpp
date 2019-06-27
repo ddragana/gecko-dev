@@ -10,6 +10,7 @@
 #include "Http3Stream.h"
 #include "nsHttpRequestHead.h"
 #include "nsISocketTransport.h"
+#include "nsSocketTransportService2.h"
 
 #include <stdio.h>
 
