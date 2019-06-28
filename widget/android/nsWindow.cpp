@@ -1428,7 +1428,8 @@ nsWindow::nsWindow()
     : mScreenId(0),  // Use 0 (primary screen) as the default value.
       mIsVisible(false),
       mParent(nullptr),
-      mIsFullScreen(false) {}
+      mIsFullScreen(false),
+      mIsDisablingWebRender(false) {}
 
 nsWindow::~nsWindow() {
   gTopLevelWindows.RemoveElement(this);
@@ -1743,11 +1744,9 @@ nsWindow* nsWindow::FindTopLevel() {
   return this;
 }
 
-nsresult nsWindow::SetFocus(bool aRaise) {
-  nsWindow* top = FindTopLevel();
-  top->BringToFront();
-
-  return NS_OK;
+void nsWindow::SetFocus(Raise) {
+  // FIXME: Shouldn't this account for the argument?
+  FindTopLevel()->BringToFront();
 }
 
 void nsWindow::BringToFront() {
@@ -1845,6 +1844,13 @@ mozilla::layers::LayerManager* nsWindow::GetLayerManager(
   if (mLayerManager) {
     return mLayerManager;
   }
+
+  if (mIsDisablingWebRender) {
+    CreateLayerManager();
+    mIsDisablingWebRender = false;
+    return mLayerManager;
+  }
+
   return nullptr;
 }
 
@@ -1877,6 +1883,11 @@ void nsWindow::CreateLayerManager() {
     printf_stderr(" -- creating basic, not accelerated\n");
     mLayerManager = CreateBasicLayerManager();
   }
+}
+
+void nsWindow::NotifyDisablingWebRender() {
+  mIsDisablingWebRender = true;
+  RedrawAll();
 }
 
 void nsWindow::OnSizeChanged(const gfx::IntSize& aSize) {

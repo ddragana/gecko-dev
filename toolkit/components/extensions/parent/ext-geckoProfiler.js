@@ -79,13 +79,11 @@ this.geckoProfiler = class extends ExtensionAPI {
           Services.prefs.setBoolPref(PREF_ASYNC_STACK, false);
           if (threads) {
             Services.profiler.StartProfiler(bufferSize, interval,
-                                            features, features.length,
-                                            threads, threads.length,
+                                            features, threads,
                                             windowLength);
           } else {
             Services.profiler.StartProfiler(bufferSize, interval,
-                                            features, features.length,
-                                            [], 0,
+                                            features, [],
                                             windowLength);
           }
         },
@@ -122,6 +120,15 @@ this.geckoProfiler = class extends ExtensionAPI {
           }
 
           return Services.profiler.getProfileDataAsArrayBuffer();
+        },
+
+        async getProfileAsGzippedArrayBuffer() {
+          if (!Services.profiler.IsActive()) {
+            throw new ExtensionError("The profiler is stopped. " +
+              "You need to start the profiler before you can capture a profile.");
+          }
+
+          return Services.profiler.getProfileDataAsGzippedArrayBuffer();
         },
 
         async getSymbols(debugName, breakpadId) {

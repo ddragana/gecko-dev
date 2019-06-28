@@ -33,7 +33,7 @@ class VideoBridgeChild final : public PVideoBridgeChild,
   bool DeallocPTextureChild(PTextureChild* actor);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
-  void DeallocPVideoBridgeChild() override;
+  void ActorDealloc() override;
 
   // ISurfaceAllocator
   bool AllocUnsafeShmem(size_t aSize,
@@ -55,7 +55,7 @@ class VideoBridgeChild final : public PVideoBridgeChild,
   // ClientIPCAllocator
   base::ProcessId GetParentPid() const override { return OtherPid(); }
   MessageLoop* GetMessageLoop() const override { return mMessageLoop; }
-  void CancelWaitForRecycle(uint64_t aTextureId) override {
+  void CancelWaitForNotifyNotUsed(uint64_t aTextureId) override {
     MOZ_ASSERT(false, "NO RECYCLING HERE");
   }
 

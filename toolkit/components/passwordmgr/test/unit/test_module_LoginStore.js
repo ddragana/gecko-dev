@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -31,7 +29,7 @@ add_task(async function test_save_reload() {
     id:                  storeForSave.data.nextId++,
     hostname:            "http://www.example.com",
     httpRealm:           null,
-    formSubmitURL:       "http://www.example.com/submit-url",
+    formSubmitURL:       "http://www.example.com",
     usernameField:       "field_" + String.fromCharCode(533, 537, 7570, 345),
     passwordField:       "field_" + String.fromCharCode(421, 259, 349, 537),
     encryptedUsername:   "(test)",
@@ -104,7 +102,7 @@ add_task(async function test_load_string_predefined() {
                 "\"id\":1," +
                 "\"hostname\":\"http://www.example.com\"," +
                 "\"httpRealm\":null," +
-                "\"formSubmitURL\":\"http://www.example.com/submit-url\"," +
+                "\"formSubmitURL\":\"http://www.example.com\"," +
                 "\"usernameField\":\"usernameField\"," +
                 "\"passwordField\":\"passwordField\"," +
                 "\"encryptedUsername\":\"(test)\"," +
@@ -128,7 +126,7 @@ add_task(async function test_load_string_predefined() {
     id:                  1,
     hostname:            "http://www.example.com",
     httpRealm:           null,
-    formSubmitURL:       "http://www.example.com/submit-url",
+    formSubmitURL:       "http://www.example.com",
     usernameField:       "usernameField",
     passwordField:       "passwordField",
     encryptedUsername:   "(test)",

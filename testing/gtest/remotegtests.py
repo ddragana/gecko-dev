@@ -16,6 +16,7 @@ import shutil
 import sys
 import tempfile
 import time
+import traceback
 
 import mozcrash
 import mozdevice
@@ -236,13 +237,13 @@ class AppWaiter(object):
         return top
 
     def wait_for_start(self, package):
-        if self.update_log():
-            # if log content is available, assume the app started; otherwise,
-            # a short run (few tests) might complete without ever being detected
-            # in the foreground
-            return package
         top = None
         while top != package and not self.start_timed_out():
+            if self.update_log():
+                # if log content is available, assume the app started; otherwise,
+                # a short run (few tests) might complete without ever being detected
+                # in the foreground
+                return package
             time.sleep(1)
             top = self.get_top()
         return top
@@ -387,6 +388,7 @@ def main():
         log.info("gtest | Received keyboard interrupt")
     except Exception as e:
         log.error(str(e))
+        traceback.print_exc()
         if isinstance(e, mozdevice.ADBTimeoutError):
             device_exception = True
     finally:

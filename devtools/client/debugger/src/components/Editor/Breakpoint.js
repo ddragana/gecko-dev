@@ -23,7 +23,7 @@ import type {
 
 const breakpointSvg = document.createElement("div");
 breakpointSvg.innerHTML =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60 15" width="60" height="15"><path d="M53.07.5H1.5c-.54 0-1 .46-1 1v12c0 .54.46 1 1 1h51.57c.58 0 1.15-.26 1.53-.7l4.7-6.3-4.7-6.3c-.38-.44-.95-.7-1.53-.7z"/></svg>';
+  '<svg viewBox="0 0 60 15" width="60" height="15"><path d="M53.07.5H1.5c-.54 0-1 .46-1 1v12c0 .54.46 1 1 1h51.57c.58 0 1.15-.26 1.53-.7l4.7-6.3-4.7-6.3c-.38-.44-.95-.7-1.53-.7z"/></svg>';
 
 type Props = {
   cx: ThreadContext,
@@ -106,10 +106,15 @@ class Breakpoint extends PureComponent<Props> {
   };
 
   onContextMenu = (event: MouseEvent) => {
-    const { cx, breakpoint, breakpointActions } = this.props;
+    const { cx, breakpoint, selectedSource, breakpointActions } = this.props;
     event.stopPropagation();
     event.preventDefault();
-    showMenu(event, breakpointItems(cx, breakpoint, breakpointActions));
+    const selectedLocation = getSelectedLocation(breakpoint, selectedSource);
+
+    showMenu(
+      event,
+      breakpointItems(cx, breakpoint, selectedLocation, breakpointActions)
+    );
   };
 
   addBreakpoint(props: Props) {

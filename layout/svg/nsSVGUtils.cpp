@@ -457,10 +457,10 @@ void nsSVGUtils::DetermineMaskUsage(nsIFrame* aFrame, bool aHandleOpacity,
   // XXX check return value?
   SVGObserverUtils::GetAndObserveClipPath(firstFrame, &clipPathFrame);
   MOZ_ASSERT(!clipPathFrame ||
-             svgReset->mClipPath.GetType() == StyleShapeSourceType::URL);
+             svgReset->mClipPath.GetType() == StyleShapeSourceType::Image);
 
   switch (svgReset->mClipPath.GetType()) {
-    case StyleShapeSourceType::URL:
+    case StyleShapeSourceType::Image:
       if (clipPathFrame) {
         if (clipPathFrame->IsTrivial()) {
           aUsage.shouldApplyClipPath = true;
@@ -709,8 +709,13 @@ void nsSVGUtils::PaintFrameWithEffects(nsIFrame* aFrame, gfxContext& aContext,
       StyleMaskMode maskMode =
           aFrame->StyleSVGReset()->mMask.mLayers[0].mMaskMode;
       nsSVGMaskFrame::MaskParams params(&aContext, aFrame, aTransform,
-                                        maskUsage.opacity, &maskTransform,
-                                        maskMode, aImgParams);
+                                        maskUsage.opacity, maskMode,
+                                        aImgParams);
+      // We want the mask to be untransformed so use the inverse of the current
+      // transform as the maskTransform to compensate.
+      maskTransform = aContext.CurrentMatrix();
+      maskTransform.Invert();
+
       maskSurface = maskFrame->GetMaskForMaskedFrame(params);
 
       if (!maskSurface) {
@@ -722,13 +727,14 @@ void nsSVGUtils::PaintFrameWithEffects(nsIFrame* aFrame, gfxContext& aContext,
     }
 
     if (maskUsage.shouldGenerateClipMaskLayer) {
-      Matrix clippedMaskTransform;
       RefPtr<SourceSurface> clipMaskSurface = clipPathFrame->GetClipMask(
-          aContext, aFrame, aTransform, &clippedMaskTransform, maskSurface,
-          maskTransform);
+          aContext, aFrame, aTransform, maskSurface, maskTransform);
       if (clipMaskSurface) {
+        // We want the mask to be untransformed so use the inverse of the
+        // current transform as the maskTransform to compensate.
+        maskTransform = aContext.CurrentMatrix();
+        maskTransform.Invert();
         maskSurface = clipMaskSurface;
-        maskTransform = clippedMaskTransform;
       } else {
         // Either entire surface is clipped out, or gfx buffer allocation
         // failure in nsSVGClipPathFrame::GetClipMask.

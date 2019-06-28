@@ -180,7 +180,7 @@ var PlacesOrganizer = {
       let findKey = document.getElementById("key_find");
       findKey.setAttribute("command", "OrganizerCommand_find:all");
 
-      // 2. Disable some keybindings from browser.xul
+      // 2. Disable some keybindings from browser.xhtml
       let elements = ["cmd_handleBackspace", "cmd_handleShiftBackspace"];
       for (let i = 0; i < elements.length; i++) {
         document.getElementById(elements[i]).setAttribute("disabled", "true");
@@ -487,7 +487,7 @@ var PlacesOrganizer = {
         }
 
         let backupDate = PlacesBackups.getDateForFile(backupFiles[i]);
-        let m = restorePopup.insertBefore(document.createElement("menuitem"),
+        let m = restorePopup.insertBefore(document.createXULElement("menuitem"),
                                           document.getElementById("restoreFromFile"));
         m.setAttribute("label", dateFormatter.format(backupDate) + sizeInfo);
         m.setAttribute("value", OS.Path.basename(backupFiles[i]));
@@ -496,7 +496,7 @@ var PlacesOrganizer = {
       }
 
       // Add the restoreFromFile item.
-      restorePopup.insertBefore(document.createElement("menuseparator"),
+      restorePopup.insertBefore(document.createXULElement("menuseparator"),
                                 document.getElementById("restoreFromFile"));
     })();
   },
@@ -972,7 +972,7 @@ var ViewMenu = {
     var columns = content.columns;
     for (var i = 0; i < columns.count; ++i) {
       var column = columns.getColumnAt(i).element;
-      var menuitem = document.createElement("menuitem");
+      var menuitem = document.createXULElement("menuitem");
       menuitem.id = "menucol_" + column.id;
       menuitem.column = column;
       var label = column.getAttribute("label");

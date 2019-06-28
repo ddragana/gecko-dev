@@ -415,11 +415,11 @@ ModuleEnvironmentObject* ModuleEnvironmentObject::create(
   return env;
 }
 
-ModuleObject& ModuleEnvironmentObject::module() {
+ModuleObject& ModuleEnvironmentObject::module() const {
   return getReservedSlot(MODULE_SLOT).toObject().as<ModuleObject>();
 }
 
-IndirectBindingMap& ModuleEnvironmentObject::importBindings() {
+IndirectBindingMap& ModuleEnvironmentObject::importBindings() const {
   return module().importBindings();
 }
 
@@ -1481,18 +1481,23 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
     LiveEnvironmentVal* maybeLiveEnv =
         DebugEnvironments::hasLiveEnvironment(*env);
 
-    if (env->is<ModuleEnvironmentObject>()) {
-      /* Everything is aliased and stored in the environment object. */
-      return true;
-    }
-
-    /* Handle unaliased formals, vars, lets, and consts at function scope. */
-    if (env->is<CallObject>()) {
-      CallObject& callobj = env->as<CallObject>();
-      RootedFunction fun(cx, &callobj.callee());
-      RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
-      if (!script->ensureHasAnalyzedArgsUsage(cx)) {
-        return false;
+    // Handle unaliased formals, vars, lets, and consts at function or module
+    // scope.
+    if (env->is<CallObject>() || env->is<ModuleEnvironmentObject>()) {
+      RootedScript script(cx);
+      if (env->is<CallObject>()) {
+        CallObject& callobj = env->as<CallObject>();
+        RootedFunction fun(cx, &callobj.callee());
+        script = JSFunction::getOrCreateScript(cx, fun);
+        if (!script->ensureHasAnalyzedArgsUsage(cx)) {
+          return false;
+        }
+      } else {
+        script = env->as<ModuleEnvironmentObject>().module().maybeScript();
+        if (!script) {
+          *accessResult = ACCESS_LOST;
+          return true;
+        }
       }
 
       BindingIter bi(script);
@@ -1500,6 +1505,10 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
         bi++;
       }
       if (!bi) {
+        return true;
+      }
+
+      if (bi.location().kind() == BindingLocation::Kind::Import) {
         return true;
       }
 
@@ -1565,7 +1574,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
         }
 
         if (action == SET) {
-          TypeScript::SetArgument(cx, script, i, vp);
+          jit::JitScript::MonitorArgType(cx, script, i, vp);
         }
       }
 
@@ -1776,6 +1785,11 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
   static Scope* getEnvironmentScope(const JSObject& env) {
     if (isFunctionEnvironment(env)) {
       return env.as<CallObject>().callee().nonLazyScript()->bodyScope();
+    }
+    if (env.is<ModuleEnvironmentObject>()) {
+      JSScript* script =
+          env.as<ModuleEnvironmentObject>().module().maybeScript();
+      return script ? script->bodyScope() : nullptr;
     }
     if (isNonExtensibleLexicalEnvironment(env)) {
       return &env.as<LexicalEnvironmentObject>().scope();
@@ -3787,20 +3801,23 @@ static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
     }
   }
 
-  if (script->hasObjects()) {
-    RootedFunction fun(cx);
-    RootedScript innerScript(cx);
-    for (JSObject* obj : script->objects()) {
-      if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-        fun = &obj->as<JSFunction>();
-        innerScript = JSFunction::getOrCreateScript(cx, fun);
-        if (!innerScript) {
-          return false;
-        }
+  RootedFunction fun(cx);
+  RootedScript innerScript(cx);
+  for (JS::GCCellPtr gcThing : script->gcthings()) {
+    if (!gcThing.is<JSObject>()) {
+      continue;
+    }
 
-        if (!RemoveReferencedNames(cx, innerScript, remainingNames)) {
-          return false;
-        }
+    JSObject* obj = &gcThing.as<JSObject>();
+    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
+      fun = &obj->as<JSFunction>();
+      innerScript = JSFunction::getOrCreateScript(cx, fun);
+      if (!innerScript) {
+        return false;
+      }
+
+      if (!RemoveReferencedNames(cx, innerScript, remainingNames)) {
+        return false;
       }
     }
   }
@@ -3859,17 +3876,20 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
     printf("%s\n", buf.string());
   }
 
-  if (innerScript->hasObjects()) {
-    RootedFunction fun(cx);
-    RootedScript innerInnerScript(cx);
-    for (JSObject* obj : script->objects()) {
-      if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-        fun = &obj->as<JSFunction>();
-        innerInnerScript = JSFunction::getOrCreateScript(cx, fun);
-        if (!innerInnerScript ||
-            !AnalyzeEntrainedVariablesInScript(cx, script, innerInnerScript)) {
-          return false;
-        }
+  RootedFunction fun(cx);
+  RootedScript innerInnerScript(cx);
+  for (JS::GCCellPtr gcThing : script->gcthings()) {
+    if (!gcThing.is<JSObject>()) {
+      continue;
+    }
+
+    JSObject* obj = &gcThing.as<JSObject>();
+    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
+      fun = &obj->as<JSFunction>();
+      innerInnerScript = JSFunction::getOrCreateScript(cx, fun);
+      if (!innerInnerScript ||
+          !AnalyzeEntrainedVariablesInScript(cx, script, innerInnerScript)) {
+        return false;
       }
     }
   }
@@ -3889,13 +3909,14 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
 //
 // |bar| unnecessarily entrains |b|, and |baz| unnecessarily entrains |a|.
 bool js::AnalyzeEntrainedVariables(JSContext* cx, HandleScript script) {
-  if (!script->hasObjects()) {
-    return true;
-  }
-
   RootedFunction fun(cx);
   RootedScript innerScript(cx);
-  for (JSObject* obj : script->objects()) {
+  for (JS::GCCellPtr gcThing : script->gcthings()) {
+    if (!gcThing.is<JSObject>()) {
+      continue;
+    }
+
+    JSObject* obj = &gcThing.as<JSObject>();
     if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
       fun = &obj->as<JSFunction>();
       innerScript = JSFunction::getOrCreateScript(cx, fun);

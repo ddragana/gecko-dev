@@ -2302,7 +2302,12 @@ static bool IsRegExpHoistableCall(CompileRuntime* runtime, MCall* call,
     if (!fun->isSelfHostedBuiltin()) {
       return false;
     }
-    name = GetSelfHostedFunctionName(fun->rawJSFunction());
+
+    // Avoid accessing `JSFunction.flags_` via `JSFunction::isExtended`.
+    if (!fun->isExtended()) {
+      return false;
+    }
+    name = GetClonedSelfHostedFunctionNameOffMainThread(fun->rawJSFunction());
   } else {
     MDefinition* funDef = call->getFunction();
     if (funDef->isDebugCheckSelfHosted()) {
@@ -4554,7 +4559,7 @@ bool jit::AnalyzeNewScriptDefiniteProperties(
     }
   }
 
-  TypeScript::SetThis(cx, script, TypeSet::ObjectType(group));
+  JitScript::MonitorThisType(cx, script, TypeSet::ObjectType(group));
 
   MIRGraph graph(&temp);
   InlineScriptTree* inlineScriptTree =
@@ -4800,8 +4805,8 @@ bool jit::AnalyzeArgumentsUsage(JSContext* cx, JSScript* scriptArg) {
     return false;
   }
 
-  AutoKeepTypeScripts keepTypes(cx);
-  if (!script->ensureHasTypes(cx, keepTypes)) {
+  AutoKeepJitScripts keepJitScript(cx);
+  if (!script->ensureHasJitScript(cx, keepJitScript)) {
     return false;
   }
 

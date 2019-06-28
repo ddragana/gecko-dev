@@ -13,7 +13,6 @@
 #include "gfxContext.h"
 #include "gfxCrashReporterUtils.h"
 #include "gfxPattern.h"
-#include "gfxPrefs.h"
 #include "gfxUtils.h"
 #include "MozFramebuffer.h"
 #include "GLBlitHelper.h"
@@ -30,11 +29,13 @@
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/WebGLContextEvent.h"
+#include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/EnumeratedArrayCycleCollection.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessPriorityManager.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "nsContentUtils.h"
 #include "nsDisplayList.h"
@@ -97,7 +98,8 @@ using namespace mozilla::layers;
 
 WebGLContextOptions::WebGLContextOptions() {
   // Set default alpha state based on preference.
-  if (gfxPrefs::WebGLDefaultNoAlpha()) alpha = false;
+  alpha = !StaticPrefs::WebGLDefaultNoAlpha();
+  antialias = StaticPrefs::WebGLDefaultAntialias();
 }
 
 bool WebGLContextOptions::operator==(const WebGLContextOptions& r) const {
@@ -116,18 +118,18 @@ bool WebGLContextOptions::operator==(const WebGLContextOptions& r) const {
 WebGLContext::WebGLContext()
     : gl(mGL_OnlyClearInDestroyResourcesAndContext)  // const reference
       ,
-      mMaxPerfWarnings(gfxPrefs::WebGLMaxPerfWarnings()),
+      mMaxPerfWarnings(StaticPrefs::WebGLMaxPerfWarnings()),
       mNumPerfWarnings(0),
       mMaxAcceptableFBStatusInvals(
-          gfxPrefs::WebGLMaxAcceptableFBStatusInvals()),
+          StaticPrefs::WebGLMaxAcceptableFBStatusInvals()),
       mDataAllocGLCallCount(0),
       mEmptyTFO(0),
       mContextLossHandler(this),
       mNeedsFakeNoAlpha(false),
       mNeedsFakeNoDepth(false),
       mNeedsFakeNoStencil(false),
-      mAllowFBInvalidation(gfxPrefs::WebGLFBInvalidation()),
-      mMsaaSamples((uint8_t)gfxPrefs::WebGLMsaaSamples()) {
+      mAllowFBInvalidation(StaticPrefs::WebGLFBInvalidation()),
+      mMsaaSamples((uint8_t)StaticPrefs::WebGLMsaaSamples()) {
   mGeneration = 0;
   mInvalidated = false;
   mCapturedFrameInvalidated = false;
@@ -163,7 +165,7 @@ WebGLContext::WebGLContext()
   mAlreadyWarnedAboutFakeVertexAttrib0 = false;
   mAlreadyWarnedAboutViewportLargerThanDest = false;
 
-  mMaxWarnings = gfxPrefs::WebGLMaxWarningsPerContext();
+  mMaxWarnings = StaticPrefs::WebGLMaxWarningsPerContext();
   if (mMaxWarnings < -1) {
     GenerateWarning(
         "webgl.max-warnings-per-context size is too large (seems like a "
@@ -348,7 +350,6 @@ WebGLContext::SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
   newOpts.stencil = attributes.mStencil;
   newOpts.depth = attributes.mDepth;
   newOpts.premultipliedAlpha = attributes.mPremultipliedAlpha;
-  newOpts.antialias = attributes.mAntialias;
   newOpts.preserveDrawingBuffer = attributes.mPreserveDrawingBuffer;
   newOpts.failIfMajorPerformanceCaveat =
       attributes.mFailIfMajorPerformanceCaveat;
@@ -357,13 +358,16 @@ WebGLContext::SetContextOptions(JSContext* cx, JS::Handle<JS::Value> options,
   if (attributes.mAlpha.WasPassed()) {
     newOpts.alpha = attributes.mAlpha.Value();
   }
+  if (attributes.mAntialias.WasPassed()) {
+    newOpts.antialias = attributes.mAntialias.Value();
+  }
 
   // Don't do antialiasing if we've disabled MSAA.
-  if (!gfxPrefs::MSAALevel()) {
+  if (!mMsaaSamples) {
     newOpts.antialias = false;
   }
 
-  if (!gfxPrefs::WebGLForceMSAA()) {
+  if (newOpts.antialias && !StaticPrefs::WebGLForceMSAA()) {
     const nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
 
     nsCString blocklistId;
@@ -475,36 +479,50 @@ bool WebGLContext::CreateAndInitGL(
 
   if (IsWebGL2()) {
     flags |= gl::CreateContextFlags::PREFER_ES3;
-  } else if (!gfxPrefs::WebGL1AllowCoreProfile()) {
+  } else if (!StaticPrefs::WebGL1AllowCoreProfile()) {
     flags |= gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE;
   }
 
-  switch (mOptions.powerPreference) {
-    case dom::WebGLPowerPreference::Low_power:
-      break;
+  {
+    bool highPower = false;
+    switch (mOptions.powerPreference) {
+      case dom::WebGLPowerPreference::Low_power:
+        highPower = false;
+        break;
 
-    case dom::WebGLPowerPreference::High_performance:
+      case dom::WebGLPowerPreference::High_performance:
+        highPower = true;
+        break;
+
+        // Eventually add a heuristic, but for now default to high-performance.
+        // We can even make it dynamic by holding on to a
+        // ForceDiscreteGPUHelperCGL iff we decide it's a high-performance
+        // application:
+        // - Non-trivial canvas size
+        // - Many draw calls
+        // - Same origin with root page (try to stem bleeding from WebGL
+        // ads/trackers)
+      default:
+        highPower = true;
+        if (StaticPrefs::WebGLDefaultLowPower()) {
+          highPower = false;
+        } else if (mCanvasElement && !mCanvasElement->GetParentNode()) {
+          GenerateWarning(
+              "WebGLContextAttributes.powerPreference: 'default' when <canvas>"
+              " has no parent Element defaults to 'low-power'.");
+          highPower = false;
+        }
+        break;
+    }
+
+    // If "Use hardware acceleration when available" option is disabled:
+    if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
+      highPower = false;
+    }
+
+    if (highPower) {
       flags |= gl::CreateContextFlags::HIGH_POWER;
-      break;
-
-      // Eventually add a heuristic, but for now default to high-performance.
-      // We can even make it dynamic by holding on to a
-      // ForceDiscreteGPUHelperCGL iff we decide it's a high-performance
-      // application:
-      // - Non-trivial canvas size
-      // - Many draw calls
-      // - Same origin with root page (try to stem bleeding from WebGL
-      // ads/trackers)
-    default:
-      if (!gfxPrefs::WebGLDefaultLowPower()) {
-        flags |= gl::CreateContextFlags::HIGH_POWER;
-      }
-      break;
-  }
-
-  // If "Use hardware acceleration when available" option is disabled:
-  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
-    flags &= ~gl::CreateContextFlags::HIGH_POWER;
+    }
   }
 
 #ifdef XP_MACOSX
@@ -541,11 +559,11 @@ bool WebGLContext::CreateAndInitGL(
   tryNativeGL = false;
   tryANGLE = true;
 
-  if (gfxPrefs::WebGLDisableWGL()) {
+  if (StaticPrefs::WebGLDisableWGL()) {
     tryNativeGL = false;
   }
 
-  if (gfxPrefs::WebGLDisableANGLE() || PR_GetEnv("MOZ_WEBGL_FORCE_OPENGL") ||
+  if (StaticPrefs::WebGLDisableANGLE() || PR_GetEnv("MOZ_WEBGL_FORCE_OPENGL") ||
       useEGL) {
     tryNativeGL = true;
     tryANGLE = false;
@@ -801,7 +819,7 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight) {
   // pick up the old generation.
   ++mGeneration;
 
-  bool disabled = gfxPrefs::WebGLDisabled();
+  bool disabled = StaticPrefs::WebGLDisabled();
 
   // TODO: When we have software webgl support we should use that instead.
   disabled |= gfxPlatform::InSafeMode();
@@ -817,7 +835,7 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight) {
     return NS_ERROR_FAILURE;
   }
 
-  if (gfxPrefs::WebGLDisableFailIfMajorPerformanceCaveat()) {
+  if (StaticPrefs::WebGLDisableFailIfMajorPerformanceCaveat()) {
     mOptions.failIfMajorPerformanceCaveat = false;
   }
 
@@ -834,7 +852,7 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight) {
   }
 
   // Alright, now let's start trying.
-  bool forceEnabled = gfxPrefs::WebGLForceEnabled();
+  bool forceEnabled = StaticPrefs::WebGLForceEnabled();
   ScopedGfxFeatureReporter reporter("WebGL", forceEnabled);
 
   MOZ_ASSERT(!gl);
@@ -966,8 +984,9 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight) {
 }
 
 void WebGLContext::LoseOldestWebGLContextIfLimitExceeded() {
-  const auto maxWebGLContexts = gfxPrefs::WebGLMaxContexts();
-  auto maxWebGLContextsPerPrincipal = gfxPrefs::WebGLMaxContextsPerPrincipal();
+  const auto maxWebGLContexts = StaticPrefs::WebGLMaxContexts();
+  auto maxWebGLContextsPerPrincipal =
+      StaticPrefs::WebGLMaxContextsPerPrincipal();
 
   // maxWebGLContextsPerPrincipal must be less than maxWebGLContexts
   MOZ_ASSERT(maxWebGLContextsPerPrincipal <= maxWebGLContexts);
@@ -1270,7 +1289,7 @@ void WebGLContext::GetContextAttributes(
   result.mAlpha.Construct(mOptions.alpha);
   result.mDepth = mOptions.depth;
   result.mStencil = mOptions.stencil;
-  result.mAntialias = mOptions.antialias;
+  result.mAntialias.Construct(mOptions.antialias);
   result.mPremultipliedAlpha = mOptions.premultipliedAlpha;
   result.mPreserveDrawingBuffer = mOptions.preserveDrawingBuffer;
   result.mFailIfMajorPerformanceCaveat = mOptions.failIfMajorPerformanceCaveat;
@@ -1329,7 +1348,7 @@ ScopedPrepForResourceClear::~ScopedPrepForResourceClear() {
 // -
 
 void WebGLContext::OnEndOfFrame() const {
-  if (gfxPrefs::WebGLSpewFrameAllocs()) {
+  if (StaticPrefs::WebGLSpewFrameAllocs()) {
     GeneratePerfWarning("[webgl.perf.spew-frame-allocs] %" PRIu64
                         " data allocations this frame.",
                         mDataAllocGLCallCount);
@@ -1918,59 +1937,62 @@ uint64_t IndexedBufferBinding::ByteCount() const {
 ////////////////////////////////////////
 
 ScopedUnpackReset::ScopedUnpackReset(const WebGLContext* const webgl)
-    : ScopedGLWrapper<ScopedUnpackReset>(webgl->gl), mWebGL(webgl) {
+    : mWebGL(webgl) {
+  const auto& gl = mWebGL->gl;
   // clang-format off
-    if (mWebGL->mPixelStore_UnpackAlignment != 4) mGL->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
+  if (mWebGL->mPixelStore_UnpackAlignment != 4) gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
 
-    if (mWebGL->IsWebGL2()) {
-        if (mWebGL->mPixelStore_UnpackRowLength   != 0) mGL->fPixelStorei(LOCAL_GL_UNPACK_ROW_LENGTH  , 0);
-        if (mWebGL->mPixelStore_UnpackImageHeight != 0) mGL->fPixelStorei(LOCAL_GL_UNPACK_IMAGE_HEIGHT, 0);
-        if (mWebGL->mPixelStore_UnpackSkipPixels  != 0) mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_PIXELS , 0);
-        if (mWebGL->mPixelStore_UnpackSkipRows    != 0) mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_ROWS   , 0);
-        if (mWebGL->mPixelStore_UnpackSkipImages  != 0) mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_IMAGES , 0);
+  if (mWebGL->IsWebGL2()) {
+    if (mWebGL->mPixelStore_UnpackRowLength   != 0) gl->fPixelStorei(LOCAL_GL_UNPACK_ROW_LENGTH  , 0);
+    if (mWebGL->mPixelStore_UnpackImageHeight != 0) gl->fPixelStorei(LOCAL_GL_UNPACK_IMAGE_HEIGHT, 0);
+    if (mWebGL->mPixelStore_UnpackSkipPixels  != 0) gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_PIXELS , 0);
+    if (mWebGL->mPixelStore_UnpackSkipRows    != 0) gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_ROWS   , 0);
+    if (mWebGL->mPixelStore_UnpackSkipImages  != 0) gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_IMAGES , 0);
 
-        if (mWebGL->mBoundPixelUnpackBuffer) mGL->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, 0);
-    }
+    if (mWebGL->mBoundPixelUnpackBuffer) gl->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, 0);
+  }
   // clang-format on
 }
 
-void ScopedUnpackReset::UnwrapImpl() {
+ScopedUnpackReset::~ScopedUnpackReset() {
+  const auto& gl = mWebGL->gl;
   // clang-format off
-    mGL->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, mWebGL->mPixelStore_UnpackAlignment);
+  gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, mWebGL->mPixelStore_UnpackAlignment);
 
-    if (mWebGL->IsWebGL2()) {
-        mGL->fPixelStorei(LOCAL_GL_UNPACK_ROW_LENGTH  , mWebGL->mPixelStore_UnpackRowLength  );
-        mGL->fPixelStorei(LOCAL_GL_UNPACK_IMAGE_HEIGHT, mWebGL->mPixelStore_UnpackImageHeight);
-        mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_PIXELS , mWebGL->mPixelStore_UnpackSkipPixels );
-        mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_ROWS   , mWebGL->mPixelStore_UnpackSkipRows   );
-        mGL->fPixelStorei(LOCAL_GL_UNPACK_SKIP_IMAGES , mWebGL->mPixelStore_UnpackSkipImages );
+  if (mWebGL->IsWebGL2()) {
+    gl->fPixelStorei(LOCAL_GL_UNPACK_ROW_LENGTH  , mWebGL->mPixelStore_UnpackRowLength  );
+    gl->fPixelStorei(LOCAL_GL_UNPACK_IMAGE_HEIGHT, mWebGL->mPixelStore_UnpackImageHeight);
+    gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_PIXELS , mWebGL->mPixelStore_UnpackSkipPixels );
+    gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_ROWS   , mWebGL->mPixelStore_UnpackSkipRows   );
+    gl->fPixelStorei(LOCAL_GL_UNPACK_SKIP_IMAGES , mWebGL->mPixelStore_UnpackSkipImages );
 
-        GLuint pbo = 0;
-        if (mWebGL->mBoundPixelUnpackBuffer) {
-            pbo = mWebGL->mBoundPixelUnpackBuffer->mGLName;
-        }
-
-        mGL->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, pbo);
+    GLuint pbo = 0;
+    if (mWebGL->mBoundPixelUnpackBuffer) {
+        pbo = mWebGL->mBoundPixelUnpackBuffer->mGLName;
     }
+
+    gl->fBindBuffer(LOCAL_GL_PIXEL_UNPACK_BUFFER, pbo);
+  }
   // clang-format on
 }
 
 ////////////////////
 
-void ScopedFBRebinder::UnwrapImpl() {
+ScopedFBRebinder::~ScopedFBRebinder() {
   const auto fnName = [&](WebGLFramebuffer* fb) {
     return fb ? fb->mGLName : 0;
   };
 
+  const auto& gl = mWebGL->gl;
   if (mWebGL->IsWebGL2()) {
-    mGL->fBindFramebuffer(LOCAL_GL_DRAW_FRAMEBUFFER,
-                          fnName(mWebGL->mBoundDrawFramebuffer));
-    mGL->fBindFramebuffer(LOCAL_GL_READ_FRAMEBUFFER,
-                          fnName(mWebGL->mBoundReadFramebuffer));
+    gl->fBindFramebuffer(LOCAL_GL_DRAW_FRAMEBUFFER,
+                         fnName(mWebGL->mBoundDrawFramebuffer));
+    gl->fBindFramebuffer(LOCAL_GL_READ_FRAMEBUFFER,
+                         fnName(mWebGL->mBoundReadFramebuffer));
   } else {
     MOZ_ASSERT(mWebGL->mBoundDrawFramebuffer == mWebGL->mBoundReadFramebuffer);
-    mGL->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER,
-                          fnName(mWebGL->mBoundDrawFramebuffer));
+    gl->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER,
+                         fnName(mWebGL->mBoundDrawFramebuffer));
   }
 }
 
@@ -1987,17 +2009,15 @@ static GLenum TargetIfLazy(GLenum target) {
   }
 }
 
-ScopedLazyBind::ScopedLazyBind(gl::GLContext* gl, GLenum target,
+ScopedLazyBind::ScopedLazyBind(gl::GLContext* const gl, const GLenum target,
                                const WebGLBuffer* buf)
-    : ScopedGLWrapper<ScopedLazyBind>(gl),
-      mTarget(buf ? TargetIfLazy(target) : 0),
-      mBuf(buf) {
+    : mGL(gl), mTarget(buf ? TargetIfLazy(target) : 0), mBuf(buf) {
   if (mTarget) {
     mGL->fBindBuffer(mTarget, mBuf->mGLName);
   }
 }
 
-void ScopedLazyBind::UnwrapImpl() {
+ScopedLazyBind::~ScopedLazyBind() {
   if (mTarget) {
     mGL->fBindBuffer(mTarget, 0);
   }
@@ -2331,6 +2351,25 @@ bool WebGLContext::ValidateDeleteObject(
   if (object->IsDeleteRequested()) return false;
 
   return true;
+}
+
+bool WebGLContext::ShouldResistFingerprinting() const {
+  if (NS_IsMainThread()) {
+    if (mCanvasElement) {
+      // If we're constructed from a canvas element
+      return nsContentUtils::ShouldResistFingerprinting(GetOwnerDoc());
+    }
+    if (mOffscreenCanvas->GetOwnerGlobal()) {
+      // If we're constructed from an offscreen canvas
+      return nsContentUtils::ShouldResistFingerprinting(
+          mOffscreenCanvas->GetOwnerGlobal()->PrincipalOrNull());
+    }
+    // Last resort, just check the global preference
+    return nsContentUtils::ShouldResistFingerprinting();
+  }
+  dom::WorkerPrivate* workerPrivate = dom::GetCurrentThreadWorkerPrivate();
+  MOZ_ASSERT(workerPrivate);
+  return nsContentUtils::ShouldResistFingerprinting(workerPrivate);
 }
 
 // --

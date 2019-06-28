@@ -59,6 +59,11 @@ class D3D11YCbCrImage : public Image {
   D3D11YCbCrImage();
   virtual ~D3D11YCbCrImage();
 
+  static already_AddRefed<TextureClient>
+  CreateAndCopyDataToDXGIYCbCrTextureData(KnowsCompositor* aAllocator,
+                                          ImageContainer* aContainer,
+                                          const PlanarYCbCrData& aData);
+
   // Copies the surface into a sharable texture's surface, and initializes
   // the image.
   bool SetData(KnowsCompositor* aAllocator, ImageContainer* aContainer,
@@ -68,7 +73,7 @@ class D3D11YCbCrImage : public Image {
 
   already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
 
-  TextureClient* GetTextureClient(KnowsCompositor* aForwarder) override;
+  TextureClient* GetTextureClient(KnowsCompositor* aKnowsCompositor) override;
 
   gfx::IntRect GetPictureRect() const override { return mPictureRect; }
 

@@ -28,22 +28,20 @@ function run_test() {
   gClient.connect().then(function() {
     attachTestTabAndResume(
       gClient, "test-stack",
-      function(response, targetFront, threadClient) {
+      async function(response, targetFront, threadClient) {
         gThreadClient = threadClient;
-        gThreadClient.reconfigure({
+        await gThreadClient.reconfigure({
           observeAsmJS: true,
           wasmBinarySource: true,
-        }, function(response) {
-          Assert.equal(!!response.error, false);
-          test_pause_frame();
         });
+        test_pause_frame();
       });
   });
   do_test_pending();
 }
 
 function test_pause_frame() {
-  gThreadClient.addOneTimeListener("paused", function(event, packet) {
+  gThreadClient.once("paused", function(packet) {
     gThreadClient.getFrames(0, null).then(async function(frameResponse) {
       Assert.equal(frameResponse.frames.length, 4);
 

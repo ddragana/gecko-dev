@@ -87,6 +87,7 @@ class nsWindowSizes;
 namespace mozilla {
 class AbstractThread;
 class DOMEventTargetHelper;
+class ThrottledEventQueue;
 namespace dom {
 class BarProp;
 class BrowsingContext;
@@ -231,9 +232,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   }
 
   // nsIGlobalJSObjectHolder
-  JSObject* GetGlobalJSObject() final {
-    return GetWrapper();
-  }
+  JSObject* GetGlobalJSObject() final { return GetWrapper(); }
   JSObject* GetGlobalJSObjectPreserveColor() const final {
     return GetWrapperPreserveColor();
   }
@@ -298,7 +297,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       mozilla::dom::EventTarget* aChromeEventHandler) override;
 
   // Outer windows only.
-  virtual void SetInitialPrincipalToSubject() override;
+  virtual void SetInitialPrincipalToSubject(
+      nsIContentSecurityPolicy* aCSP) override;
 
   virtual already_AddRefed<nsISupports> SaveWindowState() override;
   virtual nsresult RestoreWindowState(nsISupports* aState) override;
@@ -541,6 +541,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   nsresult GetPrompter(nsIPrompt** aPrompt) override;
 
+  RefPtr<mozilla::ThrottledEventQueue> mPostMessageEventQueue;
  protected:
   nsPIDOMWindowOuter* GetOpenerWindowOuter();
   // Initializes the mWasOffline member variable
@@ -917,9 +918,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   virtual bool ShouldShowFocusRing() override;
 
-  virtual void SetKeyboardIndicators(
-      UIStateChangeType aShowAccelerators,
-      UIStateChangeType aShowFocusRings) override;
+  virtual void SetKeyboardIndicators(UIStateChangeType aShowFocusRings)
+      override;
 
  public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;

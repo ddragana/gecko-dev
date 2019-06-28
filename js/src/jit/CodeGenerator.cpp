@@ -3771,7 +3771,7 @@ void CodeGenerator::visitStackArgT(LStackArgT* lir) {
   Address dest(masm.getStackPointer(), stack_offset);
 
   if (arg->isFloatReg()) {
-    masm.storeDouble(ToFloatRegister(arg), dest);
+    masm.boxDouble(ToFloatRegister(arg), dest);
   } else if (arg->isRegister()) {
     masm.storeValue(ValueTypeFromMIRType(argType), ToRegister(arg), dest);
   } else {
@@ -8902,35 +8902,6 @@ JitCode* JitRealm::generateStringConcatStub(JSContext* cx) {
   return code;
 }
 
-void JitRuntime::generateMallocStub(MacroAssembler& masm) {
-  const Register regReturn = CallTempReg0;
-  const Register regZone = CallTempReg0;
-  const Register regNBytes = CallTempReg1;
-
-  mallocStubOffset_ = startTrampolineCode(masm);
-
-  AllocatableRegisterSet regs(RegisterSet::Volatile());
-#ifdef JS_USE_LINK_REGISTER
-  masm.pushReturnAddress();
-#endif
-  regs.takeUnchecked(regZone);
-  regs.takeUnchecked(regNBytes);
-  LiveRegisterSet save(regs.asLiveSet());
-  masm.PushRegsInMask(save);
-
-  const Register regTemp = regs.takeAnyGeneral();
-  MOZ_ASSERT(regTemp != regNBytes && regTemp != regZone);
-
-  masm.setupUnalignedABICall(regTemp);
-  masm.passABIArg(regZone);
-  masm.passABIArg(regNBytes);
-  masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, MallocWrapper));
-  masm.storeCallPointerResult(regReturn);
-
-  masm.PopRegsInMask(save);
-  masm.ret();
-}
-
 void JitRuntime::generateFreeStub(MacroAssembler& masm) {
   const Register regSlots = CallTempReg0;
 
@@ -10179,7 +10150,7 @@ void CodeGenerator::visitSetFrameArgumentT(LSetFrameArgumentT* lir) {
   if (type == MIRType::Double) {
     // Store doubles directly.
     FloatRegister input = ToFloatRegister(lir->input());
-    masm.storeDouble(input, Address(masm.getStackPointer(), argOffset));
+    masm.boxDouble(input, Address(masm.getStackPointer(), argOffset));
 
   } else {
     Register input = ToRegister(lir->input());
@@ -11783,7 +11754,7 @@ void CodeGenerator::emitLoadElementT(LLoadElementT* lir, const T& source) {
 
   AnyRegister output = ToAnyRegister(lir->output());
   if (lir->mir()->loadDoubles()) {
-    masm.loadDouble(source, output.fpu());
+    masm.unboxDouble(source, output.fpu());
   } else {
     masm.loadUnboxedValue(source, lir->mir()->type(), output);
   }

@@ -2003,6 +2003,9 @@ def isChromeOnly(m):
     return m.getExtendedAttribute("ChromeOnly")
 
 
+def prefIdentifier(pref):
+    return pref.replace(".", "_").replace("-", "_")
+
 class MemberCondition:
     """
     An object representing the condition for a member to actually be
@@ -2022,6 +2025,12 @@ class MemberCondition:
         assert isinstance(secureContext, bool)
         assert nonExposedGlobals is None or isinstance(nonExposedGlobals, set)
         self.pref = pref
+        if self.pref:
+            identifier = prefIdentifier(self.pref)
+            self.prefFuncIndex = "WebIDLPrefIndex::" + identifier
+        else:
+            self.prefFuncIndex = "WebIDLPrefIndex::NoPref"
+
         self.secureContext = secureContext
 
         def toFuncPtr(val):
@@ -2065,10 +2074,6 @@ class PropertyDefiner:
     def __init__(self, descriptor, name):
         self.descriptor = descriptor
         self.name = name
-        # self.prefCacheData will store an array of (prefname, bool*)
-        # pairs for our bool var caches.  generateArray will fill it
-        # in as needed.
-        self.prefCacheData = []
 
     def hasChromeOnly(self):
         return len(self.chrome) > 0
@@ -2228,9 +2233,8 @@ class PropertyDefiner:
 
         disablersTemplate = dedent(
             """
-            // Can't be const because the pref-enabled boolean needs to be writable
-            static PrefableDisablers %s_disablers%d = {
-              true, %s, %s, %s
+            static const PrefableDisablers %s_disablers%d = {
+              %s, %s, %s, %s
             };
             """)
         prefableWithDisablersTemplate = '  { &%s_disablers%d, &%s_specs[%d] }'
@@ -2238,18 +2242,13 @@ class PropertyDefiner:
         prefCacheTemplate = '&%s[%d].disablers->enabled'
 
         def switchToCondition(condition, specs):
-            # Remember the info about where our pref-controlled
-            # booleans live.
-            if condition.pref is not None:
-                self.prefCacheData.append(
-                    (condition.pref,
-                     prefCacheTemplate % (name, len(prefableSpecs))))
             # Set up pointers to the new sets of specs inside prefableSpecs
             if condition.hasDisablers():
                 prefableSpecs.append(prefableWithDisablersTemplate %
                                      (name, len(specs), name, len(specs)))
                 disablers.append(disablersTemplate %
                                  (name, len(specs),
+                                  condition.prefFuncIndex,
                                   toStringBool(condition.secureContext),
                                   condition.nonExposedGlobals,
                                   condition.func))
@@ -2361,7 +2360,8 @@ class MethodDefiner(PropertyDefiner):
                        m.isMethod() and m.isStatic() == static and
                        MemberIsUnforgeable(m, descriptor) == unforgeable and
                        (not crossOriginOnly or m.getExtendedAttribute("CrossOriginCallable")) and
-                       not m.isIdentifierLess()]
+                       not m.isIdentifierLess() and
+                       not m.getExtendedAttribute("Unexposed")]
         else:
             methods = []
         self.chrome = []
@@ -2431,7 +2431,7 @@ class MethodDefiner(PropertyDefiner):
             self.regular.append({
                 "name": "@@iterator",
                 "methodInfo": False,
-                "selfHostedName": "ArrayValues",
+                "selfHostedName": "$ArrayValues",
                 "length": 0,
                 "flags": "0", # Not enumerable, per spec.
                 "condition": MemberCondition()
@@ -2457,7 +2457,7 @@ class MethodDefiner(PropertyDefiner):
             self.regular.append({
                 "name": "values",
                 "methodInfo": False,
-                "selfHostedName": "ArrayValues",
+                "selfHostedName": "$ArrayValues",
                 "length": 0,
                 "flags": "JSPROP_ENUMERATE",
                 "condition": PropertyDefiner.getControllingCondition(m,
@@ -3115,22 +3115,6 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
         else:
             initIds = None
 
-        prefCacheData = []
-        for var in self.properties.arrayNames():
-            props = getattr(self.properties, var)
-            prefCacheData.extend(props.prefCacheData)
-        if len(prefCacheData) != 0:
-            prefCacheData = [
-                CGGeneric('Preferences::AddBoolVarCache(%s, "%s");\n' % (ptr, pref))
-                for pref, ptr in prefCacheData]
-            prefCache = CGWrapper(CGIndenter(CGList(prefCacheData)),
-                                  pre=("static bool sPrefCachesInited = false;\n"
-                                       "if (!sPrefCachesInited && NS_IsMainThread()) {\n"
-                                       "  sPrefCachesInited = true;\n"),
-                                  post="}\n")
-        else:
-            prefCache = None
-
         if self.descriptor.interface.ctor():
             constructArgs = methodLength(self.descriptor.interface.ctor())
         else:
@@ -3360,7 +3344,7 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
 
         return CGList(
             [getParentProto, getConstructorProto, initIds,
-             prefCache, CGGeneric(call), defineAliases, unforgeableHolderSetup,
+             CGGeneric(call), defineAliases, unforgeableHolderSetup,
              makeProtoPrototypeImmutable],
             "\n").define()
 
@@ -3505,26 +3489,13 @@ def getConditionList(idlobj, cxName, objName):
     objName is the name of the object that we're working with, because some of
     our test functions want that.
 
-    The return value is a pair.  The first element is a possibly-empty CGList
-    of conditions.  The second element, if not None, is a CGThing for som code
-    that needs to run before the list of conditions can be evaluated.
+    The return value is a possibly-empty CGList of conditions.
     """
     conditions = []
-    conditionSetup = None
     pref = idlobj.getExtendedAttribute("Pref")
     if pref:
         assert isinstance(pref, list) and len(pref) == 1
-        conditionSetup = CGGeneric(fill(
-            """
-            static bool sPrefValue;
-            static bool sPrefCacheSetUp = false;
-            if (!sPrefCacheSetUp) {
-              sPrefCacheSetUp = true;
-              Preferences::AddBoolVarCache(&sPrefValue, "${prefName}");
-            }
-            """,
-            prefName=pref[0]))
-        conditions.append("sPrefValue")
+        conditions.append("StaticPrefs::%s()" % prefIdentifier(pref[0]))
     if idlobj.getExtendedAttribute("ChromeOnly"):
         conditions.append("nsContentUtils::ThreadsafeIsSystemCaller(%s)" % cxName)
     func = idlobj.getExtendedAttribute("Func")
@@ -3534,8 +3505,7 @@ def getConditionList(idlobj, cxName, objName):
     if idlobj.getExtendedAttribute("SecureContext"):
         conditions.append("mozilla::dom::IsSecureContextOrObjectIsFromSecureContext(%s, %s)" % (cxName, objName))
 
-    return (CGList((CGGeneric(cond) for cond in conditions), " &&\n"),
-            conditionSetup)
+    return CGList((CGGeneric(cond) for cond in conditions), " &&\n")
 
 
 class CGConstructorEnabled(CGAbstractMethod):
@@ -3579,14 +3549,13 @@ class CGConstructorEnabled(CGAbstractMethod):
                                                    "!NS_IsMainThread()")
             body.append(exposedInWorkerCheck)
 
-        (conditions, conditionsSetup) = getConditionList(iface, "aCx", "aObj")
+        conditions = getConditionList(iface, "aCx", "aObj")
 
         # We should really have some conditions
         assert len(body) or len(conditions)
 
         conditionsWrapper = ""
         if len(conditions):
-            body.append(conditionsSetup);
             conditionsWrapper = CGWrapper(conditions,
                                           pre="return ",
                                           post=";\n",
@@ -7978,7 +7947,13 @@ class CGPerSignatureCall(CGThing):
                 self.getArguments(), argsPre, returnType,
                 self.extendedAttributes, descriptor,
                 nativeMethodName,
-                static, argsPost=argsPost, resultVar=resultVar))
+                static,
+                # We know our "self" must be being kept alive; otherwise we have
+                # a serious problem.  In common cases it's just an argument and
+                # we're MOZ_CAN_RUN_SCRIPT, but in some cases it's on the stack
+                # and being kept alive via references from JS.
+                object="MOZ_KnownLive(self)",
+                argsPost=argsPost, resultVar=resultVar))
 
         if useCounterName:
             # Generate a telemetry call for when [UseCounter] is used.
@@ -8736,11 +8711,12 @@ class CGSetterCall(CGPerSignatureCall):
 
 class CGAbstractBindingMethod(CGAbstractStaticMethod):
     """
-    Common class to generate the JSNatives for all our methods, getters, and
-    setters.  This will generate the function declaration and unwrap the
-    |this| object.  Subclasses are expected to override the generate_code
-    function to do the rest of the work.  This function should return a
-    CGThing which is already properly indented.
+    Common class to generate some of our class hooks.  This will generate the
+    function declaration, get a reference to the JS object for our binding
+    object (which might be an argument of the class hook or something we get
+    from a JS::CallArgs), and unwrap into the right C++ type. Subclasses are
+    expected to override the generate_code function to do the rest of the work.
+    This function should return a CGThing which is already properly indented.
 
     getThisObj should be code for getting a JSObject* for the binding
     object.  "" can be passed in if the binding object is already stored in
@@ -8748,13 +8724,21 @@ class CGAbstractBindingMethod(CGAbstractStaticMethod):
 
     callArgs should be code for getting a JS::CallArgs into a variable
     called 'args'.  This can be "" if there is already such a variable
-    around.
+    around or if the body does not need a JS::CallArgs.
+
     """
     def __init__(self, descriptor, name, args, getThisObj,
                  callArgs="JS::CallArgs args = JS::CallArgsFromVp(argc, vp);\n"):
-        CGAbstractStaticMethod.__init__(self, descriptor, name, "bool", args)
+        CGAbstractStaticMethod.__init__(self, descriptor, name, "bool", args,
+                                        canRunScript=True)
 
-        self.unwrapFailureCode = 'return ThrowErrorMessage(cx, MSG_THIS_DOES_NOT_IMPLEMENT_INTERFACE, "Value", "%s");\n' % descriptor.interface.identifier.name
+        # This can't ever happen, because we only use this for class hooks.
+        self.unwrapFailureCode = fill(
+            """
+            MOZ_CRASH("Unexpected object in '${name}' hook");
+            return false;
+            """,
+            name=name)
 
         if getThisObj == "":
             self.getThisObj = None
@@ -9628,11 +9612,19 @@ class CGMemberJITInfo(CGThing):
                 argTypes=argTypes,
                 slotAssert=slotAssert)
 
+        # Unexposed things are meant to be used from C++ directly, so we make
+        # their jitinfo non-static.  That way C++ can get at it.
+        if self.member.getExtendedAttribute("Unexposed"):
+            storageClass = "extern"
+        else:
+            storageClass = "static"
+
         return fill(
             """
-            static const JSJitInfo ${infoName} = ${jitInfo};
+            ${storageClass} const JSJitInfo ${infoName} = ${jitInfo};
             $*{slotAssert}
             """,
+            storageClass=storageClass,
             infoName=infoName,
             jitInfo=jitInfoInitializer(False),
             slotAssert=slotAssert)
@@ -13903,12 +13895,7 @@ class CGDictionary(CGThing):
               return false;
             }
             """))
-        (conditions, conditionsSetup) = getConditionList(member, "cx", "*object")
-        if conditionsSetup is not None:
-            raise TypeError("We don't support Pref annotations on dictionary "
-                            "members.  If we start to, we need to make sure all "
-                            "the variable names conditionsSetup uses for a "
-                            "given dictionary are unique.")
+        conditions = getConditionList(member, "cx", "*object")
         if len(conditions) != 0:
             setTempValue = CGIfElseWrapper(conditions.define(),
                                            setTempValue,
@@ -14024,12 +14011,7 @@ class CGDictionary(CGThing):
         if member.canHaveMissingValue():
             # Only do the conversion if we have a value
             conversion = CGIfWrapper(conversion, "%s.WasPassed()" % memberLoc)
-        (conditions, conditionsSetup) = getConditionList(member, "cx", "obj")
-        if conditionsSetup is not None:
-            raise TypeError("We don't support Pref annotations on dictionary "
-                            "members.  If we start to, we need to make sure all "
-                            "the variable names conditionsSetup uses for a "
-                            "given dictionary are unique.")
+        conditions = getConditionList(member, "cx", "obj")
         if len(conditions) != 0:
             conversion = CGIfWrapper(conversion, conditions.define())
         return conversion
@@ -14601,18 +14583,13 @@ class CGBindingRoot(CGThing):
 
         bindingHeaders["js/Symbol.h"] = any(descriptorHasIteratorAlias(d) for d in descriptors)
 
-        def descriptorRequiresPreferences(desc):
-            iface = desc.interface
-            return any(m.getExtendedAttribute("Pref") for m in iface.members + [iface])
-
         def descriptorDeprecated(desc):
             iface = desc.interface
             return any(m.getExtendedAttribute("Deprecated") for m in iface.members + [iface])
 
         bindingHeaders["mozilla/dom/Document.h"] = any(
             descriptorDeprecated(d) for d in descriptors)
-        bindingHeaders["mozilla/Preferences.h"] = any(
-            descriptorRequiresPreferences(d) for d in descriptors)
+
         bindingHeaders["mozilla/dom/DOMJSProxyHandler.h"] = any(
             d.concrete and d.proxy for d in descriptors)
         hasCrossOriginObjects = any(
@@ -14661,6 +14638,27 @@ class CGBindingRoot(CGThing):
         def descriptorNeedsNonSystemPrincipal(d):
             return any(needsNonSystemPrincipal(m) for m in d.interface.members)
 
+        def descriptorHasPrefDisabler(desc):
+            iface = desc.interface
+            return any(PropertyDefiner.getControllingCondition(m, desc).hasDisablers()
+                       for m in iface.members if (m.isMethod() or m.isAttr() or m.isConst()))
+
+        def dictionaryHasPrefControlledMember(dictionary):
+            while dictionary:
+                if (any(m.getExtendedAttribute("Pref") for m in dictionary.members)):
+                    return True
+                dictionary = dictionary.parent
+            return False
+
+        def descriptorRequiresPreferences(desc):
+            iface = desc.interface
+            return iface.getExtendedAttribute("Pref") is not None
+
+        bindingHeaders["mozilla/StaticPrefs.h"] = (
+            any(descriptorRequiresPreferences(d) for d in descriptors) or
+            any(dictionaryHasPrefControlledMember(d) for d in dictionaries))
+        bindingHeaders["mozilla/dom/WebIDLPrefs.h"] = any(
+            descriptorHasPrefDisabler(d) for d in descriptors)
         bindingHeaders["nsContentUtils.h"] = (
             any(descriptorHasChromeOnly(d) for d in descriptors) or
             any(descriptorNeedsNonSystemPrincipal(d) for d in descriptors) or
@@ -15466,20 +15464,21 @@ class CGBindingImplClass(CGClass):
                      []),
                     {"infallible": True}))
 
-        wrapArgs = [Argument('JSContext*', 'aCx'),
-                    Argument('JS::Handle<JSObject*>', 'aGivenProto')]
-        if not descriptor.wrapperCache:
-            wrapReturnType = "bool"
-            wrapArgs.append(Argument('JS::MutableHandle<JSObject*>',
-                                     'aReflector'))
-        else:
-            wrapReturnType = "JSObject*"
-        self.methodDecls.insert(0,
-                                ClassMethod(wrapMethodName, wrapReturnType,
-                                            wrapArgs, virtual=descriptor.wrapperCache,
-                                            breakAfterReturnDecl=" ",
-                                            override=descriptor.wrapperCache,
-                                            body=self.getWrapObjectBody()))
+        if descriptor.concrete:
+            wrapArgs = [Argument('JSContext*', 'aCx'),
+                        Argument('JS::Handle<JSObject*>', 'aGivenProto')]
+            if not descriptor.wrapperCache:
+                wrapReturnType = "bool"
+                wrapArgs.append(Argument('JS::MutableHandle<JSObject*>',
+                                         'aReflector'))
+            else:
+                wrapReturnType = "JSObject*"
+            self.methodDecls.insert(0,
+                                    ClassMethod(wrapMethodName, wrapReturnType,
+                                                wrapArgs, virtual=descriptor.wrapperCache,
+                                                breakAfterReturnDecl=" ",
+                                                override=descriptor.wrapperCache,
+                                                body=self.getWrapObjectBody()))
         if descriptor.hasCEReactions():
             self.methodDecls.insert(0,
                                     ClassMethod("GetDocGroup", "DocGroup*", [],
@@ -15563,7 +15562,9 @@ class CGExampleClass(CGBindingImplClass):
 
     def define(self):
         # Just override CGClass and do our own thing
-        ctordtor = dedent("""
+        nativeType = self.nativeLeafName(self.descriptor)
+
+        ctordtor = fill("""
             ${nativeType}::${nativeType}()
             {
                 // Add |MOZ_COUNT_CTOR(${nativeType});| for a non-refcounted object.
@@ -15573,10 +15574,11 @@ class CGExampleClass(CGBindingImplClass):
             {
                 // Add |MOZ_COUNT_DTOR(${nativeType});| for a non-refcounted object.
             }
-            """)
+            """,
+            nativeType=nativeType)
 
         if self.parentIface:
-            ccImpl = dedent("""
+            ccImpl = fill("""
 
                 // Only needed for refcounted objects.
                 # error "If you don't have members that need cycle collection,
@@ -15589,9 +15591,11 @@ class CGExampleClass(CGBindingImplClass):
                 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(${nativeType})
                 NS_INTERFACE_MAP_END_INHERITING(${parentType})
 
-                """)
+                """,
+                nativeType=nativeType,
+                parentType=self.nativeLeafName(self.parentDesc))
         else:
-            ccImpl = dedent("""
+            ccImpl = fill("""
 
                 // Only needed for refcounted objects.
                 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(${nativeType})
@@ -15602,31 +15606,35 @@ class CGExampleClass(CGBindingImplClass):
                   NS_INTERFACE_MAP_ENTRY(nsISupports)
                 NS_INTERFACE_MAP_END
 
-                """)
+                """,
+                nativeType=nativeType)
 
-        if self.descriptor.wrapperCache:
-            reflectorArg = ""
-            reflectorPassArg = ""
-            returnType = "JSObject*"
-        else:
-            reflectorArg = ", JS::MutableHandle<JSObject*> aReflector"
-            reflectorPassArg = ", aReflector"
-            returnType = "bool"
-        classImpl = ccImpl + ctordtor + "\n" + dedent("""
-            ${returnType}
-            ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
-            {
-              return ${ifaceName}_Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
-            }
+        classImpl = ccImpl + ctordtor + "\n"
+        if self.descriptor.concrete:
+            if self.descriptor.wrapperCache:
+                reflectorArg = ""
+                reflectorPassArg = ""
+                returnType = "JSObject*"
+            else:
+                reflectorArg = ", JS::MutableHandle<JSObject*> aReflector"
+                reflectorPassArg = ", aReflector"
+                returnType = "bool"
+            classImpl += fill(
+                """
+                ${returnType}
+                ${nativeType}::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto${reflectorArg})
+                {
+                  return ${ifaceName}_Binding::Wrap(aCx, this, aGivenProto${reflectorPassArg});
+                }
 
-            """)
-        return string.Template(classImpl).substitute(
-            ifaceName=self.descriptor.name,
-            nativeType=self.nativeLeafName(self.descriptor),
-            parentType=self.nativeLeafName(self.parentDesc) if self.parentIface else "",
-            returnType=returnType,
-            reflectorArg=reflectorArg,
-            reflectorPassArg=reflectorPassArg)
+                """,
+                returnType=returnType,
+                nativeType=nativeType,
+                reflectorArg=reflectorArg,
+                ifaceName=self.descriptor.name,
+                reflectorPassArg=reflectorPassArg)
+
+        return classImpl
 
     @staticmethod
     def nativeLeafName(descriptor):
@@ -17949,6 +17957,51 @@ class GlobalGenRoots():
 
         # Done.
         return curr
+
+    @staticmethod
+    def WebIDLPrefs(config):
+        prefs = set()
+        headers = set(["mozilla/dom/WebIDLPrefs.h", "mozilla/StaticPrefs.h"])
+        for d in config.getDescriptors(hasInterfaceOrInterfacePrototypeObject=True):
+            for m in d.interface.members:
+                pref = PropertyDefiner.getStringAttr(m, "Pref")
+                if pref:
+                    prefs.add((pref, prefIdentifier(pref)))
+        prefs = sorted(prefs)
+        declare = fill(
+            """
+            enum class WebIDLPrefIndex : uint8_t {
+              NoPref,
+              $*{prefs}
+            };
+            typedef bool (*WebIDLPrefFunc)();
+            extern const WebIDLPrefFunc sWebIDLPrefs[${len}];
+            """,
+            prefs=",\n".join(map(lambda p: "// " + p[0] + "\n" + p[1], prefs)) + "\n",
+            len=len(prefs) + 1)
+        define = fill(
+            """
+            const WebIDLPrefFunc sWebIDLPrefs[] = {
+              nullptr,
+              $*{prefs}
+            };
+            """,
+            prefs=",\n".join(map(lambda p: "// " + p[0] + "\nStaticPrefs::" + p[1], prefs)) + "\n")
+        prefFunctions = CGGeneric(declare=declare, define=define)
+
+        # Wrap all of that in our namespaces.
+        curr = CGNamespace.build(['mozilla', 'dom'], prefFunctions)
+
+        curr = CGWrapper(curr, post='\n')
+
+        curr = CGHeaders([], [], [], [], [], headers, 'WebIDLPrefs', curr)
+
+        # Add include guards.
+        curr = CGIncludeGuard('WebIDLPrefs', curr)
+
+        # Done.
+        return curr
+
 
 
 # Code generator for simple events

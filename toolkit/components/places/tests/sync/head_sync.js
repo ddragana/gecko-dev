@@ -144,15 +144,6 @@ async function fetchLocalTree(rootGuid) {
   function bookmarkNodeToInfo(node) {
     let { guid, index, title, typeCode: type } = node;
     let itemInfo = { guid, index, title, type };
-    if (node.annos) {
-      let syncableAnnos = node.annos.filter(anno => [
-        PlacesUtils.LMANNO_FEEDURI,
-        PlacesUtils.LMANNO_SITEURI,
-      ].includes(anno.name));
-      if (syncableAnnos.length) {
-        itemInfo.annos = syncableAnnos;
-      }
-    }
     if (node.uri) {
       itemInfo.url = node.uri;
     }
@@ -217,6 +208,16 @@ async function openMirror(name, options = {}) {
     recordTelemetryEvent(...args) {
       if (options.recordTelemetryEvent) {
         options.recordTelemetryEvent.call(this, ...args);
+      }
+    },
+    recordStepTelemetry(...args) {
+      if (options.recordStepTelemetry) {
+        options.recordStepTelemetry.call(this, ...args);
+      }
+    },
+    recordValidationTelemetry(...args) {
+      if (options.recordValidationTelemetry) {
+        options.recordValidationTelemetry.call(this, ...args);
       }
     },
   });

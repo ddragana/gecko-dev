@@ -67,7 +67,6 @@
 #include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
-#include "nsIHTMLDocument.h"
 #include "nsIStorageStream.h"
 #include "nsIPromptFactory.h"
 #include "nsIWindowWatcher.h"
@@ -231,12 +230,15 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
       mIsMappedArrayBuffer(false),
       mXPCOMifier(nullptr),
       mEventDispatchingSuspended(false),
-      mEofDecoded(false) {
+      mEofDecoded(false),
+      mDelayedDoneNotifier(nullptr) {
   mozilla::HoldJSObjects(this);
 }
 
 XMLHttpRequestMainThread::~XMLHttpRequestMainThread() {
-  DisconnectDoneNotifier();
+  MOZ_ASSERT(
+      !mDelayedDoneNotifier,
+      "How can we have mDelayedDoneNotifier, which owns us, in destructor?");
 
   mFlagDeleted = true;
 
@@ -417,16 +419,16 @@ size_t XMLHttpRequestMainThread::SizeOfEventTargetIncludingThis(
   // - lots
 }
 
-static void LogMessage(const char* aWarning, nsPIDOMWindowInner* aWindow,
-                       const char16_t** aParams = nullptr,
-                       uint32_t aParamCount = 0) {
+static void LogMessage(
+    const char* aWarning, nsPIDOMWindowInner* aWindow,
+    const nsTArray<nsString>& aParams = nsTArray<nsString>()) {
   nsCOMPtr<Document> doc;
   if (aWindow) {
     doc = aWindow->GetExtantDoc();
   }
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, NS_LITERAL_CSTRING("DOM"), doc,
-      nsContentUtils::eDOM_PROPERTIES, aWarning, aParams, aParamCount);
+      nsContentUtils::eDOM_PROPERTIES, aWarning, aParams);
 }
 
 Document* XMLHttpRequestMainThread::GetResponseXML(ErrorResult& aRv) {
@@ -644,7 +646,7 @@ void XMLHttpRequestMainThread::SetResponseType(
   }
 
   // Set the responseType attribute's value to the given value.
-  mResponseType = aResponseType;
+  SetResponseTypeRaw(aResponseType);
 }
 
 void XMLHttpRequestMainThread::GetResponse(
@@ -2003,7 +2005,9 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
     NS_ENSURE_SUCCESS(rv, rv);
 
     // the spec requires the response document.referrer to be the empty string
-    mResponseXML->SetReferrer(NS_LITERAL_CSTRING(""));
+    nsCOMPtr<nsIReferrerInfo> referrerInfo =
+        new ReferrerInfo(nullptr, true, mResponseXML->GetReferrerPolicy());
+    mResponseXML->SetReferrerInfo(referrerInfo);
 
     mXMLParserStreamListener = listener;
     rv = mXMLParserStreamListener->OnStartRequest(request);
@@ -2234,6 +2238,8 @@ void XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument() {
 }
 void XMLHttpRequestMainThread::DisconnectDoneNotifier() {
   if (mDelayedDoneNotifier) {
+    // Disconnect may release the last reference to 'this'.
+    RefPtr<XMLHttpRequestMainThread> kungfuDeathGrip = this;
     mDelayedDoneNotifier->Disconnect();
     mDelayedDoneNotifier = nullptr;
   }
@@ -2249,22 +2255,15 @@ void XMLHttpRequestMainThread::ChangeStateToDone(bool aWasSync) {
     mChannel->GetLoadFlags(&loadFlags);
     if (loadFlags & nsIRequest::LOAD_BACKGROUND) {
       nsPIDOMWindowInner* owner = GetOwner();
-      Document* doc = owner ? owner->GetExtantDoc() : nullptr;
-      doc = doc ? doc->GetTopLevelContentDocument() : nullptr;
-      if (doc &&
-          (doc->GetReadyStateEnum() > Document::READYSTATE_UNINITIALIZED &&
-           doc->GetReadyStateEnum() < Document::READYSTATE_COMPLETE)) {
-        nsPIDOMWindowInner* topWin = doc->GetInnerWindow();
-        if (topWin) {
-          MOZ_ASSERT(!mDelayedDoneNotifier);
-          RefPtr<XMLHttpRequestDoneNotifier> notifier =
-              new XMLHttpRequestDoneNotifier(this);
-          mDelayedDoneNotifier = notifier;
-          topWin->AddAfterLoadRunner(notifier);
-          NS_DispatchToCurrentThreadQueue(notifier.forget(), 5000,
-                                          EventQueuePriority::Idle);
-          return;
-        }
+      nsPIDOMWindowInner* topWin =
+          owner ? owner->GetWindowForDeprioritizedLoadRunner() : nullptr;
+      if (topWin) {
+        MOZ_ASSERT(!mDelayedDoneNotifier);
+        RefPtr<XMLHttpRequestDoneNotifier> notifier =
+            new XMLHttpRequestDoneNotifier(this);
+        mDelayedDoneNotifier = notifier;
+        topWin->AddDeprioritizedLoadRunner(notifier);
+        return;
       }
     }
   }
@@ -2477,10 +2476,9 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
     if (!IsSystemXHR()) {
       nsCOMPtr<nsPIDOMWindowInner> owner = GetOwner();
       nsCOMPtr<Document> doc = owner ? owner->GetExtantDoc() : nullptr;
-      mozilla::net::ReferrerPolicy referrerPolicy =
-          doc ? doc->GetReferrerPolicy() : mozilla::net::RP_Unset;
-      nsContentUtils::SetFetchReferrerURIWithPolicy(
-          mPrincipal, doc, httpChannel, referrerPolicy);
+      nsCOMPtr<nsIReferrerInfo> referrerInfo =
+          ReferrerInfo::CreateForFetch(mPrincipal, doc);
+      Unused << httpChannel->SetReferrerInfoWithoutClone(referrerInfo);
     }
 
     // Some extensions override the http protocol handler and provide their own
@@ -3009,10 +3007,9 @@ void XMLHttpRequestMainThread::SetRequestHeader(const nsACString& aName,
   bool isPrivilegedCaller = IsSystemXHR();
   bool isForbiddenHeader = nsContentUtils::IsForbiddenRequestHeader(aName);
   if (!isPrivilegedCaller && isForbiddenHeader) {
-    NS_ConvertUTF8toUTF16 name(aName);
-    const char16_t* params[] = {name.get()};
-    LogMessage("ForbiddenHeaderWarning", GetOwner(), params,
-               ArrayLength(params));
+    AutoTArray<nsString, 1> params;
+    CopyUTF8toUTF16(aName, *params.AppendElement());
+    LogMessage("ForbiddenHeaderWarning", GetOwner(), params);
     return;
   }
 

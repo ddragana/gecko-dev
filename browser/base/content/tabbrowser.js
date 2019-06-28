@@ -30,6 +30,7 @@ window._gBrowser = {
     }
     window.addEventListener("sizemodechange", this);
     window.addEventListener("occlusionstatechange", this);
+    window.addEventListener("framefocusrequested", this);
 
     this._setupInitialBrowserAndTab();
 
@@ -41,18 +42,17 @@ window._gBrowser = {
     }
 
     let messageManager = window.getGroupMessageManager("browsers");
+    window.messageManager.addMessageListener("contextmenu", this);
+
     if (gMultiProcessBrowser) {
       messageManager.addMessageListener("DOMTitleChanged", this);
       messageManager.addMessageListener("DOMWindowClose", this);
-      window.messageManager.addMessageListener("contextmenu", this);
       messageManager.addMessageListener("Browser:Init", this);
     } else {
       this._outerWindowIDBrowserMap.set(this.selectedBrowser.outerWindowID,
         this.selectedBrowser);
     }
-    messageManager.addMessageListener("DOMWindowFocus", this);
     messageManager.addMessageListener("RefreshBlocker:Blocked", this);
-    messageManager.addMessageListener("Browser:WindowCreated", this);
 
     // To correctly handle keypresses for potential FindAsYouType, while
     // the tab's find bar is not yet initialized.
@@ -248,19 +248,6 @@ window._gBrowser = {
         break;
     }
     return i;
-  },
-
-  get popupAnchor() {
-    if (this.selectedTab._popupAnchor) {
-      return this.selectedTab._popupAnchor;
-    }
-    let stack = this.selectedBrowser.parentNode;
-    // Create an anchor for the popup
-    let popupAnchor = document.createXULElement("hbox");
-    popupAnchor.className = "popup-anchor";
-    popupAnchor.hidden = true;
-    stack.appendChild(popupAnchor);
-    return this.selectedTab._popupAnchor = popupAnchor;
   },
 
   set selectedTab(val) {
@@ -600,7 +587,7 @@ window._gBrowser = {
   },
 
   _notifyPinnedStatus(aTab) {
-    this.getBrowserForTab(aTab).messageManager.sendAsyncMessage("Browser:AppTab", { isAppTab: aTab.pinned });
+    aTab.linkedBrowser.sendMessageToActor("Browser:AppTab", { isAppTab: aTab.pinned }, "BrowserTab");
 
     let event = document.createEvent("Events");
     event.initEvent(aTab.pinned ? "TabPinned" : "TabUnpinned", true, false);
@@ -654,8 +641,7 @@ window._gBrowser = {
       const animations =
         Array.from(aTab.parentNode.getElementsByTagName("tab"))
         .map(tab => {
-          const throbber =
-            document.getAnonymousElementByAttribute(tab, "anonid", "tab-throbber");
+          const throbber = tab.throbber;
           return throbber ? throbber.getAnimations({ subtree: true }) : [];
         })
         .reduce((a, b) => a.concat(b))
@@ -1178,9 +1164,7 @@ window._gBrowser = {
     // if the tab is a blank one.
     if (newBrowser._urlbarFocused && gURLBar) {
       // Explicitly close the popup if the URL bar retains focus
-      if (!gURLBar.openViewOnFocus) {
-        gURLBar.closePopup();
-      }
+      gURLBar.closePopup();
 
       // If the user happened to type into the URL bar for this browser
       // by the time we got here, focusing will cause the text to be
@@ -1403,6 +1387,7 @@ window._gBrowser = {
     var aUserContextId;
     var aSameProcessAsFrameLoader;
     var aOriginPrincipal;
+    var aOriginStoragePrincipal;
     var aOpener;
     var aOpenerBrowser;
     var aCreateLazyBrowser;
@@ -1430,6 +1415,7 @@ window._gBrowser = {
       aUserContextId = params.userContextId;
       aSameProcessAsFrameLoader = params.sameProcessAsFrameLoader;
       aOriginPrincipal = params.originPrincipal;
+      aOriginStoragePrincipal = params.originStoragePrincipal;
       aOpener = params.opener;
       aOpenerBrowser = params.openerBrowser;
       aCreateLazyBrowser = params.createLazyBrowser;
@@ -1465,6 +1451,7 @@ window._gBrowser = {
       preferredRemoteType: aPreferredRemoteType,
       userContextId: aUserContextId,
       originPrincipal: aOriginPrincipal,
+      originStoragePrincipal: aOriginStoragePrincipal,
       sameProcessAsFrameLoader: aSameProcessAsFrameLoader,
       opener: aOpener,
       openerBrowser: aOpenerBrowser,
@@ -1780,7 +1767,7 @@ window._gBrowser = {
       // crashed.
       tab.removeAttribute("crashed");
     } else {
-      aBrowser.messageManager.sendAsyncMessage("Browser:AppTab", { isAppTab: tab.pinned });
+      aBrowser.sendMessageToActor("Browser:AppTab", { isAppTab: tab.pinned }, "BrowserTab");
 
       // Register the new outerWindowID.
       this._outerWindowIDBrowserMap.set(aBrowser.outerWindowID, aBrowser);
@@ -1794,9 +1781,7 @@ window._gBrowser = {
       this.getCachedFindBar(tab).browser = aBrowser;
     }
 
-    tab.linkedBrowser
-       .messageManager
-       .sendAsyncMessage("Browser:HasSiblings", this.tabs.length > 1);
+    tab.linkedBrowser.sendMessageToActor("Browser:HasSiblings", this.tabs.length > 1, "BrowserTab");
 
     evt = document.createEvent("Events");
     evt.initEvent("TabRemotenessChange", true, false);
@@ -2142,12 +2127,10 @@ window._gBrowser = {
     // If we transitioned from one browser to two browsers, we need to set
     // hasSiblings=false on both the existing browser and the new browser.
     if (this.tabs.length == 2) {
-      window.messageManager
-            .broadcastAsyncMessage("Browser:HasSiblings", true);
+      this.tabs[0].linkedBrowser.sendMessageToActor("Browser:HasSiblings", true, "BrowserTab");
+      this.tabs[1].linkedBrowser.sendMessageToActor("Browser:HasSiblings", true, "BrowserTab");
     } else {
-      aTab.linkedBrowser
-          .messageManager
-          .sendAsyncMessage("Browser:HasSiblings", this.tabs.length > 1);
+      aTab.linkedBrowser.sendMessageToActor("Browser:HasSiblings", this.tabs.length > 1, "BrowserTab");
     }
 
     var evt = new CustomEvent("TabBrowserInserted", { bubbles: true, detail: { insertedOnTabCreation: aInsertedOnTabCreation } });
@@ -2271,6 +2254,7 @@ window._gBrowser = {
     opener,
     openerBrowser,
     originPrincipal,
+    originStoragePrincipal,
     ownerTab,
     pinned,
     postData,
@@ -2318,8 +2302,7 @@ window._gBrowser = {
     let openerTab = ((openerBrowser && this.getTabForBrowser(openerBrowser)) ||
       (relatedToCurrent && this.selectedTab));
 
-    var t = document.createXULElement("tab");
-
+    var t = document.createXULElement("tab", { is: "tabbrowser-tab" });
     t.openerTab = openerTab;
 
     aURI = aURI || "about:blank";
@@ -2556,13 +2539,13 @@ window._gBrowser = {
     let evt = new CustomEvent("TabOpen", { bubbles: true, detail: eventDetail || {} });
     t.dispatchEvent(evt);
 
-    if (!usingPreloadedContent && originPrincipal && aURI) {
+    if (!usingPreloadedContent && originPrincipal && originStoragePrincipal && aURI) {
       let { URI_INHERITS_SECURITY_CONTEXT } = Ci.nsIProtocolHandler;
       // Unless we know for sure we're not inheriting principals,
       // force the about:blank viewer to have the right principal:
       if (!aURIObject ||
           (doGetProtocolFlags(aURIObject) & URI_INHERITS_SECURITY_CONTEXT)) {
-        b.createAboutBlankContentViewer(originPrincipal);
+        b.createAboutBlankContentViewer(originPrincipal, originStoragePrincipal);
       }
     }
 
@@ -2869,9 +2852,10 @@ window._gBrowser = {
 
   _hasBeforeUnload(aTab) {
     let browser = aTab.linkedBrowser;
-    return browser.isRemoteBrowser && browser.frameLoader &&
-           browser.frameLoader.remoteTab &&
-           browser.frameLoader.remoteTab.hasBeforeUnload;
+    if (browser.isRemoteBrowser && browser.frameLoader) {
+      return PermitUnloader.hasBeforeUnload(browser.frameLoader);
+    }
+    return false;
   },
 
   _beginRemoveTab(aTab, {
@@ -3006,8 +2990,8 @@ window._gBrowser = {
     if (this.tabs.length == 2) {
       // We're closing one of our two open tabs, inform the other tab that its
       // sibling is going away.
-      window.messageManager
-            .broadcastAsyncMessage("Browser:HasSiblings", false);
+      this.tabs[0].linkedBrowser.sendMessageToActor("Browser:HasSiblings", false, "BrowserTab");
+      this.tabs[1].linkedBrowser.sendMessageToActor("Browser:HasSiblings", false, "BrowserTab");
     }
 
     if (aTab.linkedPanel) {
@@ -3472,6 +3456,20 @@ window._gBrowser = {
     }
     if (tmp) {
       aOtherBrowser.registeredOpenURI = tmp;
+    }
+  },
+
+  announceWindowCreated(browser, userContextId) {
+    let tab = this.getTabForBrowser(browser);
+    if (tab && userContextId) {
+      ContextualIdentityService.telemetry(userContextId);
+      tab.setUserContextId(userContextId);
+    }
+
+    // We don't want to update the container icon and identifier if
+    // this is not the selected browser.
+    if (browser == gBrowser.selectedBrowser) {
+      updateUserContextUIIndicator();
     }
   },
 
@@ -4227,8 +4225,8 @@ window._gBrowser = {
 
   createTooltip(event) {
     event.stopPropagation();
-    var tab = document.tooltipNode;
-    if (!tab || tab.localName != "tab") {
+    let tab = document.tooltipNode ? document.tooltipNode.closest("tab") : null;
+    if (!tab) {
       event.preventDefault();
       return;
     }
@@ -4277,13 +4275,25 @@ window._gBrowser = {
             tab.linkedBrowser.frameLoader) {
           label += " (pid " + tab.linkedBrowser.frameLoader.remoteTab.osPid + ")";
 
-          if (window.docShell.QueryInterface(Ci.nsILoadContext).useRemoteSubframes) {
-            label += " [F]";
+          // If we're running with fission enabled, try to include PID
+          // information for every remote subframe.
+          if (gFissionBrowser) {
+            let pids = new Set();
+            let stack = [tab.linkedBrowser.browsingContext];
+            while (stack.length) {
+              let bc = stack.pop();
+              stack.push(...bc.getChildren());
+              if (bc.currentWindowGlobal) {
+                pids.add(bc.currentWindowGlobal.osPid);
+              }
+            }
+
+            label += " [F " + Array.from(pids).join(", ") + "]";
           }
         }
       }
       if (tab.userContextId) {
-        label = gTabBrowserBundle.formatStringFromName("tabs.containers.tooltip", [label, ContextualIdentityService.getUserContextLabel(tab.userContextId)], 2);
+        label = gTabBrowserBundle.formatStringFromName("tabs.containers.tooltip", [label, ContextualIdentityService.getUserContextLabel(tab.userContextId)]);
       }
     }
 
@@ -4298,6 +4308,18 @@ window._gBrowser = {
       case "keypress":
         this._handleKeyPressEventMac(aEvent);
         break;
+      case "framefocusrequested": {
+        let tab = this.getTabForBrowser(aEvent.target);
+        if (!tab || tab == this.selectedTab) {
+          // Let the focus manager try to do its thing by not calling
+          // preventDefault(). It will still raise the window if appropriate.
+          break;
+        }
+        this.selectedTab = tab;
+        window.focus();
+        aEvent.preventDefault();
+        break;
+      }
       case "sizemodechange":
       case "occlusionstatechange":
         if (aEvent.target == window && !this._switcher) {
@@ -4324,37 +4346,9 @@ window._gBrowser = {
           tab.setAttribute("titlechanged", "true");
         break;
       }
-      case "DOMWindowClose":
-      {
-        if (this.tabs.length == 1) {
-          // We already did PermitUnload in the content process
-          // for this tab (the only one in the window). So we don't
-          // need to do it again for any tabs.
-          window.skipNextCanClose = true;
-          window.close();
-          return undefined;
-        }
-
-        let tab = this.getTabForBrowser(browser);
-        if (tab) {
-          // Skip running PermitUnload since it already happened in
-          // the content process.
-          this.removeTab(tab, { skipPermitUnload: true });
-        }
-        break;
-      }
       case "contextmenu":
       {
         openContextMenu(aMessage);
-        break;
-      }
-      case "DOMWindowFocus":
-      {
-        let tab = this.getTabForBrowser(browser);
-        if (!tab)
-          return undefined;
-        this.selectedTab = tab;
-        window.focus();
         break;
       }
       case "Browser:Init":
@@ -4364,23 +4358,7 @@ window._gBrowser = {
           return undefined;
 
         this._outerWindowIDBrowserMap.set(browser.outerWindowID, browser);
-        browser.messageManager.sendAsyncMessage("Browser:AppTab", { isAppTab: tab.pinned });
-        break;
-      }
-      case "Browser:WindowCreated":
-      {
-        let tab = this.getTabForBrowser(browser);
-        if (tab && data.userContextId) {
-          ContextualIdentityService.telemetry(data.userContextId);
-          tab.setUserContextId(data.userContextId);
-        }
-
-        // We don't want to update the container icon and identifier if
-        // this is not the selected browser.
-        if (browser == gBrowser.selectedBrowser) {
-          updateUserContextUIIndicator();
-        }
-
+        browser.sendMessageToActor("Browser:AppTab", { isAppTab: tab.pinned }, "BrowserTab");
         break;
       }
       case "Findbar:Keypress":
@@ -4508,6 +4486,7 @@ window._gBrowser = {
     }
     window.removeEventListener("sizemodechange", this);
     window.removeEventListener("occlusionstatechange", this);
+    window.removeEventListener("framefocusrequested", this);
 
     if (gMultiProcessBrowser) {
       let messageManager = window.getGroupMessageManager("browsers");
@@ -4528,25 +4507,48 @@ window._gBrowser = {
     });
 
     this.addEventListener("DOMWindowClose", (event) => {
-      if (!event.isTrusted)
-        return;
+      let browser = event.target;
+      if (!browser.isRemoteBrowser) {
+        if (!event.isTrusted) {
+          // If the browser is not remote, then we expect the event to be trusted.
+          // In the remote case, the DOMWindowClose event is captured in content,
+          // a message is sent to the parent, and another DOMWindowClose event
+          // is re-dispatched on the actual browser node. In that case, the event
+          // won't  be marked as trusted, since it's synthesized by JavaScript.
+          return;
+        }
+        // In the parent-process browser case, it's possible that the browser
+        // that fired DOMWindowClose is actually a child of another browser. We
+        // want to find the top-most browser to determine whether or not this is
+        // for a tab or not. The chromeEventHandler will be the top-most browser.
+        browser = event.target.docShell.chromeEventHandler;
+      }
 
       if (this.tabs.length == 1) {
-        // We already did PermitUnload in nsGlobalWindow::Close
-        // for this tab. There are no other tabs we need to do
-        // PermitUnload for.
+        // We already did PermitUnload in the content process
+        // for this tab (the only one in the window). So we don't
+        // need to do it again for any tabs.
         window.skipNextCanClose = true;
+        // In the parent-process browser case, the nsCloseEvent will actually take
+        // care of tearing down the window, but we need to do this ourselves in the
+        // content-process browser case. Doing so in both cases doesn't appear to
+        // hurt.
+        window.close();
         return;
       }
 
-      let browser = event.target.docShell.chromeEventHandler;
       let tab = this.getTabForBrowser(browser);
       if (tab) {
-        // Skip running PermitUnload since it already happened.
+        // Skip running PermitUnload since it already happened in
+        // the content process.
         this.removeTab(tab, { skipPermitUnload: true });
+        // If we don't preventDefault on the DOMWindowClose event, then
+        // in the parent-process browser case, we're telling the platform
+        // to close the entire window. Calling preventDefault is our way of
+        // saying we took care of this close request by closing the tab.
         event.preventDefault();
       }
-    }, true);
+    });
 
     this.addEventListener("DOMWillOpenModalDialog", (event) => {
       if (!event.isTrusted)
@@ -4774,9 +4776,11 @@ window._gBrowser = {
         el.setAttribute("data-l10n-id", el.getAttribute("data-lazy-l10n-id"));
         el.removeAttribute("data-lazy-l10n-id");
       });
+      this.tabContainer.removeEventListener("contextmenu", tabContextFTLInserter, true);
       this.tabContainer.removeEventListener("mouseover", tabContextFTLInserter);
       this.tabContainer.removeEventListener("focus", tabContextFTLInserter, true);
     };
+    this.tabContainer.addEventListener("contextmenu", tabContextFTLInserter, true);
     this.tabContainer.addEventListener("mouseover", tabContextFTLInserter);
     this.tabContainer.addEventListener("focus", tabContextFTLInserter, true);
   },
@@ -5034,8 +5038,8 @@ class TabProgressListener {
 
           this.mBrowser.userTypedValue = null;
 
-          let inLoadURI = this.mBrowser.inLoadURI;
-          if (this.mTab.selected && gURLBar && !inLoadURI) {
+          let isNavigating = this.mBrowser.isNavigating;
+          if (this.mTab.selected && gURLBar && !isNavigating) {
             URLBarSetURI();
           }
         } else if (isSuccessful) {
@@ -5108,7 +5112,7 @@ class TabProgressListener {
       // and the user cleared the URL manually.
       if (this.mBrowser.didStartLoadSinceLastUserTyping() ||
           (isErrorPage && aLocation.spec != "about:blank") ||
-          (isSameDocument && this.mBrowser.inLoadURI) ||
+          (isSameDocument && this.mBrowser.isNavigating) ||
           (isSameDocument && !this.mBrowser.userTypedValue)) {
         this.mBrowser.userTypedValue = null;
       }
@@ -5396,8 +5400,9 @@ var TabContextMenu = {
     });
   },
   updateContextMenu(aPopupMenu) {
-    this.contextTab = aPopupMenu.triggerNode.localName == "tab" ?
-                      aPopupMenu.triggerNode : gBrowser.selectedTab;
+    let tab = aPopupMenu.triggerNode && aPopupMenu.triggerNode.closest("tab");
+    this.contextTab = tab || gBrowser.selectedTab;
+
     let disabled = gBrowser.tabs.length == 1;
     let multiselectionContext = this.contextTab.multiselected;
 

@@ -107,7 +107,7 @@ function CustomizeMode(aWindow) {
     container.replaceChild(this.window.MozXULElement.parseXULToFragment(container.firstChild.data), container.lastChild);
   }
   // There are two palettes - there's the palette that can be overlayed with
-  // toolbar items in browser.xul. This is invisible, and never seen by the
+  // toolbar items in browser.xhtml. This is invisible, and never seen by the
   // user. Then there's the visible palette, which gets populated and displayed
   // to the user when in customizing mode.
   this.visiblePalette = this.$(kPaletteId);
@@ -313,7 +313,8 @@ CustomizeMode.prototype = {
       this._transitioning = true;
 
       let customizer = document.getElementById("customization-container");
-      customizer.parentNode.selectedPanel = customizer;
+      let browser = document.getElementById("browser");
+      browser.collapsed = true;
       customizer.hidden = false;
 
       this._wrapToolbarItemSync(CustomizableUI.AREA_TABSTRIP);
@@ -427,10 +428,10 @@ CustomizeMode.prototype = {
           unregisterGlobalTab();
         }
       }
-      let browser = document.getElementById("browser");
-      browser.parentNode.selectedPanel = browser;
       let customizer = document.getElementById("customization-container");
+      let browser = document.getElementById("browser");
       customizer.hidden = true;
+      browser.collapsed = false;
 
       window.gNavToolbox.removeEventListener("toolbarvisibilitychange", this);
 

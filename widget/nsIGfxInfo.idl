@@ -20,6 +20,11 @@ interface nsIGfxInfo : nsISupports
   readonly attribute AString cleartypeParameters;
 
   /*
+   * These are non-Android linux-specific
+   */
+  readonly attribute AString windowProtocol;
+
+  /*
    * These are valid across all platforms.
    */
   readonly attribute AString ContentBackend;
@@ -80,10 +85,7 @@ interface nsIGfxInfo : nsISupports
   [implicit_jscontext]
   jsval getMonitors();
 
-  void getFailures(
-               out unsigned long failureCount,
-               [optional, array, size_is(failureCount)] out long indices,
-               [retval, array, size_is(failureCount)] out string failures);
+  Array<ACString> getFailures(out Array<long> indices);
 
   [noscript, notxpcom] void logFailure(in ACString failure);
   /*

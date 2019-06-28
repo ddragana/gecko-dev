@@ -49,6 +49,7 @@ import android.os.Parcelable;
 import android.os.SystemClock;
 import android.support.annotation.AnyThread;
 import android.support.annotation.IntDef;
+import android.support.annotation.LongDef;
 import android.support.annotation.Nullable;
 import android.support.annotation.NonNull;
 import android.support.annotation.StringDef;
@@ -426,9 +427,9 @@ public class GeckoSession implements Parcelable {
                 "GeckoView:ContentCrash",
                 "GeckoView:ContextMenu",
                 "GeckoView:DOMTitleChanged",
-                "GeckoView:DOMWindowFocus",
                 "GeckoView:DOMWindowClose",
                 "GeckoView:ExternalResponse",
+                "GeckoView:FocusRequest",
                 "GeckoView:FullScreenEnter",
                 "GeckoView:FullScreenExit",
                 "GeckoView:WebAppManifest",
@@ -461,7 +462,7 @@ public class GeckoSession implements Parcelable {
                 } else if ("GeckoView:DOMTitleChanged".equals(event)) {
                     delegate.onTitleChange(GeckoSession.this,
                                            message.getString("title"));
-                } else if ("GeckoView:DOMWindowFocus".equals(event)) {
+                } else if ("GeckoView:FocusRequest".equals(event)) {
                     delegate.onFocusRequest(GeckoSession.this);
                 } else if ("GeckoView:DOMWindowClose".equals(event)) {
                     delegate.onCloseRequest(GeckoSession.this);
@@ -868,6 +869,7 @@ public class GeckoSession implements Parcelable {
                         "GeckoView:MediaRateChanged",
                         "GeckoView:MediaFullscreenChanged",
                         "GeckoView:MediaError",
+                        "GeckoView:MediaRecordingStatusChanged",
                     }
             ) {
         @Override
@@ -885,6 +887,14 @@ public class GeckoSession implements Parcelable {
                     delegate.onMediaRemove(GeckoSession.this, mMediaElements.get(key));
                 }
                 mMediaElements.clear();
+                return;
+            } else if ("GeckoView:MediaRecordingStatusChanged".equals(event)) {
+                final GeckoBundle[] deviceBundles = message.getBundleArray("devices");
+                final MediaDelegate.RecordingDevice[] devices = new MediaDelegate.RecordingDevice[deviceBundles.length];
+                for (int i = 0; i < deviceBundles.length; i++) {
+                    devices[i] = new MediaDelegate.RecordingDevice(deviceBundles[i]);
+                }
+                delegate.onRecordingStatusChanged(GeckoSession.this, devices);
                 return;
             }
 
@@ -1012,7 +1022,7 @@ public class GeckoSession implements Parcelable {
 
     /**
      * Get the current prompt delegate for this GeckoSession.
-     * @return PromptDelegate instance or null if using default delegate.
+     * @return PermissionDelegate instance or null if using default delegate.
      */
     @UiThread
     public @Nullable PermissionDelegate getPermissionDelegate() {
@@ -4346,50 +4356,35 @@ public class GeckoSession implements Parcelable {
 
         class MediaSource {
             @Retention(RetentionPolicy.SOURCE)
-            @IntDef({SOURCE_CAMERA, SOURCE_SCREEN, SOURCE_APPLICATION,
-                     SOURCE_WINDOW, SOURCE_BROWSER, SOURCE_MICROPHONE,
-                     SOURCE_AUDIOCAPTURE, SOURCE_OTHER})
+            @IntDef({SOURCE_CAMERA, SOURCE_SCREEN,
+                     SOURCE_MICROPHONE, SOURCE_AUDIOCAPTURE,
+                     SOURCE_OTHER})
             /* package */ @interface Source {}
 
             /**
-             * The media source is a camera.
+             * Constant to indicate that camera will be recorded.
              */
             public static final int SOURCE_CAMERA = 0;
 
             /**
-             * The media source is the screen.
+             * Constant to indicate that screen will be recorded.
              */
             public static final int SOURCE_SCREEN  = 1;
 
             /**
-             * The media source is an application.
+             * Constant to indicate that microphone will be recorded.
              */
-            public static final int SOURCE_APPLICATION = 2;
+            public static final int SOURCE_MICROPHONE = 2;
 
             /**
-             * The media source is a window.
+             * Constant to indicate that device audio playback will be recorded.
              */
-            public static final int SOURCE_WINDOW = 3;
+            public static final int SOURCE_AUDIOCAPTURE = 3;
 
             /**
-             * The media source is the browser.
+             * Constant to indicate a media source that does not fall under the other categories.
              */
-            public static final int SOURCE_BROWSER = 4;
-
-            /**
-             * The media source is a microphone.
-             */
-            public static final int SOURCE_MICROPHONE = 5;
-
-            /**
-             * The media source is audio capture.
-             */
-            public static final int SOURCE_AUDIOCAPTURE = 6;
-
-            /**
-             * The media source does not fall into any of the other categories.
-             */
-            public static final int SOURCE_OTHER = 7;
+            public static final int SOURCE_OTHER = 4;
 
             @Retention(RetentionPolicy.SOURCE)
             @IntDef({TYPE_VIDEO, TYPE_AUDIO})
@@ -4423,9 +4418,9 @@ public class GeckoSession implements Parcelable {
             public final @Nullable String name;
 
             /**
-             * An int giving the media source type.
+             * An int indicating the media source type.
              * Possible values for a video source are:
-             * SOURCE_CAMERA, SOURCE_SCREEN, SOURCE_APPLICATION, SOURCE_WINDOW, SOURCE_BROWSER, and SOURCE_OTHER.
+             * SOURCE_CAMERA, SOURCE_SCREEN, and SOURCE_OTHER.
              * Possible values for an audio source are:
              * SOURCE_MICROPHONE, SOURCE_AUDIOCAPTURE, and SOURCE_OTHER.
              */
@@ -4440,19 +4435,13 @@ public class GeckoSession implements Parcelable {
                 // The strings here should match those in MediaSourceEnum in MediaStreamTrack.webidl
                 if ("camera".equals(src)) {
                     return SOURCE_CAMERA;
-                } else if ("screen".equals(src)) {
+                } else if ("screen".equals(src) || "window".equals(src) || "browser".equals(src)) {
                     return SOURCE_SCREEN;
-                } else if ("application".equals(src)) {
-                    return SOURCE_APPLICATION;
-                } else if ("window".equals(src)) {
-                    return SOURCE_WINDOW;
-                } else if ("browser".equals(src)) {
-                    return SOURCE_BROWSER;
                 } else if ("microphone".equals(src)) {
                     return SOURCE_MICROPHONE;
                 } else if ("audioCapture".equals(src)) {
                     return SOURCE_AUDIOCAPTURE;
-                } else if ("other".equals(src)) {
+                } else if ("other".equals(src) || "application".equals(src)) {
                     return SOURCE_OTHER;
                 } else {
                     throw new IllegalArgumentException("String: " + src + " is not a valid media source string");
@@ -4952,6 +4941,83 @@ public class GeckoSession implements Parcelable {
      * GeckoSession applications implement this interface to handle media events.
      */
     public interface MediaDelegate {
+
+        class RecordingDevice {
+
+            /*
+             * Default status flags for this RecordingDevice.
+             */
+            public static class Status {
+                public static final long RECORDING = 0;
+                public static final long INACTIVE = 1 << 0;
+
+                // Do not instantiate this class.
+                protected Status() {}
+            }
+
+            /*
+             * Default device types for this RecordingDevice.
+             */
+            public static class Type {
+                public static final long CAMERA = 0;
+                public static final long MICROPHONE = 1 << 0;
+
+                // Do not instantiate this class.
+                protected Type() {}
+            }
+
+            @Retention(RetentionPolicy.SOURCE)
+            @LongDef(flag = true,
+                    value = { Status.RECORDING, Status.INACTIVE })
+            /* package */ @interface RecordingStatus {}
+
+            @Retention(RetentionPolicy.SOURCE)
+            @LongDef(flag = true,
+                    value = {Type.CAMERA, Type.MICROPHONE})
+            /* package */ @interface DeviceType {}
+
+            /**
+             * A long giving the current recording status, must be either Status.RECORDING,
+             * Status.PAUSED or Status.INACTIVE.
+             */
+            public final @RecordingStatus long status;
+
+            /**
+             * A long giving the type of the recording device, must be either Type.CAMERA or Type.MICROPHONE.
+             */
+            public final @DeviceType long type;
+
+            private static @DeviceType long getTypeFromString(final String type) {
+                if ("microphone".equals(type)) {
+                    return Type.MICROPHONE;
+                } else if ("camera".equals(type)) {
+                    return Type.CAMERA;
+                } else {
+                    throw new IllegalArgumentException("String: " + type + " is not a valid recording device string");
+                }
+            }
+
+            private static @RecordingStatus long getStatusFromString(final String type) {
+                if ("recording".equals(type)) {
+                    return Status.RECORDING;
+                } else {
+                    return Status.INACTIVE;
+                }
+            }
+
+            /* package */ RecordingDevice(final GeckoBundle media) {
+                status = getStatusFromString(media.getString("status"));
+                type = getTypeFromString(media.getString("type"));
+            }
+
+            /**
+             * Empty constructor for tests.
+             */
+            protected RecordingDevice() {
+                status = Status.INACTIVE;
+                type = Type.CAMERA;
+            }
+        }
         /**
          * An HTMLMediaElement has been created.
          * @param session Session instance.
@@ -4967,6 +5033,16 @@ public class GeckoSession implements Parcelable {
          */
         @UiThread
         default void onMediaRemove(@NonNull GeckoSession session, @NonNull MediaElement element) {}
+
+        /**
+         * A recording device has changed state.
+         * Any change to the recording state of the devices microphone or camera will call this
+         * delegate method. The argument provides details of the active recording devices.
+         * @param session The session that the event has originated from.
+         * @param devices The list of active devices and their recording state.
+         */
+        @UiThread
+        default void onRecordingStatusChanged(@NonNull GeckoSession session, @NonNull RecordingDevice[] devices) {}
     }
 
     /**

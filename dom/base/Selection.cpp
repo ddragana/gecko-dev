@@ -23,6 +23,7 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/RangeBoundary.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 
 #include "nsCOMPtr.h"
@@ -938,7 +939,7 @@ nsresult Selection::AddItem(nsRange* aItem, int32_t* aOutIndex,
 
     Document* doc = GetParentObject();
     bool selectEventsEnabled =
-        nsFrameSelection::sSelectionEventsEnabled ||
+        StaticPrefs::dom_select_events_enabled() ||
         (doc && nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
 
     if (!aNoStartSelect && mSelectionType == SelectionType::eNormal &&
@@ -1474,8 +1475,8 @@ void Selection::SelectFramesForContent(nsIContent* aContent, bool aSelected) {
   // as a text frame.
   if (frame->IsTextFrame()) {
     nsTextFrame* textFrame = static_cast<nsTextFrame*>(frame);
-    textFrame->SetSelectedRange(0, aContent->GetText()->GetLength(), aSelected,
-                                mSelectionType);
+    textFrame->SetSelectedRange(0, textFrame->TextFragment()->GetLength(),
+                                aSelected, mSelectionType);
   } else {
     frame->InvalidateFrameSubtree();  // frame continuations?
   }

@@ -80,7 +80,7 @@ class UrlbarView {
     if (!this.isOpen || !this._selected) {
       return -1;
     }
-    return parseInt(this._selected.getAttribute("resultIndex"));
+    return this._selected.result.uiIndex;
   }
 
   set selectedIndex(val) {
@@ -94,7 +94,7 @@ class UrlbarView {
     }
 
     let items = Array.from(this._rows.children)
-                     .filter(r => r.style.display != "none");
+                     .filter(r => this._isRowVisible(r));
     if (val >= items.length) {
       throw new Error(`UrlbarView: Index ${val} is out of bounds.`);
     }
@@ -111,19 +111,6 @@ class UrlbarView {
       return null;
     }
     return this._selected.result;
-  }
-
-  /**
-   * Gets the result for the index.
-   * @param {number} index
-   *   The index to look up.
-   * @returns {UrlbarResult}
-   */
-  getResult(index) {
-    if (index < 0 || index > this._queryContext.results.length) {
-      throw new Error(`UrlbarView: Index ${index} is out of bounds`);
-    }
-    return this._queryContext.results[index];
   }
 
   /**
@@ -147,7 +134,7 @@ class UrlbarView {
 
     // Results over maxResults may be hidden and should not be selectable.
     let lastElementChild = this._rows.lastElementChild;
-    while (lastElementChild && lastElementChild.style.display == "none") {
+    while (lastElementChild && !this._isRowVisible(lastElementChild)) {
       lastElementChild = lastElementChild.previousElementSibling;
     }
 
@@ -176,7 +163,7 @@ class UrlbarView {
       if (!next) {
         break;
       }
-      if (next.style.display == "none") {
+      if (!this._isRowVisible(next)) {
         continue;
       }
       row = next;
@@ -230,7 +217,9 @@ class UrlbarView {
         });
       } else {
         // Clear the selection when we get a new set of results.
-        this._selectItem(null);
+        this._selectItem(null, {
+          updateInput: false,
+        });
       }
       // Hide the one-off search buttons if the search string is empty, or
       // starts with a potential @ search alias or the search restriction
@@ -263,14 +252,10 @@ class UrlbarView {
    * @param {number} index The index of the result that has been removed.
    */
   onQueryResultRemoved(index) {
-    // Change the index for any rows above the removed index.
-    for (let i = index + 1; i < this._rows.children.length; i++) {
-      let child = this._rows.children[i];
-      child.setAttribute("resultIndex", child.getAttribute("resultIndex") - 1);
-    }
-
     let rowToRemove = this._rows.children[index];
     rowToRemove.remove();
+
+    this._updateIndices();
 
     if (rowToRemove != this._selected) {
       return;
@@ -478,10 +463,12 @@ class UrlbarView {
       // Due to stale rows, we may have more rows than maxResults, thus we must
       // hide them, and we'll revert this when stale rows are removed.
       if (this._rows.children.length >= queryContext.maxResults) {
-        row.style.display = "none";
+        this._setRowVisibility(row, false);
       }
       this._rows.appendChild(row);
     }
+
+    this._updateIndices();
   }
 
   _createRow() {
@@ -532,11 +519,8 @@ class UrlbarView {
   }
 
   _updateRow(item, result) {
-    let resultIndex = this._queryContext.results.indexOf(result);
     item.result = result;
     item.removeAttribute("stale");
-    item.id = "urlbarView-row-" + resultIndex;
-    item.setAttribute("resultIndex", resultIndex);
 
     if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH &&
         !result.payload.isKeywordOffer) {
@@ -593,7 +577,7 @@ class UrlbarView {
         break;
       case UrlbarUtils.RESULT_TYPE.SEARCH:
         action = bundle.formatStringFromName("searchWithEngine",
-                                             [result.payload.engine], 1);
+                                             [result.payload.engine]);
         break;
       case UrlbarUtils.RESULT_TYPE.KEYWORD:
         isVisitAction = result.payload.input.trim() == result.payload.keyword;
@@ -634,6 +618,29 @@ class UrlbarView {
     item._elements.get("titleSeparator").hidden = !action && !setURL;
   }
 
+  _updateIndices() {
+    for (let i = 0; i < this._rows.children.length; i++) {
+      let item = this._rows.children[i];
+      item.result.uiIndex = i;
+      item.id = "urlbarView-row-" + i;
+    }
+  }
+
+  _setRowVisibility(row, visible) {
+    row.style.display = visible ? "" : "none";
+    if (!visible) {
+      // Reset the overflow state of elements that can overflow in case their
+      // content changes while they're hidden. When making the row visible
+      // again, we'll get new overflow events if needed.
+      this._setElementOverflowing(row._elements.get("title"), false);
+      this._setElementOverflowing(row._elements.get("url"), false);
+    }
+  }
+
+  _isRowVisible(row) {
+    return row.style.display != "none";
+  }
+
   _removeStaleRows() {
     let row = this._rows.lastElementChild;
     while (row) {
@@ -641,7 +648,7 @@ class UrlbarView {
       if (row.hasAttribute("stale")) {
         row.remove();
       } else {
-        row.style.display = "";
+        this._setRowVisibility(row, true);
       }
       row = next;
     }
@@ -743,6 +750,17 @@ class UrlbarView {
     }
   }
 
+  _setElementOverflowing(element, overflowing) {
+    element.toggleAttribute("overflow", overflowing);
+    if (overflowing) {
+      element.setAttribute("title", element._tooltip);
+    } else {
+      element.removeAttribute("title");
+    }
+  }
+
+  // Event handlers below.
+
   _on_SelectedOneOffButtonChanged() {
     if (!this.isOpen || !this._queryContext) {
       return;
@@ -772,7 +790,7 @@ class UrlbarView {
       let action = item.querySelector(".urlbarView-action");
       action.textContent =
         bundle.formatStringFromName("searchWithEngine",
-          [(engine && engine.name) || result.payload.engine], 1);
+          [(engine && engine.name) || result.payload.engine]);
       // If we just changed the engine from the original engine and it had an
       // icon, then make sure the result now uses the new engine's icon or
       // failing that the default icon.  If we changed it back to the original
@@ -799,7 +817,7 @@ class UrlbarView {
       row = row.parentNode;
     }
     this._selectItem(row, { updateInput: false });
-    this.controller.speculativeConnect(this._queryContext, this.selectedIndex, "mousedown");
+    this.controller.speculativeConnect(this.selectedResult, this._queryContext, "mousedown");
   }
 
   _on_mouseup(event) {
@@ -812,15 +830,14 @@ class UrlbarView {
     while (!row.classList.contains("urlbarView-row")) {
       row = row.parentNode;
     }
-    this.input.pickResult(event, parseInt(row.getAttribute("resultIndex")));
+    this.input.pickResult(row.result, event);
   }
 
   _on_overflow(event) {
     if (event.detail == 1 &&
         (event.target.classList.contains("urlbarView-url") ||
          event.target.classList.contains("urlbarView-title"))) {
-      event.target.toggleAttribute("overflow", true);
-      event.target.setAttribute("title", event.target._tooltip);
+      this._setElementOverflowing(event.target, true);
     }
   }
 
@@ -828,8 +845,7 @@ class UrlbarView {
     if (event.detail == 1 &&
         (event.target.classList.contains("urlbarView-url") ||
          event.target.classList.contains("urlbarView-title"))) {
-      event.target.toggleAttribute("overflow", false);
-      event.target.removeAttribute("title");
+      this._setElementOverflowing(event.target, false);
     }
   }
 

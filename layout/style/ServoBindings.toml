@@ -163,6 +163,7 @@ whitelist-vars = [
     "mozilla::detail::gGkAtoms",
     "mozilla::detail::kGkAtomsArrayOffset",
     "mozilla::profiler::detail::RacyFeatures::sActiveAndFeatures",
+    "mozilla::StaticPrefs::.*",
 ]
 # TODO(emilio): A bunch of types here can go away once we generate bindings and
 # structs together.
@@ -408,10 +409,13 @@ cbindgen-types = [
     { gecko = "StyleFontDisplay", servo = "font_face::FontDisplay" },
     { gecko = "StyleFontFaceSourceListComponent", servo = "font_face::FontFaceSourceListComponent" },
     { gecko = "StyleFontLanguageOverride", servo = "values::computed::font::FontLanguageOverride" },
+    { gecko = "StyleOffsetPath", servo = "values::computed::motion::OffsetPath" },
+    { gecko = "StyleOffsetRotate", servo = "values::computed::motion::OffsetRotate" },
     { gecko = "StylePathCommand", servo = "values::specified::svg_path::PathCommand" },
     { gecko = "StyleUnicodeRange", servo = "cssparser::UnicodeRange" },
     { gecko = "StyleOverflowWrap", servo = "values::computed::OverflowWrap" },
     { gecko = "StyleWordBreak", servo = "values::computed::WordBreak" },
+    { gecko = "StyleLineBreak", servo = "values::computed::LineBreak" },
     { gecko = "StyleUserSelect", servo = "values::computed::UserSelect" },
     { gecko = "StyleBreakBetween", servo = "values::computed::BreakBetween" },
     { gecko = "StyleBreakWithin", servo = "values::computed::BreakWithin" },
@@ -425,6 +429,7 @@ cbindgen-types = [
     { gecko = "StyleFloat", servo = "values::computed::Float" },
     { gecko = "StyleOverscrollBehavior", servo = "values::computed::OverscrollBehavior" },
     { gecko = "StyleTextAlign", servo = "values::computed::TextAlign" },
+    { gecko = "StyleTextOverflow", servo = "values::computed::TextOverflow" },
     { gecko = "StyleOverflow", servo = "values::computed::Overflow" },
     { gecko = "StyleOverflowAnchor", servo = "values::computed::OverflowAnchor" },
     { gecko = "StyleLength", servo = "values::computed::CSSPixelLength" },
@@ -450,6 +455,7 @@ cbindgen-types = [
     { gecko = "StyleCSSPixelLength", servo = "values::computed::length::CSSPixelLength" },
     { gecko = "StyleNonNegativeLength", servo = "values::computed::NonNegativeLength" },
     { gecko = "StyleNonNegativeNumber", servo = "values::computed::NonNegativeNumber" },
+    { gecko = "StyleZeroToOneNumber", servo = "values::computed::ZeroToOneNumber" },
     { gecko = "StylePercentage", servo = "values::computed::Percentage" },
     { gecko = "StylePerspective", servo = "values::computed::Perspective" },
     { gecko = "StyleGenericPerspective", servo = "values::generics::box_::Perspective" },
@@ -472,6 +478,7 @@ cbindgen-types = [
     { gecko = "StyleGenericFontFamily", servo = "values::computed::font::GenericFontFamily" },
     { gecko = "StyleFontFamilyNameSyntax", servo = "values::computed::font::FontFamilyNameSyntax" },
     { gecko = "StyleGenericColor", servo = "values::generics::color::Color" },
+    { gecko = "StyleSystemColor", servo = "values::specified::color::SystemColor" },
     { gecko = "StyleGenericColorOrAuto", servo = "values::generics::color::ColorOrAuto" },
     { gecko = "StyleGenericScrollbarColor", servo = "values::generics::ui::ScrollbarColor" },
     { gecko = "StyleRGBA", servo = "cssparser::RGBA" },
@@ -493,7 +500,20 @@ cbindgen-types = [
     { gecko = "StyleGenericScale", servo = "values::generics::transform::Scale" },
     { gecko = "StyleGenericRotate", servo = "values::generics::transform::Rotate" },
     { gecko = "StyleGenericTranslate", servo = "values::generics::transform::Translate" },
-    { gecko = "StyleAngle", servo = "values::computed::Angle" }
+    { gecko = "StyleAngle", servo = "values::computed::Angle" },
+    { gecko = "StyleGenericBorderImageSideWidth", servo = "values::generics::border::BorderImageSideWidth" },
+    { gecko = "StyleGenericUrlOrNone", servo = "values::generics::url::UrlOrNone" },
+    { gecko = "StyleCssUrl", servo = "gecko::url::CssUrl" },
+    { gecko = "StyleSpecifiedUrl", servo = "gecko::url::SpecifiedUrl" },
+    { gecko = "StyleSpecifiedImageUrl", servo = "gecko::url::SpecifiedImageUrl" },
+    { gecko = "StyleComputedUrl", servo = "gecko::url::ComputedUrl" },
+    { gecko = "StyleComputedImageUrl", servo = "gecko::url::ComputedImageUrl" },
+    { gecko = "StyleLoadData", servo = "gecko::url::LoadData" },
+    { gecko = "StyleGenericFilter", servo = "values::generics::effects::Filter" },
+    { gecko = "StyleGenericGradient", servo = "values::generics::image::Gradient" },
+    { gecko = "StyleLineDirection", servo = "values::computed::image::LineDirection" },
+    { gecko = "StyleGridTemplateAreas", servo = "values::computed::position::GridTemplateAreas" },
+    { gecko = "StyleGenericGridLine", servo = "values::generics::grid::GridLine" },
 ]
 
 mapped-generic-types = [

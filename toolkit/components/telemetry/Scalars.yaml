@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 # This file contains a definition of the scalar probes that are recorded in Telemetry.
 # They are submitted with the "main" pings and can be inspected in about:telemetry.
 
@@ -449,30 +453,15 @@ identity.fxaccounts:
       - main
 
 security:
-  pkcs11_modules_loaded:
-    bug_numbers:
-      - 1369911
-      - 1445961
-    description: >
-      A keyed boolean indicating the library names of the PKCS#11 modules that
-      have been loaded by the browser.
-    expires: "69"
-    kind: boolean
-    keyed: true
-    notification_emails:
-      - seceng-telemetry@mozilla.com
-      - dkeeler@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - main
   webauthn_used:
     bug_numbers:
       - 1265472
+      - 1558870
     description: >
       Counts of how often Web Authentication was used in this session, keyed
       by authenticator protocol, method and result. Currently: U2FRegisterFinish,
       U2FRegisterAbort, U2FSignFinish, U2FSignAbort.
-    expires: "70"
+    expires: "78"
     kind: uint
     keyed: true
     notification_emails:
@@ -949,6 +938,37 @@ webrtc.nicer:
     release_channel_collection: opt-in
     record_in_processes:
       - 'main'
+      - 'content'
+
+webrtc.video:
+  recv_codec_used:
+    bug_numbers:
+      - 1556766
+    description: >
+      The video codec used for receiving video on a WebRTC call.
+    expires: "never"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dminor@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'content'
+
+  send_codec_used:
+    bug_numbers:
+      - 1556766
+    description: >
+      The video codec used for sending video on a WebRTC call.
+    expires: "never"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dminor@mozilla.com
+      - nohlmeier@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
       - 'content'
 
 webrtc.sdp:
@@ -1449,6 +1469,21 @@ devtools.inspector:
     record_in_processes:
       - 'main'
 
+  node_selection_count:
+    bug_numbers:
+      - 1550794
+    description: >
+      Number of times a different node is marked as selected in the Inspector regardless
+      of the cause: context menu, manual selection in markup view, etc.
+    expires: "never"
+    kind: uint
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - mbalfanz@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
 devtools.shadowdom:
   shadow_root_displayed:
     bug_numbers:
@@ -1499,6 +1534,21 @@ devtools:
       - 1396811
     description: >
       Number of times DevTools was opened, keyed by theme.
+    expires: never
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'main'
+
+devtools.tooltip:
+  shown:
+    bug_numbers:
+      - 1553471
+    description: >
+      Number of times a tooltip was shown, keyed by tooltip type. Currently supported types are "image", "font-family", "inactive-css" and "variable."
     expires: never
     kind: uint
     keyed: true
@@ -1958,6 +2008,23 @@ dom.event:
       compatible with conflated keypress event model or not, using "new"/"old".
       I.e., collecting percentage of too old Confluence instance use count in
       all Confluence instance use count.
+    expires: "71"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - mnakano@mozilla.com
+    release_channel_collection: opt-out
+    record_in_processes:
+      - 'content'
+
+  office_online_load_count:
+    bug_numbers:
+      - 1545410
+    description: >
+      Number of times Office Online Server instances are loaded, and whether
+      they are compatible with conflated keypress event model or not, using
+      "new"/"old".  I.e., collecting percentage of too old Confluence instance
+      use count in all Office Online Server instance use count.
     expires: "71"
     keyed: true
     kind: uint
@@ -2687,23 +2754,6 @@ memoryreporter:
     release_channel_collection: opt-out
     record_in_processes:
       - 'content'
-
-resistfingerprinting:
-  content_window_size:
-    bug_numbers:
-      - 1489493
-    description: >
-      The size (in pixels) of the content windows for innerWidth and innerHeight.
-    expires: "66"
-    kind: uint
-    keyed: true
-    notification_emails:
-      - tihuang@mozilla.com
-      - tom@mozilla.com
-      - ettseng@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - 'main'
 
 update:
   binarytransparencyresult:
@@ -3553,9 +3603,10 @@ encoding:
     bug_numbers:
       - 840476
       - 1513473
+      - 1554592
     description: >-
       Whether the Text Encoding menu was used to override an encoding in this subsession.
-    expires: "69"
+    expires: "72"
     kind: boolean
     notification_emails:
       - hsivonen@mozilla.com
@@ -3727,6 +3778,21 @@ networking:
     kind: uint
     notification_emails:
       - ddamjanovic@mozilla.com
+    record_in_processes:
+      - 'main'
+
+# The following section is for quotaManager
+qm:
+  origin_directory_unexpected_filename:
+    bug_numbers:
+      - 1529016
+    description: >
+      Keys are the filenames of unexpected files in the profile's origin directories.
+    expires: "70"
+    keyed: true
+    kind: uint
+    notification_emails:
+      - ttung@mozilla.com
     record_in_processes:
       - 'main'
 

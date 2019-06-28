@@ -151,7 +151,7 @@ class SVGContentUtils {
    */
   static void GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
                                dom::SVGElement* aElement,
-                               ComputedStyle* aComputedStyle,
+                               const ComputedStyle* aComputedStyle,
                                mozilla::SVGContextPaint* aContextPaint,
                                StrokeOptionFlags aFlags = eAllStrokeOptions);
 
@@ -165,7 +165,7 @@ class SVGContentUtils {
    * "0", respectively.
    */
   static Float GetStrokeWidth(dom::SVGElement* aElement,
-                              ComputedStyle* aComputedStyle,
+                              const ComputedStyle* aComputedStyle,
                               mozilla::SVGContextPaint* aContextPaint);
 
   /*
@@ -193,8 +193,7 @@ class SVGContentUtils {
    * Report a localized error message to the error console.
    */
   static nsresult ReportToConsole(dom::Document* doc, const char* aWarning,
-                                  const char16_t** aParams,
-                                  uint32_t aParamsLength);
+                                  const nsTArray<nsString>& aParams);
 
   static Matrix GetCTM(dom::SVGElement* aElement, bool aScreenCTM);
 

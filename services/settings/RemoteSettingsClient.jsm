@@ -25,6 +25,8 @@ ChromeUtils.defineModuleGetter(this, "Utils",
                                "resource://services-settings/Utils.jsm");
 ChromeUtils.defineModuleGetter(this, "Downloader",
                                "resource://services-settings/Attachments.jsm");
+ChromeUtils.defineModuleGetter(this, "ObjectUtils",
+                               "resource://gre/modules/ObjectUtils.jsm");
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -33,6 +35,7 @@ const DB_NAME = "remote-settings";
 
 const TELEMETRY_COMPONENT = "remotesettings";
 
+XPCOMUtils.defineLazyGetter(this, "console", () => Utils.log);
 XPCOMUtils.defineLazyPreferenceGetter(this, "gServerURL",
                                       "services.settings.server");
 
@@ -177,6 +180,11 @@ class RemoteSettingsClient extends EventEmitter {
     return this._lastCheckTimePref || `services.settings.${this.bucketName}.${this.collectionName}.last_check`;
   }
 
+  httpClient() {
+    const api = new KintoHttpClient(gServerURL);
+    return api.bucket(this.bucketName).collection(this.collectionName);
+  }
+
   /**
    * Open the underlying Kinto collection, using the appropriate adapter and options.
    */
@@ -212,9 +220,11 @@ class RemoteSettingsClient extends EventEmitter {
         // We'll try to avoid returning an empty list.
         if (await Utils.hasLocalDump(this.bucketName, this.collectionName)) {
           // Since there is a JSON dump, load it as default data.
+          console.debug(`${this.identifier} Local DB is empty, load JSON dump`);
           await RemoteSettingsWorker.importJSONDump(this.bucketName, this.collectionName);
         } else {
           // There is no JSON dump, force a synchronization from the server.
+          console.debug(`${this.identifier} Local DB is empty, pull data from server`);
           await this.sync({ loadDump: false });
         }
         // Either from trusted dump, or already done during sync.
@@ -230,11 +240,17 @@ class RemoteSettingsClient extends EventEmitter {
     const kintoCollection = await this.openCollection();
     const { data } = await kintoCollection.list({ filters, order });
 
-    // Verify signature of local data.
     if (verifySignature) {
-      const localRecords = data.map(r => kintoCollection.cleanLocalFields(r));
+      console.debug(`${this.identifier} verify signature of local data`);
+      const { data: allData } = await kintoCollection.list({ order: "" });
+      const localRecords = allData.map(r => kintoCollection.cleanLocalFields(r));
       const timestamp = await kintoCollection.db.getLastModified();
-      const metadata = await kintoCollection.metadata();
+      let metadata = await kintoCollection.metadata();
+      if (syncIfEmpty && ObjectUtils.isEmpty(metadata)) {
+        // No sync occured yet, may have records from dump but no metadata.
+        console.debug(`Required metadata for ${this.identifier}, fetching from server.`);
+        metadata = await kintoCollection.pullMetadata(this.httpClient());
+      }
       await this._validateCollectionSignature([],
                                               timestamp,
                                               metadata,
@@ -282,6 +298,7 @@ class RemoteSettingsClient extends EventEmitter {
   async maybeSync(expectedTimestamp, options = {}) {
     const { loadDump = true, trigger = "manual" } = options;
 
+    let importedFromDump = [];
     const startedAt = new Date();
     let reportStatus = null;
     try {
@@ -295,7 +312,12 @@ class RemoteSettingsClient extends EventEmitter {
       // cold start.
       if (!collectionLastModified && loadDump) {
         try {
-          await RemoteSettingsWorker.importJSONDump(this.bucketName, this.collectionName);
+          const imported = await RemoteSettingsWorker.importJSONDump(this.bucketName, this.collectionName);
+          // The worker only returns an integer. List the imported records to build the sync event.
+          if (imported > 0) {
+            console.debug(`${this.identifier} ${imported} records loaded from JSON dump`);
+            ({ data: importedFromDump } = await kintoCollection.list({ order: "" }));
+          }
           collectionLastModified = await kintoCollection.db.getLastModified();
         } catch (e) {
           // Report but go-on.
@@ -306,6 +328,25 @@ class RemoteSettingsClient extends EventEmitter {
       // If the data is up to date, there's no need to sync. We still need
       // to record the fact that a check happened.
       if (expectedTimestamp <= collectionLastModified) {
+        console.debug(`${this.identifier} local data is up-to-date`);
+        // If the data is up-to-date but don't have metadata (records loaded from dump),
+        // we fetch them and validate the signature immediately.
+        if (this.verifySignature && ObjectUtils.isEmpty(await kintoCollection.metadata())) {
+          console.debug(`${this.identifier} verify signature of local data`);
+          let allData = importedFromDump;
+          if (importedFromDump.length == 0) {
+            // If dump was imported at some other point (eg. `.get()`), list local DB.
+            ({ data: allData } = await kintoCollection.list({ order: "" }));
+          }
+          const localRecords = allData.map(r => kintoCollection.cleanLocalFields(r));
+          const metadata = await kintoCollection.pullMetadata(this.httpClient());
+          if (this.verifySignature) {
+            await this._validateCollectionSignature([],
+                                                    collectionLastModified,
+                                                    metadata,
+                                                    { localRecords });
+          }
+        }
         reportStatus = UptakeTelemetry.STATUS.UP_TO_DATE;
         return;
       }
@@ -315,10 +356,10 @@ class RemoteSettingsClient extends EventEmitter {
       if (this.verifySignature) {
         kintoCollection.hooks["incoming-changes"] = [async (payload, collection) => {
           const { changes: remoteRecords, lastModified: timestamp } = payload;
-          const { data } = await kintoCollection.list({ order: "" }); // no need to sort.
+          const { data } = await collection.list({ order: "" }); // no need to sort.
           const metadata = await collection.metadata();
           // Local fields are stripped to compute the collection signature (server does not have them).
-          const localRecords = data.map(r => kintoCollection.cleanLocalFields(r));
+          const localRecords = data.map(r => collection.cleanLocalFields(r));
           await this._validateCollectionSignature(remoteRecords,
                                                   timestamp,
                                                   metadata,
@@ -326,6 +367,8 @@ class RemoteSettingsClient extends EventEmitter {
           // In case the signature is valid, apply the changes locally.
           return payload;
         }];
+      } else {
+        console.warn(`Signature disabled on ${this.identifier}`);
       }
 
       let syncResult;
@@ -337,6 +380,9 @@ class RemoteSettingsClient extends EventEmitter {
           // With SERVER_WINS, there cannot be any conflicts, but don't silent it anyway.
           throw new Error("Synced failed");
         }
+        // The records imported from the dump should be considered as "created" for the
+        // listeners.
+        syncResult.created = importedFromDump.concat(syncResult.created);
       } catch (e) {
         if (e instanceof RemoteSettingsClient.InvalidSignatureError) {
           // Signature verification failed during synchronization.
@@ -346,6 +392,7 @@ class RemoteSettingsClient extends EventEmitter {
           // We will attempt to fix this by retrieving the whole
           // remote collection.
           try {
+            console.warn(`Signature verified failed for ${this.identifier}. Retry from scratch`);
             syncResult = await this._retrySyncFromScratch(kintoCollection, expectedTimestamp);
           } catch (e) {
             // If the signature fails again, or if an error occured during wiping out the
@@ -384,6 +431,8 @@ class RemoteSettingsClient extends EventEmitter {
           reportStatus = UptakeTelemetry.STATUS.APPLY_ERROR;
           throw e;
         }
+      } else {
+        console.info(`All changes are filtered by JEXL expressions for ${this.identifier}`);
       }
     } catch (e) {
       // IndexedDB errors. See https://developer.mozilla.org/en-US/docs/Web/API/IDBRequest/error
@@ -407,6 +456,7 @@ class RemoteSettingsClient extends EventEmitter {
         trigger,
         duration: durationMilliseconds,
       });
+      console.debug(`${this.identifier} sync status is ${reportStatus}`);
     }
   }
 
@@ -460,8 +510,7 @@ class RemoteSettingsClient extends EventEmitter {
    */
   async _retrySyncFromScratch(kintoCollection, expectedTimestamp) {
     // Fetch collection metadata.
-    const api = new KintoHttpClient(gServerURL);
-    const client = await api.bucket(this.bucketName).collection(this.collectionName);
+    const client = this.httpClient();
     const metadata = await client.getData({ query: { _expected: expectedTimestamp }});
     // Fetch whole list of records.
     const {
@@ -485,6 +534,7 @@ class RemoteSettingsClient extends EventEmitter {
     // replace the local data
     const localLastModified = await kintoCollection.db.getLastModified();
     if (timestamp >= localLastModified) {
+      console.debug(`Import raw data from server for ${this.identifier}`);
       await kintoCollection.clear();
       await kintoCollection.loadDump(remoteRecords);
       await kintoCollection.db.saveLastModified(timestamp);

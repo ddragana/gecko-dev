@@ -329,6 +329,12 @@ with modules["NETWORK"]:
     errors["NS_ERROR_NET_INTERRUPT"] = FAILURE(71)
     # The connection attempt to a proxy failed.
     errors["NS_ERROR_PROXY_CONNECTION_REFUSED"] = FAILURE(72)
+    # The proxy requires authentication; used when we can't easily propagate 407s.
+    errors["NS_ERROR_PROXY_AUTHENTICATION_FAILED"] = FAILURE(407)
+    # The proxy failed to connect the remote server.
+    errors["NS_ERROR_PROXY_BAD_GATEWAY"] = FAILURE(502)
+    # The proxy did get any response from the remote server in time.
+    errors["NS_ERROR_PROXY_GATEWAY_TIMEOUT"] = FAILURE(504)
     # A transfer was only partially done when it completed.
     errors["NS_ERROR_NET_PARTIAL_TRANSFER"] = FAILURE(76)
     # HTTP/2 detected invalid TLS configuration
@@ -647,6 +653,19 @@ with modules["DOM"]:
     errors["NS_ERROR_DOM_IMAGE_INVALID_REQUEST"] = FAILURE(1028)
     errors["NS_ERROR_DOM_IMAGE_BROKEN"] = FAILURE(1029)
 
+    # Editing command errors.
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_EXEC_COMMAND"] = FAILURE(1030)
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_QUERY_COMMAND_ENABLED"] = FAILURE(1031)
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_QUERY_COMMAND_INDETERM"] = FAILURE(1032)
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_QUERY_COMMAND_STATE"] = FAILURE(1033)
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_QUERY_COMMAND_SUPPORTED"] = FAILURE(1034)
+    errors["NS_ERROR_DOM_INVALID_STATE_DOCUMENT_QUERY_COMMAND_VALUE"] = FAILURE(1035)
+
+    # Used to indicate that a resource with the Cross-Origin-Resource-Policy
+    # response header set failed the origin check.
+    # https://fetch.spec.whatwg.org/#cross-origin-resource-policy-header
+    errors["NS_ERROR_DOM_CORP_FAILED"] = FAILURE(1036)
+
     # May be used to indicate when e.g. setting a property value didn't
     # actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
     # the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
@@ -827,6 +846,7 @@ with modules["URILOADER"]:
     errors["NS_ERROR_TRACKING_ANNOTATION_URI"] = FAILURE(40)
     errors["NS_ERROR_FINGERPRINTING_URI"] = FAILURE(41)
     errors["NS_ERROR_CRYPTOMINING_URI"] = FAILURE(42)
+    errors["NS_ERROR_SOCIALTRACKING_URI"] = FAILURE(43)
     # Used when "Save Link As..." doesn't see the headers quickly enough to
     # choose a filename.  See nsContextMenu.js.
     errors["NS_ERROR_SAVE_LINK_AS_TIMEOUT"] = FAILURE(32)

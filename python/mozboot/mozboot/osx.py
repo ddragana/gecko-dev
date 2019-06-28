@@ -330,7 +330,6 @@ class OSXBootstrapper(BaseBootstrapper):
             'autoconf@2.13',
             'git',
             'gnu-tar',
-            'llvm',
             'mercurial',
             'node',
             'python',
@@ -425,8 +424,6 @@ class OSXBootstrapper(BaseBootstrapper):
         packages = [
             'nasm',
             'yasm',
-            'llvm-7.0',
-            'clang-7.0',
         ]
 
         self._ensure_macports_packages(packages)
@@ -513,12 +510,14 @@ class OSXBootstrapper(BaseBootstrapper):
         self.install_toolchain_static_analysis(
             state_dir, checkout_root, static_analysis.MACOS_CLANG_TIDY)
 
+    def ensure_sccache_packages(self, state_dir, checkout_root):
+        from mozboot import sccache
+
+        self.install_toolchain_artifact(state_dir, checkout_root, sccache.MACOS_SCCACHE)
+
     def ensure_stylo_packages(self, state_dir, checkout_root):
         from mozboot import stylo
-        # We installed clang via homebrew earlier.  However, on Android, we're
-        # seeing many compiler errors so we use our own toolchain clang.
-        if 'mobile_android' in self.application:
-            self.install_toolchain_artifact(state_dir, checkout_root, stylo.MACOS_CLANG)
+        self.install_toolchain_artifact(state_dir, checkout_root, stylo.MACOS_CLANG)
         self.install_toolchain_artifact(state_dir, checkout_root, stylo.MACOS_CBINDGEN)
 
     def ensure_nasm_packages(self, state_dir, checkout_root):

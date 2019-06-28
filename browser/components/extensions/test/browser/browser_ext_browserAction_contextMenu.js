@@ -2,6 +2,8 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+const {TelemetryTestUtils} = ChromeUtils.import("resource://testing-common/TelemetryTestUtils.jsm");
+
 XPCOMUtils.defineLazyPreferenceGetter(this, "ABUSE_REPORT_ENABLED",
                                       "extensions.abuseReport.enabled", false);
 XPCOMUtils.defineLazyPreferenceGetter(this, "HTML_ABOUTADDONS_ENABLED",
@@ -49,30 +51,16 @@ let contextMenuItems = {
   "context-bookmarkpage": "hidden",
 };
 
-const TELEMETRY_CATEGORY = "addonsManager";
-const TELEMETRY_METHODS = new Set(["action", "link", "view"]);
 const type = "extension";
 
 function assertTelemetryMatches(events) {
-  let snapshot = Services.telemetry.snapshotEvents(
-    Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS, true);
-
-  if (events.length == 0) {
-    ok(!snapshot.parent || snapshot.parent.length == 0, "There are no telemetry events");
-    return;
-  }
-
-  // Make sure we got some data.
-  ok(snapshot.parent && snapshot.parent.length > 0, "Got parent telemetry events in the snapshot");
-
-  // Only look at the related events after stripping the timestamp and category.
-  let relatedEvents = snapshot.parent
-    .filter(([timestamp, category, method]) =>
-      category == TELEMETRY_CATEGORY && TELEMETRY_METHODS.has(method))
-    .map(relatedEvent => relatedEvent.slice(2, 6));
-
-  // Events are now [method, object, value, extra] as expected.
-  Assert.deepEqual(relatedEvents, events, "The events are recorded correctly");
+  events = events.map(([method, object, value, extra]) => {
+    return {method, object, value, extra};
+  });
+  TelemetryTestUtils.assertEvents(events, {
+    category: "addonsManager",
+    method: /^(action|link|view)$/,
+  });
 }
 
 add_task(async function test_setup() {
@@ -200,10 +188,23 @@ add_task(async function browseraction_contextmenu_manage_extension() {
     await checkVisibility(menu, true);
 
     info(`Choosing 'Manage Extension' in ${menuId} should load options`);
-    let optionsLoaded = extension.awaitMessage("options-loaded");
+    let addonManagerPromise = BrowserTestUtils.waitForNewTab(win.gBrowser, "about:addons", true);
     let manageExtension = menu.querySelector(".customize-context-manageExtension");
     await closeChromeContextMenu(menuId, manageExtension, win);
-    await optionsLoaded;
+    let managerWindow = (await addonManagerPromise).linkedBrowser.contentWindow;
+    if (managerWindow.useHtmlViews) {
+      // Check the UI to make sure that the correct view is loaded.
+      is(managerWindow.gViewController.currentViewId,
+         `addons://detail/${encodeURIComponent(id)}`,
+         "Expected extension details view in about:addons");
+      // In HTML about:addons, the default view does not show the inline
+      // options browser, so we should not receive an "options-loaded" event.
+      // (if we do, the test will fail due to the unexpected message).
+    } else {
+      info("Waiting for inline options page in XUL about:addons");
+      // In XUL about:addons, the inline options page is shown by default.
+      await extension.awaitMessage("options-loaded");
+    }
 
     info(`Remove the opened tab, and await customize mode to be restored if necessary`);
     let tab = win.gBrowser.selectedTab;
@@ -247,7 +248,7 @@ add_task(async function browseraction_contextmenu_manage_extension() {
 
     info("Wait until the overflow menu is ready");
     let overflowButton = win.document.getElementById("nav-bar-overflow-button");
-    let icon = win.document.getAnonymousElementByAttribute(overflowButton, "class", "toolbarbutton-icon");
+    let icon = overflowButton.icon;
     await waitForElementShown(icon);
 
     if (!customizing) {
@@ -326,7 +327,7 @@ async function runTestContextMenu({
 
   info("Wait until the overflow menu is ready");
   let overflowButton = win.document.getElementById("nav-bar-overflow-button");
-  let icon = win.document.getAnonymousElementByAttribute(overflowButton, "class", "toolbarbutton-icon");
+  let icon = overflowButton.icon;
   await waitForElementShown(icon);
 
   if (!customizing) {

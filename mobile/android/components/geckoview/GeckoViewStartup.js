@@ -8,9 +8,7 @@ const {GeckoViewUtils} = ChromeUtils.import("resource://gre/modules/GeckoViewUti
 XPCOMUtils.defineLazyModuleGetters(this, {
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.jsm",
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
-  FileSource: "resource://gre/modules/L10nRegistry.jsm",
   GeckoViewTelemetryController: "resource://gre/modules/GeckoViewTelemetryController.jsm",
-  L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   Preferences: "resource://gre/modules/Preferences.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Services: "resource://gre/modules/Services.jsm",
@@ -44,6 +42,13 @@ GeckoViewStartup.prototype = {
           ],
         });
 
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewRecordingMedia", {
+          module: "resource://gre/modules/GeckoViewMedia.jsm",
+          observers: [
+            "recording-device-events",
+          ],
+        });
+
         GeckoViewUtils.addLazyGetter(this, "GeckoViewConsole", {
           module: "resource://gre/modules/GeckoViewConsole.jsm",
         });
@@ -55,6 +60,14 @@ GeckoViewStartup.prototype = {
             "GeckoView:UnregisterWebExtension",
             "GeckoView:WebExtension:PortDisconnect",
             "GeckoView:WebExtension:PortMessageFromApp",
+          ],
+        });
+
+        GeckoViewUtils.addLazyGetter(this, "GeckoViewStorageController", {
+          module: "resource://gre/modules/GeckoViewStorageController.jsm",
+          ged: [
+            "GeckoView:ClearData",
+            "GeckoView:ClearHostData",
           ],
         });
 
@@ -121,11 +134,6 @@ GeckoViewStartup.prototype = {
         // The Telemetry initialization for the content process is performed in
         // ContentProcessSingleton.js for consistency with Desktop Telemetry.
         GeckoViewTelemetryController.setup();
-
-        // Initialize the default l10n resource sources for L10nRegistry.
-        let locales = Services.locale.packagedLocales;
-        const greSource = new FileSource("toolkit", locales, "resource://gre/localization/{locale}/");
-        L10nRegistry.registerSource(greSource);
 
         ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
 

@@ -34,6 +34,7 @@ const OPEN_CLOSE_BODY = {
 };
 
 const NO_AUTOCOMPLETE_PREFIXES = ["var", "const", "let", "function", "class"];
+const OPERATOR_CHARS_SET = new Set(";,:=<>+-*/%|&^~?!".split(""));
 
 function hasArrayIndex(str) {
   return /\[\d+\]$/.test(str);
@@ -60,6 +61,7 @@ function hasArrayIndex(str) {
  *                               element access (e.g. `x["match`).
  *            }
  */
+/* eslint-disable complexity */
 function analyzeInputString(str) {
   const bodyStack = [];
 
@@ -87,9 +89,21 @@ function analyzeInputString(str) {
     };
   };
 
-  for (let i = 0; i < characters.length; i++) {
-    c = characters[i];
+  const TIMEOUT = 2500;
+  const startingTime = Date.now();
 
+  for (let i = 0; i < characters.length; i++) {
+    // We are possibly dealing with a very large string that would take a long time to
+    // analyze (and freeze the process). If the function has been running for more than
+    // a given time, we stop the analysis (this isn't too bad because the only
+    // consequence is that we won't provide autocompletion items).
+    if (Date.now() - startingTime > TIMEOUT) {
+      return {
+        err: "timeout",
+      };
+    }
+
+    c = characters[i];
     switch (state) {
       // Normal JS state.
       case STATE_NORMAL:
@@ -99,7 +113,7 @@ function analyzeInputString(str) {
           state = STATE_QUOTE;
         } else if (c == "`") {
           state = STATE_TEMPLATE_LITERAL;
-        } else if (";,:=<>+-*/%|&^~?!".split("").includes(c)) {
+        } else if (OPERATOR_CHARS_SET.has(c)) {
           // If the character is an operator, we need to update the start position.
           start = i + 1;
         } else if (c == " ") {
@@ -195,6 +209,7 @@ function analyzeInputString(str) {
 
   return buildReturnObject();
 }
+/* eslint-enable complexity */
 
 /**
  * Provides a list of properties, that are possible matches based on the passed
@@ -247,6 +262,7 @@ function analyzeInputString(str) {
  *                               access (e.g. `window["addEvent`).
  *            }
  */
+/* eslint-disable complexity */
 function JSPropertyProvider({
   dbgObject,
   environment,
@@ -273,6 +289,7 @@ function JSPropertyProvider({
 
   // There was an error analysing the string.
   if (err) {
+    console.error("Failed to analyze input string", err);
     return null;
   }
 
@@ -506,6 +523,7 @@ function JSPropertyProvider({
 
   return prepareReturnedObject(getMatchedPropsInDbgObject(obj, search));
 }
+/* eslint-enable complexity */
 
 /**
  * For a given environment and constructor name, returns its Debugger.Object wrapped

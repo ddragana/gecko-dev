@@ -30,6 +30,7 @@ from taskgraph.util.schema import (
     OptimizationSchema,
     taskref_or_string,
 )
+from taskgraph.util.partners import get_partners_to_be_published
 from taskgraph.util.scriptworker import (
     BALROG_ACTIONS,
     get_release_config,
@@ -135,7 +136,7 @@ task_description_schema = Schema({
 
         # Type of gecko v2 index to use
         'type': Any('generic', 'nightly', 'l10n', 'nightly-with-multi-l10n',
-                    'release', 'nightly-l10n', 'shippable', 'shippable-l10n',
+                    'nightly-l10n', 'shippable', 'shippable-l10n',
                     'android-nightly', 'android-nightly-with-multi-l10n'),
 
         # The rank that the task will receive in the TaskCluster
@@ -394,7 +395,6 @@ def verify_index(config, index):
     ),
 
     # worker features that should be enabled
-    Required('relengapi-proxy'): bool,
     Required('chain-of-trust'): bool,
     Required('taskcluster-proxy'): bool,
     Required('allow-ptrace'): bool,
@@ -503,9 +503,6 @@ def build_docker_worker_payload(config, task, task_def):
             raise Exception("unknown docker image type")
 
     features = {}
-
-    if worker.get('relengapi-proxy'):
-        features['relengAPIProxy'] = True
 
     if worker.get('taskcluster-proxy'):
         features['taskclusterProxy'] = True
@@ -877,6 +874,12 @@ def build_generic_worker_payload(config, task, task_def):
         # Signing formats to use on each of the paths
         Required('formats'): [basestring],
     }],
+
+    # behavior for mac iscript
+    Optional('mac-behavior'): Any(
+        "mac_notarize", "mac_sign", "mac_sign_and_pkg", "mac_pkg",
+    ),
+    Optional('entitlements-url'): basestring,
 })
 def build_scriptworker_signing_payload(config, task, task_def):
     worker = task['worker']
@@ -885,37 +888,19 @@ def build_scriptworker_signing_payload(config, task, task_def):
         'maxRunTime': worker['max-run-time'],
         'upstreamArtifacts':  worker['upstream-artifacts']
     }
-
+    if worker.get('mac-behavior'):
+        task_def['payload']['behavior'] = worker['mac-behavior']
+        if worker.get('entitlements-url'):
+            task_def['payload']['entitlements-url'] = worker['entitlements-url']
     artifacts = set(task.get('release-artifacts', []))
     for upstream_artifact in worker['upstream-artifacts']:
         for path in upstream_artifact['paths']:
             artifacts.update(get_signed_artifacts(
                 input=path,
                 formats=upstream_artifact['formats'],
+                behavior=worker.get('mac-behavior'),
             ))
-
     task['release-artifacts'] = list(artifacts)
-
-
-@payload_builder('binary-transparency', schema={})
-def build_binary_transparency_payload(config, task, task_def):
-    release_config = get_release_config(config)
-
-    task_def['payload'] = {
-        'version': release_config['version'],
-        'chain': 'TRANSPARENCY.pem',
-        'contact': task_def['metadata']['owner'],
-        'maxRunTime': 600,
-        'stage-product': task['shipping-product'],
-        'summary': (
-            'https://archive.mozilla.org/pub/{}/candidates/'
-            '{}-candidates/build{}/SHA256SUMMARY'
-        ).format(
-            task['shipping-product'],
-            release_config['version'],
-            release_config['build_number'],
-        ),
-    }
 
 
 @payload_builder('beetmover', schema={
@@ -988,12 +973,14 @@ def build_beetmover_payload(config, task, task_def):
 def build_beetmover_push_to_release_payload(config, task, task_def):
     worker = task['worker']
     release_config = get_release_config(config)
+    partners = ['{}/{}'.format(p, s) for p, s, _ in get_partners_to_be_published(config)]
 
     task_def['payload'] = {
         'maxRunTime': worker['max-run-time'],
         'product': worker['product'],
         'version': release_config['version'],
         'build_number': release_config['build_number'],
+        'partners': partners,
     }
 
 
@@ -1351,7 +1338,6 @@ def set_defaults(config, tasks):
 
         worker = task['worker']
         if worker['implementation'] in ('docker-worker',):
-            worker.setdefault('relengapi-proxy', False)
             worker.setdefault('chain-of-trust', False)
             worker.setdefault('taskcluster-proxy', False)
             worker.setdefault('allow-ptrace', False)
@@ -1500,29 +1486,6 @@ def add_shippable_index_routes(config, task):
     # For nightly-compat index:
     if 'nightly' in config.params['target_tasks_method']:
         add_nightly_index_routes(config, task)
-
-    return task
-
-
-@index_builder('release')
-def add_release_index_routes(config, task):
-    index = task.get('index')
-    routes = []
-    release_config = get_release_config(config)
-
-    subs = config.params.copy()
-    subs['build_number'] = str(release_config['build_number'])
-    subs['revision'] = subs['head_rev']
-    subs['underscore_version'] = release_config['version'].replace('.', '_')
-    subs['product'] = index['product']
-    subs['trust-domain'] = config.graph_config['trust-domain']
-    subs['branch_rev'] = get_branch_rev(config)
-    subs['branch'] = subs['project']
-
-    for rt in task.get('routes', []):
-        routes.append(rt.format(**subs))
-
-    task['routes'] = routes
 
     return task
 

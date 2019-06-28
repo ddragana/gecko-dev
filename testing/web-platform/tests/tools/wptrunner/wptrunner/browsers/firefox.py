@@ -160,6 +160,7 @@ def run_info_extras(**kwargs):
           "wasm": kwargs.get("wasm", True),
           "verify": kwargs["verify"],
           "headless": "MOZ_HEADLESS" in os.environ,
+          "fission": get_bool_pref("fission.autostart"),
           "sw-e10s": get_bool_pref("dom.serviceWorkers.parent_intercept")}
     rv.update(run_info_browser_version(kwargs["binary"]))
     return rv
@@ -177,12 +178,11 @@ def run_info_browser_version(binary):
 
 
 def update_properties():
-    return (["debug", "webrender", "e10s", "os", "version", "processor", "bits"],
-            {"debug", "e10s", "webrender"})
+    return (["os", "debug", "webrender", "e10s", "sw-e10s", "processor"],
+            {"os": ["version"], "processor": ["bits"]})
 
 
 class FirefoxBrowser(Browser):
-    used_ports = set()
     init_timeout = 70
     shutdown_timeout = 70
 
@@ -248,8 +248,7 @@ class FirefoxBrowser(Browser):
         self.mozleak_thresholds = kwargs.get("mozleak_thresholds")
 
         if self.marionette_port is None:
-            self.marionette_port = get_free_port(2828, exclude=self.used_ports)
-            self.used_ports.add(self.marionette_port)
+            self.marionette_port = get_free_port()
 
         if self.asan:
             self.lsan_handler = mozleak.LSANLeaks(self.logger,

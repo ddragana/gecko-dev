@@ -58,6 +58,7 @@ CycleCollectedJSContext::CycleCollectedJSContext()
       mDoingStableStates(false),
       mTargetedMicroTaskRecursionDepth(0),
       mMicroTaskLevel(0),
+      mDebuggerRecursionDepth(0),
       mMicroTaskRecursionDepth(0) {
   MOZ_COUNT_CTOR(CycleCollectedJSContext);
 
@@ -233,7 +234,7 @@ class PromiseJobRunnable final : public MicroTaskRunnable {
         doc = win->GetExtantDoc();
       }
       AutoHandlingUserInputStatePusher userInpStatePusher(
-          mPropagateUserInputEventHandling, nullptr, doc);
+          mPropagateUserInputEventHandling);
 
       mCallback->Call("promise callback");
       aAso.CheckForInterrupt();
@@ -304,11 +305,14 @@ class CycleCollectedJSContext::SavedMicroTaskQueue
     : public JS::JobQueue::SavedJobQueue {
  public:
   explicit SavedMicroTaskQueue(CycleCollectedJSContext* ccjs) : ccjs(ccjs) {
+    ccjs->mDebuggerRecursionDepth++;
     ccjs->mPendingMicroTaskRunnables.swap(mQueue);
   }
 
   ~SavedMicroTaskQueue() {
     MOZ_RELEASE_ASSERT(ccjs->mPendingMicroTaskRunnables.empty());
+    MOZ_RELEASE_ASSERT(ccjs->mDebuggerRecursionDepth);
+    ccjs->mDebuggerRecursionDepth--;
     ccjs->mPendingMicroTaskRunnables.swap(mQueue);
   }
 
@@ -332,7 +336,7 @@ CycleCollectedJSContext::saveJobQueue(JSContext* cx) {
 
 /* static */
 void CycleCollectedJSContext::PromiseRejectionTrackerCallback(
-    JSContext* aCx, JS::HandleObject aPromise,
+    JSContext* aCx, bool aMutedErrors, JS::HandleObject aPromise,
     JS::PromiseRejectionHandlingState state, void* aData) {
   CycleCollectedJSContext* self = static_cast<CycleCollectedJSContext*>(aData);
 
@@ -348,7 +352,8 @@ void CycleCollectedJSContext::PromiseRejectionTrackerCallback(
 
   if (state == JS::PromiseRejectionHandlingState::Unhandled) {
     PromiseDebugging::AddUncaughtRejection(aPromise);
-    if (mozilla::StaticPrefs::dom_promise_rejection_events_enabled()) {
+    if (mozilla::StaticPrefs::dom_promise_rejection_events_enabled() &&
+        !aMutedErrors) {
       RefPtr<Promise> promise =
           Promise::CreateFromExisting(xpc::NativeGlobal(aPromise), aPromise);
       aboutToBeNotified.AppendElement(promise);
@@ -356,7 +361,8 @@ void CycleCollectedJSContext::PromiseRejectionTrackerCallback(
     }
   } else {
     PromiseDebugging::AddConsumedRejection(aPromise);
-    if (mozilla::StaticPrefs::dom_promise_rejection_events_enabled()) {
+    if (mozilla::StaticPrefs::dom_promise_rejection_events_enabled() &&
+        !aMutedErrors) {
       for (size_t i = 0; i < aboutToBeNotified.Length(); i++) {
         if (aboutToBeNotified[i] &&
             aboutToBeNotified[i]->PromiseObj() == aPromise) {
@@ -530,7 +536,10 @@ void CycleCollectedJSContext::IsIdleGCTaskNeeded() const {
 }
 
 uint32_t CycleCollectedJSContext::RecursionDepth() const {
-  return mOwningThread->RecursionDepth();
+  // Debugger interruptions are included in the recursion depth so that debugger
+  // microtask checkpoints do not run IDB transactions which were initiated
+  // before the interruption.
+  return mOwningThread->RecursionDepth() + mDebuggerRecursionDepth;
 }
 
 void CycleCollectedJSContext::RunInStableState(

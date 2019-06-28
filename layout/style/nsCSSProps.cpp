@@ -263,7 +263,6 @@ KTableEntry nsCSSProps::kDisplayKTable[] = {
     {eCSSKeyword_ruby_text_container, StyleDisplay::RubyTextContainer},
     {eCSSKeyword_grid, StyleDisplay::Grid},
     {eCSSKeyword_inline_grid, StyleDisplay::InlineGrid},
-    // The next 4 entries are controlled by the layout.css.prefixes.webkit pref.
     {eCSSKeyword__webkit_box, StyleDisplay::WebkitBox},
     {eCSSKeyword__webkit_inline_box, StyleDisplay::WebkitInlineBox},
     {eCSSKeyword__webkit_flex, StyleDisplay::Flex},
@@ -374,26 +373,6 @@ const KTableEntry nsCSSProps::kTextEmphasisStyleShapeKTable[] = {
     {eCSSKeyword_double_circle, NS_STYLE_TEXT_EMPHASIS_STYLE_DOUBLE_CIRCLE},
     {eCSSKeyword_triangle, NS_STYLE_TEXT_EMPHASIS_STYLE_TRIANGLE},
     {eCSSKeyword_sesame, NS_STYLE_TEXT_EMPHASIS_STYLE_SESAME},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-const KTableEntry nsCSSProps::kTextOverflowKTable[] = {
-    {eCSSKeyword_clip, NS_STYLE_TEXT_OVERFLOW_CLIP},
-    {eCSSKeyword_ellipsis, NS_STYLE_TEXT_OVERFLOW_ELLIPSIS},
-    {eCSSKeyword_UNKNOWN, -1}};
-
-// keyword tables for SVG properties
-
-const KTableEntry nsCSSProps::kFilterFunctionKTable[] = {
-    {eCSSKeyword_blur, NS_STYLE_FILTER_BLUR},
-    {eCSSKeyword_brightness, NS_STYLE_FILTER_BRIGHTNESS},
-    {eCSSKeyword_contrast, NS_STYLE_FILTER_CONTRAST},
-    {eCSSKeyword_grayscale, NS_STYLE_FILTER_GRAYSCALE},
-    {eCSSKeyword_invert, NS_STYLE_FILTER_INVERT},
-    {eCSSKeyword_opacity, NS_STYLE_FILTER_OPACITY},
-    {eCSSKeyword_saturate, NS_STYLE_FILTER_SATURATE},
-    {eCSSKeyword_sepia, NS_STYLE_FILTER_SEPIA},
-    {eCSSKeyword_hue_rotate, NS_STYLE_FILTER_HUE_ROTATE},
-    {eCSSKeyword_drop_shadow, NS_STYLE_FILTER_DROP_SHADOW},
     {eCSSKeyword_UNKNOWN, -1}};
 
 int32_t nsCSSProps::FindIndexOfKeyword(nsCSSKeyword aKeyword,

@@ -273,7 +273,9 @@ android.libraryVariants.all { variant ->
             file("${System.properties['java.home']}/lib/rt.jar")] + android.bootClasspath
         options.memberLevel = JavadocMemberLevel.PROTECTED
         options.source = 8
-        options.links("https://d.android.com/reference/")
+        // Bug 1555255: don't require a network connection to produce Javadoc.
+        // See https://stackoverflow.com/a/24026735.
+        options.linksOffline("https://d.android.com/reference/", "${android.sdkDirectory}/docs/reference");
 
         options.docTitle = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
         options.header = "GeckoView ${mozconfig.substs.MOZ_APP_VERSION} API"
@@ -332,10 +334,20 @@ publishing {
                     groupId = 'org.mozilla.geckoview'
 
                     if (mozconfig.substs.MOZ_UPDATE_CHANNEL == 'release') {
-                        // release artifacts don't specify the channel, for the sake of simplicity
-                        artifactId = "geckoview-${mozconfig.substs.ANDROID_CPU_ARCH}"
+                        // Release artifacts don't specify the channel, for the sake of simplicity.
+                        artifactId = 'geckoview'
                     } else {
-                        artifactId = "geckoview-${mozconfig.substs.MOZ_UPDATE_CHANNEL}-${mozconfig.substs.ANDROID_CPU_ARCH}"
+                        artifactId = "geckoview-${mozconfig.substs.MOZ_UPDATE_CHANNEL}"
+                    }
+
+                    if (mozconfig.substs.MOZILLA_OFFICIAL && !mozconfig.substs.MOZ_ANDROID_FAT_AAR_ARCHITECTURES) {
+                        // In automation, per-architecture artifacts identify
+                        // the architecture; multi-architecture artifacts don't.
+                        // When building locally, we produce a "skinny AAR" with
+                        // one target architecture masquerading as a "fat AAR"
+                        // to enable Gradle composite builds to substitute this
+                        // project into consumers easily.
+                        artifactId = "${artifactId}-${mozconfig.substs.ANDROID_CPU_ARCH}"
                     }
 
                     url = 'https://wiki.mozilla.org/Mobile/GeckoView'

@@ -33,7 +33,7 @@ obs.prototype = {
       info("channel.URI " + channel.URI);
       info("channel.URI.spec " + channel.URI.spec);
       channel.visitRequestHeaders({
-        visitHeader: function(aHeader, aValue) {
+        visitHeader(aHeader, aValue) {
           info(aHeader + ": " + aValue);
         }});
     } catch (err) {
@@ -83,7 +83,7 @@ addMessageListener("init", ({ domain }) => {
 
   cs.removeAll();
   cs.add(domain, "", "oh", "hai", false, false, true, Math.pow(2, 62), {},
-         Ci.nsICookie2.SAMESITE_UNSET);
+         Ci.nsICookie.SAMESITE_NONE);
   is(cs.countCookiesFromHost(domain), 1, "number of cookies for domain " + domain);
 
   gObs = new obs();

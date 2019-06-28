@@ -106,6 +106,7 @@ class Frame extends Component {
     };
   }
 
+  /* eslint-disable complexity */
   render() {
     let frame, isSourceMapped;
     const {
@@ -176,6 +177,22 @@ class Frame extends Component {
           }, functionDisplayName),
           " "
         );
+      }
+    }
+
+    // If the message comes from a logPoint or conditional breakpoint,
+    // prefix the source location accordingly
+    if (frame.origin) {
+      let locationPrefix;
+      if (frame.origin === "logPoint") {
+        locationPrefix = "Logpoint @ ";
+      }
+
+      if (locationPrefix) {
+        sourceElements.push(dom.span({
+          key: "locationPrefix",
+          className: "frame-link-prefix",
+        }, locationPrefix));
       }
     }
 
@@ -250,6 +267,7 @@ class Frame extends Component {
 
     return dom.span(attributes, ...elements);
   }
+  /* eslint-enable complexity */
 }
 
 module.exports = Frame;

@@ -122,7 +122,7 @@ const WEBEXT_STORAGE_USER_CONTEXT_ID = -1 >>> 0;
 const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
 
 // Permissions that are only available to privileged extensions.
-const PRIVILEGED_PERMS = new Set(["mozillaAddons", "geckoViewAddons"]);
+const PRIVILEGED_PERMS = new Set(["mozillaAddons", "geckoViewAddons", "telemetry", "urlbar"]);
 
 /**
  * Classify an individual permission from a webextension manifest
@@ -428,28 +428,22 @@ class ExtensionData {
     }
 
     let uri = this.rootURI.QueryInterface(Ci.nsIJARURI);
-    let file = uri.JARFile.QueryInterface(Ci.nsIFileURL).file;
 
-    // Normalize the directory path.
-    path = `${uri.JAREntry}/${path}`;
-    path = path.replace(/\/\/+/g, "/").replace(/^\/|\/$/g, "") + "/";
-    if (path === "/") {
-      path = "";
-    }
-
-    // Escape pattern metacharacters.
-    let pattern = path.replace(/[[\]()?*~|$\\]/g, "\\$&") + "*";
+    // Append the sub-directory path to the base JAR URI and normalize the
+    // result.
+    let entry = `${uri.JAREntry}/${path}/`.replace(/\/\/+/g, "/").replace(/^\//, "");
+    uri = Services.io.newURI(`jar:${uri.JARFile.spec}!/${entry}`);
 
     let results = [];
-    for (let name of aomStartup.enumerateZipFile(file, pattern)) {
-      if (!name.startsWith(path)) {
+    for (let name of aomStartup.enumerateJARSubtree(uri)) {
+      if (!name.startsWith(entry)) {
         throw new Error("Unexpected ZipReader entry");
       }
 
       // The enumerator returns the full path of all entries.
       // Trim off the leading path, and filter out entries from
       // subdirectories.
-      name = name.slice(path.length);
+      name = name.slice(entry.length);
       if (name && !/\/./.test(name)) {
         results.push({
           name: name.replace("/", ""),
@@ -1198,7 +1192,7 @@ class ExtensionData {
       // says "...plus N others"
       let format = (list, itemKey, moreKey) => {
         function formatItems(items) {
-          result.msgs.push(...items.map(item => bundle.formatStringFromName(itemKey, [item], 1)));
+          result.msgs.push(...items.map(item => bundle.formatStringFromName(itemKey, [item])));
         }
         if (list.length < 5) {
           formatItems(list);
@@ -1222,7 +1216,7 @@ class ExtensionData {
     // Next, show the native messaging permission if it is present.
     const NATIVE_MSG_PERM = "nativeMessaging";
     if (perms.permissions.includes(NATIVE_MSG_PERM)) {
-      result.msgs.push(bundle.formatStringFromName(permissionKey(NATIVE_MSG_PERM), [info.appName], 1));
+      result.msgs.push(bundle.formatStringFromName(permissionKey(NATIVE_MSG_PERM), [info.appName]));
     }
 
     // Finally, show remaining permissions, in the same order as AMO.
@@ -1244,7 +1238,7 @@ class ExtensionData {
 
     const haveAccessKeys = (AppConstants.platform !== "android");
 
-    result.header = bundle.formatStringFromName("webextPerms.header", ["<>"], 1);
+    result.header = bundle.formatStringFromName("webextPerms.header", ["<>"]);
     result.text = info.unsigned ?
                   bundle.GetStringFromName("webextPerms.unsignedWarning") : "";
     result.listIntro = bundle.GetStringFromName("webextPerms.listIntro");
@@ -1257,7 +1251,7 @@ class ExtensionData {
     }
 
     if (info.type == "sideload") {
-      result.header = bundle.formatStringFromName("webextPerms.sideloadHeader", ["<>"], 1);
+      result.header = bundle.formatStringFromName("webextPerms.sideloadHeader", ["<>"]);
       let key = result.msgs.length == 0 ?
                 "webextPerms.sideloadTextNoPerms" : "webextPerms.sideloadText2";
       result.text = bundle.GetStringFromName(key);
@@ -1268,14 +1262,14 @@ class ExtensionData {
         result.cancelKey = bundle.GetStringFromName("webextPerms.sideloadCancel.accessKey");
       }
     } else if (info.type == "update") {
-      result.header = bundle.formatStringFromName("webextPerms.updateText", ["<>"], 1);
+      result.header = bundle.formatStringFromName("webextPerms.updateText", ["<>"]);
       result.text = "";
       result.acceptText = bundle.GetStringFromName("webextPerms.updateAccept.label");
       if (haveAccessKeys) {
         result.acceptKey = bundle.GetStringFromName("webextPerms.updateAccept.accessKey");
       }
     } else if (info.type == "optional") {
-      result.header = bundle.formatStringFromName("webextPerms.optionalPermsHeader", ["<>"], 1);
+      result.header = bundle.formatStringFromName("webextPerms.optionalPermsHeader", ["<>"]);
       result.text = "";
       result.listIntro = bundle.GetStringFromName("webextPerms.optionalPermsListIntro");
       result.acceptText = bundle.GetStringFromName("webextPerms.optionalPermsAllow.label");
@@ -1386,6 +1380,7 @@ class Extension extends ExtensionData {
   constructor(addonData, startupReason) {
     super(addonData.resourceURI);
 
+    this.startupStates = new Set();
     this.state = "Not started";
 
     this.sharedDataKeys = new Set();
@@ -1490,6 +1485,24 @@ class Extension extends ExtensionData {
       this.cachePermissions();
     });
     /* eslint-enable mozilla/balanced-listeners */
+  }
+
+  set state(startupState) {
+    this.startupStates.clear();
+    this.startupStates.add(startupState);
+  }
+
+  get state() {
+    return `${Array.from(this.startupStates).join(", ")}`;
+  }
+
+  async addStartupStatePromise(name, fn) {
+    this.startupStates.add(name);
+    try {
+      await fn();
+    } finally {
+      this.startupStates.delete(name);
+    }
   }
 
   get restrictSchemes() {
@@ -1743,34 +1756,17 @@ class Extension extends ExtensionData {
   }
 
   runManifest(manifest) {
-    let state = new Set();
-    let updateState = () => {
-      this.state = `Startup: Run manifest: ${Array.from(state)}`;
-    };
-
     let promises = [];
-    let addPromise = (name, promise) => {
-      if (promise) {
-        promises.push(promise);
-
-        state.add(name);
-        promise.finally(() => {
-          state.delete(name);
-          updateState();
-        });
-      }
+    let addPromise = (name, fn) => {
+      promises.push(this.addStartupStatePromise(name, fn));
     };
 
     for (let directive in manifest) {
       if (manifest[directive] !== null) {
-        addPromise(`manifest_${directive}`,
-                   Management.emit(`manifest_${directive}`, directive, this, manifest));
-
         addPromise(`asyncEmitManifestEntry("${directive}")`,
-                   Management.asyncEmitManifestEntry(this, directive));
+                   () => Management.asyncEmitManifestEntry(this, directive));
       }
     }
-    updateState();
 
     activeExtensionIDs.add(this.id);
     sharedData.set("extensions/activeIDs", activeExtensionIDs);
@@ -1831,16 +1827,22 @@ class Extension extends ExtensionData {
     const testPermission = perm =>
       Services.perms.testPermissionFromPrincipal(principal, perm);
 
+    const addUnlimitedStoragePermissions = () => {
+      // Set the indexedDB permission and a custom "WebExtensions-unlimitedStorage" to
+      // remember that the permission hasn't been selected manually by the user.
+      Services.perms.addFromPrincipal(principal, "WebExtensions-unlimitedStorage",
+                                      Services.perms.ALLOW_ACTION);
+      Services.perms.addFromPrincipal(principal, "indexedDB",
+                                      Services.perms.ALLOW_ACTION);
+      Services.perms.addFromPrincipal(principal, "persistent-storage",
+                                      Services.perms.ALLOW_ACTION);
+    };
+
     // Only update storage permissions when the extension changes in
     // some way.
     if (reason !== "APP_STARTUP" && reason !== "APP_SHUTDOWN") {
       if (this.hasPermission("unlimitedStorage")) {
-        // Set the indexedDB permission and a custom "WebExtensions-unlimitedStorage" to remember
-        // that the permission hasn't been selected manually by the user.
-        Services.perms.addFromPrincipal(principal, "WebExtensions-unlimitedStorage",
-                                        Services.perms.ALLOW_ACTION);
-        Services.perms.addFromPrincipal(principal, "indexedDB", Services.perms.ALLOW_ACTION);
-        Services.perms.addFromPrincipal(principal, "persistent-storage", Services.perms.ALLOW_ACTION);
+        addUnlimitedStoragePermissions();
       } else {
         // Remove the indexedDB permission if it has been enabled using the
         // unlimitedStorage WebExtensions permissions.
@@ -1848,6 +1850,13 @@ class Extension extends ExtensionData {
         Services.perms.removeFromPrincipal(principal, "indexedDB");
         Services.perms.removeFromPrincipal(principal, "persistent-storage");
       }
+    } else if (reason === "APP_STARTUP" && this.hasPermission("unlimitedStorage") &&
+               (testPermission("indexedDB") !== Services.perms.ALLOW_ACTION ||
+                testPermission("persistent-storage") !== Services.perms.ALLOW_ACTION)) {
+      // If the extension does have the unlimitedStorage permission, but the
+      // expected site permissions are missing during the app startup, then
+      // add them back (See Bug 1454192).
+      addUnlimitedStoragePermissions();
     }
 
     // Never change geolocation permissions at shutdown, since it uses a
@@ -1973,17 +1982,12 @@ class Extension extends ExtensionData {
       // any of the "startup" listeners.
       this.emit("startup", this);
 
-      let state = new Set(["Emit startup", "Run manifest"]);
-      this.state = `Startup: ${Array.from(state)}`;
+      this.startupStates.clear();
       await Promise.all([
-        Management.emit("startup", this).finally(() => {
-          state.delete("Emit startup");
-          this.state = `Startup: ${Array.from(state)}`;
-        }),
-        this.runManifest(this.manifest).finally(() => {
-          state.delete("Run manifest");
-          this.state = `Startup: ${Array.from(state)}`;
-        }),
+        this.addStartupStatePromise("Startup: Emit startup",
+                                    () => Management.emit("startup", this)),
+        this.addStartupStatePromise("Startup: Run manifest",
+                                    () => this.runManifest(this.manifest)),
       ]);
       this.state = "Startup: Ran manifest";
 

@@ -1,6 +1,5 @@
 import {DSCard, PlaceholderDSCard} from "../DSCard/DSCard.jsx";
 import {actionCreators as ac} from "common/Actions.jsm";
-import {clampTotalLines} from "content-src/lib/clamp-total-lines";
 import {DSEmptyState} from "../DSEmptyState/DSEmptyState.jsx";
 import {DSImage} from "../DSImage/DSImage.jsx";
 import {DSLinkMenu} from "../DSLinkMenu/DSLinkMenu";
@@ -26,7 +25,11 @@ export class Hero extends React.PureComponent {
       this.props.dispatch(ac.ImpressionStats({
         source: this.props.type.toUpperCase(),
         click: 0,
-        tiles: [{id: this.heroRec.id, pos: this.heroRec.pos}],
+        tiles: [{
+          id: this.heroRec.id,
+          pos: this.heroRec.pos,
+          ...(this.heroRec.shim && this.heroRec.shim.click ? {shim: this.heroRec.shim.click} : {}),
+        }],
       }));
     }
   }
@@ -42,20 +45,21 @@ export class Hero extends React.PureComponent {
         <PlaceholderDSCard key={`dscard-${index}`} />
       ) : (
         <DSCard
-        campaignId={rec.campaign_id}
-        key={`dscard-${index}`}
-        image_src={rec.image_src}
-        raw_image_src={rec.raw_image_src}
-        title={rec.title}
-        url={rec.url}
-        id={rec.id}
-        pos={rec.pos}
-        type={this.props.type}
-        dispatch={this.props.dispatch}
-        context={rec.context}
-        source={rec.domain}
-        pocket_id={rec.pocket_id}
-        bookmarkGuid={rec.bookmarkGuid} />
+          campaignId={rec.campaign_id}
+          key={`dscard-${index}`}
+          image_src={rec.image_src}
+          raw_image_src={rec.raw_image_src}
+          title={rec.title}
+          url={rec.url}
+          id={rec.id}
+          shim={rec.shim}
+          pos={rec.pos}
+          type={this.props.type}
+          dispatch={this.props.dispatch}
+          context={rec.context}
+          source={rec.domain}
+          pocket_id={rec.pocket_id}
+          bookmarkGuid={rec.bookmarkGuid} />
       ));
     }
 
@@ -77,21 +81,23 @@ export class Hero extends React.PureComponent {
               <DSImage extraClassNames="img" source={heroRec.image_src} rawSource={heroRec.raw_image_src} />
             </div>
             <div className="meta">
-              <div className="header-and-excerpt"
-                data-total-lines="7"
-                ref={clampTotalLines}>
+              <div className="header-and-excerpt">
                 {heroRec.context ? (
                   <p className="context">{heroRec.context}</p>
                 ) : (
-                  <p className="source clamp" data-clamp="1">{heroRec.domain}</p>
+                  <p className="source clamp">{heroRec.domain}</p>
                 )}
-                <header className="clamp" data-clamp="4">{heroRec.title}</header>
+                <header className="clamp">{heroRec.title}</header>
                 <p className="excerpt clamp">{heroRec.excerpt}</p>
               </div>
             </div>
             <ImpressionStats
               campaignId={heroRec.campaignId}
-              rows={[{id: heroRec.id, pos: heroRec.pos}]}
+              rows={[{
+                id: heroRec.id,
+                pos: heroRec.pos,
+                ...(heroRec.shim && heroRec.shim.impression ? {shim: heroRec.shim.impression} : {}),
+              }]}
               dispatch={this.props.dispatch}
               source={this.props.type} />
           </SafeAnchor>
@@ -105,6 +111,7 @@ export class Hero extends React.PureComponent {
             source={heroRec.domain}
             type={this.props.type}
             pocket_id={heroRec.pocket_id}
+            shim={heroRec.shim}
             bookmarkGuid={heroRec.bookmarkGuid} />
         </div>
       );
@@ -114,6 +121,7 @@ export class Hero extends React.PureComponent {
       <List
         recStartingPoint={1}
         data={this.props.data}
+        feed={this.props.feed}
         hasImages={true}
         hasBorders={this.props.border === `border`}
         items={this.props.items - 1}
@@ -147,7 +155,9 @@ export class Hero extends React.PureComponent {
       <div>
         <div className="ds-header">{this.props.title}</div>
         {isEmpty ?
-          <div className="ds-hero empty"><DSEmptyState /></div> :
+          <div className="ds-hero empty">
+            <DSEmptyState status={data.status} dispatch={this.props.dispatch} feed={this.props.feed} />
+          </div> :
           this.renderHero()
         }
       </div>

@@ -35,6 +35,9 @@ interface WindowOrWorkerGlobalScope {
   long setInterval(DOMString handler, optional long timeout = 0, any... unused);
   void clearInterval(optional long handle = 0);
 
+  // microtask queuing
+  void queueMicrotask(VoidFunction callback);
+
   // ImageBitmap
   [Throws]
   Promise<ImageBitmap> createImageBitmap(ImageBitmapSource aImage);
@@ -62,6 +65,6 @@ partial interface WindowOrWorkerGlobalScope {
 
 // https://w3c.github.io/ServiceWorker/#self-caches
 partial interface WindowOrWorkerGlobalScope {
-  [Throws, Func="mozilla::dom::DOMPrefs::dom_caches_enabled", SameObject]
+  [Throws, Pref="dom.caches.enabled", SameObject]
   readonly attribute CacheStorage caches;
 };

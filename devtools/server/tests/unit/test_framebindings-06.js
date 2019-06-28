@@ -29,9 +29,8 @@ function run_test() {
 }
 
 function test_banana_environment() {
-  gThreadClient.addOneTimeListener("paused",
-    function(event, packet) {
-      equal(packet.type, "paused");
+  gThreadClient.once("paused",
+    function(packet) {
       const env = packet.frame.environment;
       equal(env.type, "function");
       equal(env.function.name, "banana3");
@@ -56,6 +55,7 @@ function test_banana_environment() {
   gDebuggee.eval("function banana(x) {\n" +
                  "  return function banana2(y) {\n" +
                  "    return function banana3(z) {\n" +
+                 "      eval(\"\");\n" +
                  "      debugger;\n" +
                  "    };\n" +
                  "  };\n" +

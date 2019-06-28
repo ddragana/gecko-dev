@@ -143,7 +143,6 @@ var gAddedEnvXRENoWindowsCrashDialog = false;
 var gEnvXPCOMDebugBreak;
 var gEnvXPCOMMemLeakLog;
 var gEnvDyldLibraryPath;
-var gEnvLdLibraryPath;
 
 const URL_HTTP_UPDATE_SJS = "http://test_details/";
 const DATA_URI_SPEC = Services.io.newFileURI(do_get_file("", false)).spec;
@@ -772,9 +771,6 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
 
   setDefaultPrefs();
 
-  // Don't attempt to show a prompt when an update finishes.
-  Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, true);
-
   gGREDirOrig = getGREDir();
   gGREBinDirOrig = getGREBinDir();
 
@@ -843,8 +839,6 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
 
   setAppUpdateAutoSync(aAppUpdateAutoEnabled);
   Services.prefs.setBoolPref(PREF_APP_UPDATE_BITS_ENABLED, aAllowBits);
-  // Set this preference so the trial doesn't override the decision.
-  Services.prefs.setBoolPref("app.update.BITS.inTrialGroup", aAllowBits);
 
   debugDump("finish - general test setup");
   return true;
@@ -2882,10 +2876,10 @@ function checkUpdateLogContents(aCompareLogFile, aStaged = false,
     // when there are files still in use. The following will remove the
     // additional entries from the log file when this happens so the log check
     // passes.
-    let re = new RegExp("\n" + ERR_RENAME_FILE + "[^\n]*\n" +
+    let re = new RegExp(ERR_RENAME_FILE + "[^\n]*\n" +
                         "PerformReplaceRequest: destDir rename[^\n]*\n" +
                         "rename_file: proceeding to rename the directory\n", "g");
-    updateLogContents = updateLogContents.replace(re, "\n");
+    updateLogContents = updateLogContents.replace(re, "");
   }
 
   // Replace error codes since they are different on each platform.
@@ -3412,48 +3406,6 @@ function checkFilesInDirRecursive(aDir, aCallback) {
   }
 }
 
-
-/**
- * Helper function to override the update prompt component to verify whether it
- * is called or not.
- *
- * @param   aCallback
- *          The callback to call if the update prompt component is called.
- */
-function overrideUpdatePrompt(aCallback) {
-  MockRegistrar.register("@mozilla.org/updates/update-prompt;1", UpdatePrompt, [aCallback]);
-}
-
-function UpdatePrompt(aCallback) {
-  this._callback = aCallback;
-
-  let fns = ["checkForUpdates", "showUpdateAvailable", "showUpdateDownloaded",
-             "showUpdateError", "showUpdateHistory", "showUpdateInstalled"];
-
-  fns.forEach(function UP_fns(aPromptFn) {
-    UpdatePrompt.prototype[aPromptFn] = function() {
-      if (!this._callback) {
-        return;
-      }
-
-      let callback = this._callback[aPromptFn];
-      if (!callback) {
-        return;
-      }
-
-      callback.apply(this._callback,
-                     Array.prototype.slice.call(arguments));
-    };
-  });
-}
-
-UpdatePrompt.prototype = {
-  flags: Ci.nsIClassInfo.SINGLETON,
-  getScriptableHelper: () => null,
-  interfaces: [Ci.nsISupports, Ci.nsIUpdatePrompt],
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIClassInfo, Ci.nsIUpdatePrompt]),
-};
-
 /**
  * Waits for an update check request to complete.
  *
@@ -3471,13 +3423,13 @@ function waitForUpdateCheck(aSuccess, aExpectedValues = {}) {
   return new Promise(resolve => gUpdateChecker.checkForUpdates({
     onProgress: (aRequest, aPosition, aTotalSize) => {
     },
-    onCheckComplete: (request, updates, updateCount) => {
+    onCheckComplete: (request, updates) => {
       Assert.ok(aSuccess, "the update check should succeed");
       if (aExpectedValues.updateCount) {
-        Assert.equal(aExpectedValues.updateCount, updateCount,
+        Assert.equal(aExpectedValues.updateCount, updates.length,
                      "the update count" + MSG_SHOULD_EQUAL);
       }
-      resolve({request, updates, updateCount});
+      resolve({request, updates});
     },
     onError: (request, update) => {
       Assert.ok(!aSuccess, "the update check should error");
@@ -3503,8 +3455,8 @@ function waitForUpdateCheck(aSuccess, aExpectedValues = {}) {
  * @return  A promise which will resolve the first time the update download
  *          onStopRequest occurs and returns the arguments from onStopRequest.
  */
-function waitForUpdateDownload(aUpdates, aUpdateCount, aExpectedStatus) {
-  let bestUpdate = gAUS.selectUpdate(aUpdates, aUpdateCount);
+function waitForUpdateDownload(aUpdates, aExpectedStatus) {
+  let bestUpdate = gAUS.selectUpdate(aUpdates);
   let state = gAUS.downloadUpdate(bestUpdate, false);
   if (state == STATE_NONE || state == STATE_FAILED) {
     do_throw("nsIApplicationUpdateService:downloadUpdate returned " + state);
@@ -3656,6 +3608,15 @@ function getProcessArgs(aExtraArgs) {
     appBinPath = '"' + appBinPath + '"';
   }
 
+  // The profile must be specified for the tests that launch the application to
+  // run locally when the profiles.ini and installs.ini files already exist.
+  let profileDir = appBin.parent.parent;
+  profileDir.append("profile");
+  let profilePath = profileDir.path;
+  if (/ /.test(profilePath)) {
+    profilePath = '"' + profilePath + '"';
+  }
+
   let args;
   if (AppConstants.platform == "macosx" || AppConstants.platform == "linux") {
     let launchScript = getLaunchScript();
@@ -3663,6 +3624,7 @@ function getProcessArgs(aExtraArgs) {
     launchScript.create(Ci.nsIFile.NORMAL_FILE_TYPE, PERMS_DIRECTORY);
 
     let scriptContents = "#! /bin/sh\n";
+    scriptContents += "export XRE_PROFILE_PATH=" + profilePath + "\n";
     scriptContents += appBinPath + " -no-remote -test-process-updates " +
                       aExtraArgs.join(" ") + " " + PIPE_TO_NULL;
     writeFile(launchScript, scriptContents);
@@ -3670,7 +3632,8 @@ function getProcessArgs(aExtraArgs) {
               scriptContents);
     args = [launchScript.path];
   } else {
-    args = ["/D", "/Q", "/C", appBinPath, "-no-remote", "-test-process-updates",
+    args = ["/D", "/Q", "/C", "set", "XRE_PROFILE_PATH=" + profilePath, "&&",
+            appBinPath, "-no-remote", "-test-process-updates",
             "-wait-for-browser"].concat(aExtraArgs).concat([PIPE_TO_NULL]);
   }
   return args;
@@ -4038,14 +4001,6 @@ function setEnvironment() {
     }
   }
 
-  if (AppConstants.platform == "linux" && gEnv.exists("LD_LIBRARY_PATH")) {
-    gEnvLdLibraryPath = gEnv.get("LD_LIBRARY_PATH");
-    debugDump("removing LD_LIBRARY_PATH environment variable");
-    // By removing the LD_LIBRARY_PATH environment variable this will test
-    // that setting the rpath for the updater is working properly.
-    gEnv.set("LD_LIBRARY_PATH", "");
-  }
-
   if (gEnv.exists("XPCOM_MEM_LEAK_LOG")) {
     gEnvXPCOMMemLeakLog = gEnv.get("XPCOM_MEM_LEAK_LOG");
     debugDump("removing the XPCOM_MEM_LEAK_LOG environment variable... " +
@@ -4106,12 +4061,6 @@ function resetEnvironment() {
       debugDump("removing DYLD_LIBRARY_PATH environment variable");
       gEnv.set("DYLD_LIBRARY_PATH", "");
     }
-  }
-
-  if (AppConstants.platform == "linux" && gEnvLdLibraryPath) {
-    debugDump("setting LD_LIBRARY_PATH environment variable value back " +
-              "to " + gEnvLdLibraryPath);
-    gEnv.set("LD_LIBRARY_PATH", gEnvLdLibraryPath);
   }
 
   if (AppConstants.platform == "win" && gAddedEnvXRENoWindowsCrashDialog) {

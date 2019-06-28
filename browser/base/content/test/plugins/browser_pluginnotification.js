@@ -10,10 +10,9 @@ function updateAllTestPlugins(aState) {
 add_task(async function() {
   registerCleanupFunction(async function() {
     clearAllPluginPermissions();
-    Services.prefs.clearUserPref("plugins.click_to_play");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Test Plug-in");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Second Test Plug-in");
-    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
     resetBlocklist();
     gTestBrowser = null;
     gBrowser.removeCurrentTab();
@@ -26,14 +25,13 @@ add_task(async function() {
   gTestBrowser = gBrowser.selectedBrowser;
 
   Services.prefs.setBoolPref("extensions.blocklist.suppressUI", true);
-  Services.prefs.setBoolPref("plugins.click_to_play", true);
 
   updateAllTestPlugins(Ci.nsIPluginTag.STATE_CLICKTOPLAY);
 
   // Prime the blocklist service, the remote service doesn't launch on startup.
   await promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html></html>");
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 });
 
 // Tests a page with an unknown plugin in it.
@@ -216,7 +214,7 @@ add_task(async function() {
 add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 
   // Work around for delayed PluginBindingAttached
   await promiseUpdatePluginBindings(gTestBrowser);
@@ -441,7 +439,7 @@ add_task(async function() {
 
 // Plugin sync removal test. Note this test produces a notification drop down since
 // the plugin we add has zero dims.
-add_task(async function() {
+add_task(async function blockPluginSyncRemoved() {
   updateAllTestPlugins(Ci.nsIPluginTag.STATE_CLICKTOPLAY);
 
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_syncRemoved.html");
@@ -459,21 +457,24 @@ add_task(async function() {
 
 // Tests a page with a blocked plugin in it and make sure the infoURL property
 // the blocklist file gets used.
-add_task(async function() {
+add_task(async function blockPluginInfoURL() {
   clearAllPluginPermissions();
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginInfoURL.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginInfoURL", gTestBrowser);
 
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
   // Work around for delayed PluginBindingAttached
+  info("Waiting for plugin bindings");
   await promiseUpdatePluginBindings(gTestBrowser);
 
   let notification = PopupNotifications.getNotification("click-to-play-plugins");
 
+  info("Waiting for notification to be shown");
   // Since the plugin notification is dismissed by default, reshow it.
   await promiseForNotificationShown(notification);
 
+  info("Waiting for plugin info");
   let pluginInfo = await promiseForPluginInfo("test");
   is(pluginInfo.pluginFallbackType, Ci.nsIObjectLoadingContent.PLUGIN_BLOCKLISTED,
      "Test 26, plugin fallback type should be PLUGIN_BLOCKLISTED");

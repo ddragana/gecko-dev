@@ -36,32 +36,27 @@ class WebNavigationChild extends ActorChild {
         this.gotoIndex(message.data);
         break;
       case "WebNavigation:LoadURI":
-        let histogram = Services.telemetry.getKeyedHistogramById("FX_TAB_REMOTE_NAVIGATION_DELAY_MS");
-        histogram.add("WebNavigation:LoadURI",
-                      Services.telemetry.msSystemNow() - message.data.requestTime);
-
         this.loadURI(message.data);
-
         break;
       case "WebNavigation:SetOriginAttributes":
         this.setOriginAttributes(message.data.originAttributes);
         break;
       case "WebNavigation:Reload":
-        this.reload(message.data.flags);
+        this.reload(message.data.loadFlags);
         break;
       case "WebNavigation:Stop":
-        this.stop(message.data.flags);
+        this.stop(message.data.loadFlags);
         break;
     }
   }
 
   _wrapURIChangeCall(fn) {
-    this.mm.WebProgress.inLoadURI = true;
     try {
       fn();
     } finally {
-      this.mm.WebProgress.inLoadURI = false;
-      this.mm.WebProgress.sendLoadCallResult();
+      this.mm.docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIBrowserChild)
+        .notifyNavigationFinished();
     }
   }
 
@@ -91,7 +86,7 @@ class WebNavigationChild extends ActorChild {
   loadURI(params) {
     let {
       uri,
-      flags,
+      loadFlags,
       referrerInfo,
       postData,
       headers,
@@ -133,7 +128,7 @@ class WebNavigationChild extends ActorChild {
     let loadURIOptions = {
       triggeringPrincipal,
       csp,
-      loadFlags: flags,
+      loadFlags,
       referrerInfo: E10SUtils.deserializeReferrerInfo(referrerInfo),
       postData,
       headers,
@@ -159,11 +154,11 @@ class WebNavigationChild extends ActorChild {
     }
   }
 
-  reload(flags) {
-    this.webNavigation.reload(flags);
+  reload(loadFlags) {
+    this.webNavigation.reload(loadFlags);
   }
 
-  stop(flags) {
-    this.webNavigation.stop(flags);
+  stop(loadFlags) {
+    this.webNavigation.stop(loadFlags);
   }
 }

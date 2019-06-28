@@ -1,6 +1,6 @@
-/* import-globals-from storageprincipal_head.js */
+/* import-globals-from partitionedstorage_head.js */
 
-StoragePrincipalHelper.runTest("IndexedDB",
+PartitionedStorageHelper.runTest("IndexedDB",
   async (win3rdParty, win1stParty, allowed) => {
     await new Promise(resolve => {
       let a = win1stParty.indexedDB.open("test", 1);
@@ -44,3 +44,46 @@ StoragePrincipalHelper.runTest("IndexedDB",
     });
   });
 
+PartitionedStorageHelper.runPartitioningTest(
+  "Partitioned tabs - IndexedDB",
+
+  // getDataCallback
+  async win => {
+    return new Promise(resolve => {
+      let a = win.indexedDB.open("test", 1);
+
+      a.onupgradeneeded = e => {
+        let db = e.target.result;
+        db.createObjectStore("foobar", {keyPath: "id"});
+      };
+
+      a.onsuccess = e => {
+        let db = e.target.result;
+        db.transaction("foobar").objectStore("foobar").get(1).onsuccess = ee => {
+          resolve(ee.target.result === undefined ? "" : ee.target.result.value);
+        };
+      };
+    });
+  },
+
+  // addDataCallback
+  async (win, value) => {
+    return new Promise(resolve => {
+      let a = win.indexedDB.open("test", 1);
+
+      a.onsuccess = e => {
+        let db = e.target.result;
+        db.transaction("foobar", "readwrite").objectStore("foobar").add({ id: 1, value }).onsuccess = _ => {
+          resolve(true);
+        };
+      };
+    });
+  },
+
+  // cleanup
+  async _ => {
+    await new Promise(resolve => {
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+    });
+  }
+);

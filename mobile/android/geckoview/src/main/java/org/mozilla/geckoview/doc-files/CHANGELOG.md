@@ -100,6 +100,20 @@ exclude: true
 [68.23]: ./GeckoView.html#setVerticalClipping-int-
 [68.24]: ./GeckoDisplay.html#setVerticalClipping-int-
 
+- Added [`StorageController`][68.25] API for clearing data.
+
+[68.25]: ../StorageController.html
+
+- Added [`onRecordingStatusChanged`][68.26] to [`MediaDelegate`][68.27] to handle events related to the status of recording devices.
+
+[68.26]: ./GeckoSession.MediaDelegate.html#onRecordingStatusChanged-org.mozilla.geckoview.GeckoSession-org.mozilla.geckoview.GeckoSession.MediaDelegate.RecordingDevice:A-
+[68.27]: ./GeckoSession.MediaDelegate.html
+
+- Removed redundant constants in [`MediaSource`][68.28]
+
+[68.28]: ./GeckoSession.MediaSource.html
+
+
 ## v67
 - Added [`setAutomaticFontSizeAdjustment`][67.2] to
   [`GeckoRuntimeSettings`][67.3] for automatically adjusting font size settings
@@ -306,4 +320,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: dfd66add2059abb3318cfffbfc60001d2e25efb2
+[api-version]: 29ff764a2ca4aaa16dbe79a269d6c1c8a166775e

@@ -1892,14 +1892,18 @@ nsresult nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction* trans) {
 
   trans->SetPendingTime();
 
-  Http2PushedStream* pushedStream = trans->GetPushedStream();
-  if (pushedStream) {
-    LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n", trans,
-         pushedStream->Session()));
-    return pushedStream->Session()->AddStream(trans, trans->Priority(), false,
-                                              false, nullptr)
-               ? NS_OK
-               : NS_ERROR_UNEXPECTED;
+  RefPtr<Http2PushedStreamWrapper> pushedStreamWrapper =
+      trans->GetPushedStream();
+  if (pushedStreamWrapper) {
+    Http2PushedStream* pushedStream = pushedStreamWrapper->GetStream();
+    if (pushedStream) {
+      LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n", trans,
+           pushedStream->Session()));
+      return pushedStream->Session()->AddStream(trans, trans->Priority(), false,
+                                                false, nullptr)
+                 ? NS_OK
+                 : NS_ERROR_UNEXPECTED;
+    }
   }
 
   nsresult rv = NS_OK;
@@ -2344,9 +2348,9 @@ void nsHttpConnectionMgr::OnMsgShutdownConfirm(int32_t priority,
 
 void nsHttpConnectionMgr::OnMsgNewTransaction(int32_t priority,
                                               ARefBase* param) {
-  LOG(("nsHttpConnectionMgr::OnMsgNewTransaction [trans=%p]\n", param));
-
   nsHttpTransaction* trans = static_cast<nsHttpTransaction*>(param);
+
+  LOG(("nsHttpConnectionMgr::OnMsgNewTransaction [trans=%p]\n", trans));
   trans->SetPriority(priority);
   nsresult rv = ProcessNewTransaction(trans);
   if (NS_FAILED(rv)) trans->Close(rv);  // for whatever its worth
@@ -3977,20 +3981,18 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
 
   MOZ_ASSERT(mEnt);
   nsresult rv;
-  const char* socketTypes[1];
-  uint32_t typeCount = 0;
+  nsTArray<nsCString> socketTypes;
   const nsHttpConnectionInfo* ci = mEnt->mConnInfo;
   if (!isBackup && ci->FirstHopSSL()) {
-    socketTypes[typeCount++] = "quic";
+    socketTypes.AppendElement(NS_LITERAL_CSTRING("quic"));
     mHttp3Session = new Http3Session();
   } else {
     if (ci->FirstHopSSL()) {
-      socketTypes[typeCount++] = "ssl";
+      socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
     } else {
-      socketTypes[typeCount] = gHttpHandler->DefaultSocketType();
-      if (socketTypes[typeCount]) {
-        typeCount++;
-      }
+    const nsCString& defaultType = gHttpHandler->DefaultSocketType();
+    if (!defaultType.IsVoid()) {
+      socketTypes.AppendElement(defaultType);
     }
   }
 
@@ -4011,9 +4013,8 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
   nsCOMPtr<nsIRoutedSocketTransportService> routedSTS(do_QueryInterface(sts));
   if (routedSTS) {
     rv = routedSTS->CreateRoutedTransport(
-        socketTypes, typeCount, ci->GetOrigin(), ci->OriginPort(),
-        ci->GetRoutedHost(), ci->RoutedPort(), ci->ProxyInfo(),
-        getter_AddRefs(socketTransport));
+        socketTypes, ci->GetOrigin(), ci->OriginPort(), ci->GetRoutedHost(),
+        ci->RoutedPort(), ci->ProxyInfo(), getter_AddRefs(socketTransport));
   } else {
     if (!ci->GetRoutedHost().IsEmpty()) {
       // There is a route requested, but the legacy nsISocketTransportService
@@ -4026,9 +4027,8 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
            this, ci->RoutedHost(), ci->RoutedPort()));
     }
 
-    rv = sts->CreateTransport(socketTypes, typeCount, ci->GetOrigin(),
-                              ci->OriginPort(), ci->ProxyInfo(),
-                              getter_AddRefs(socketTransport));
+    rv = sts->CreateTransport(socketTypes, ci->GetOrigin(), ci->OriginPort(),
+                              ci->ProxyInfo(), getter_AddRefs(socketTransport));
   }
   NS_ENSURE_SUCCESS(rv, rv);
 

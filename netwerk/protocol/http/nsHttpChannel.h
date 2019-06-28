@@ -144,7 +144,7 @@ class nsHttpChannel final : public HttpBaseChannel,
        nsContentPolicyType aContentPolicyType) override;
 
   MOZ_MUST_USE nsresult OnPush(const nsACString& uri,
-                               Http2PushedStream* pushedStream);
+                               Http2PushedStreamWrapper* pushedStream);
 
   static bool IsRedirectStatus(uint32_t status);
   static bool WillRedirect(nsHttpResponseHead* response);
@@ -286,9 +286,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   }
   TransactionObserver* GetTransactionObserver() { return mTransactionObserver; }
 
-  typedef MozPromise<nsCOMPtr<nsIRemoteTab>, nsresult, false> TabPromise;
-  already_AddRefed<TabPromise> TakeRedirectTabPromise() {
-    return mRedirectTabPromise.forget();
+  typedef MozPromise<uint64_t, nsresult, false> ContentProcessIdPromise;
+  already_AddRefed<ContentProcessIdPromise>
+  TakeRedirectContentProcessIdPromise() {
+    return mRedirectContentProcessIdPromise.forget();
   }
   uint64_t CrossProcessRedirectIdentifier() {
     return mCrossProcessRedirectIdentifier;
@@ -482,6 +483,9 @@ class nsHttpChannel final : public HttpBaseChannel,
   nsresult GetResponseCrossOriginPolicy(
       nsILoadInfo::CrossOriginPolicy* aResponseCrossOriginPolicy);
   nsresult ProcessCrossOriginHeader();
+  nsresult ProcessCrossOriginResourcePolicyHeader();
+
+  nsresult ComputeCrossOriginOpenerPolicyMismatch();
 
   /**
    * A function to process a single security header (STS or PKP), assumes
@@ -537,7 +541,7 @@ class nsHttpChannel final : public HttpBaseChannel,
                                              bool startBuffering,
                                              bool checkingAppCacheEntry);
 
-  void SetPushedStream(Http2PushedStream* stream);
+  void SetPushedStream(Http2PushedStreamWrapper* stream);
 
   void MaybeWarnAboutAppCache();
 
@@ -576,7 +580,7 @@ class nsHttpChannel final : public HttpBaseChannel,
 
   // The associated childChannel is getting relocated to another process.
   // This promise will be resolved when that process is set up.
-  RefPtr<TabPromise> mRedirectTabPromise;
+  RefPtr<ContentProcessIdPromise> mRedirectContentProcessIdPromise;
   // This identifier is passed to the childChannel in order to identify it.
   uint64_t mCrossProcessRedirectIdentifier = 0;
 
@@ -733,6 +737,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   // True only when we have computed the value of the top window origin.
   uint32_t mTopWindowOriginComputed : 1;
 
+  // True if this is a navigation to a page with a different cross origin
+  // opener policy ( see ComputeCrossOriginOpenerPolicyMismatch )
+  uint32_t mHasCrossOriginOpenerPolicyMismatch : 1;
+
   // The origin of the top window, only valid when mTopWindowOriginComputed is
   // true.
   nsCString mTopWindowOrigin;
@@ -742,7 +750,7 @@ class nsHttpChannel final : public HttpBaseChannel,
   // Needed for accurate DNS timing
   RefPtr<nsDNSPrefetch> mDNSPrefetch;
 
-  Http2PushedStream* mPushedStream;
+  RefPtr<Http2PushedStreamWrapper> mPushedStream;
   // True if the channel's principal was found on a phishing, malware, or
   // tracking (if tracking protection is enabled) blocklist
   bool mLocalBlocklist;

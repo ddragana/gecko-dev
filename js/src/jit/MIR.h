@@ -2669,6 +2669,7 @@ class WrappedFunction : public TempObject {
   bool isConstructor_ : 1;
   bool isClassConstructor_ : 1;
   bool isSelfHostedBuiltin_ : 1;
+  bool isExtended_ : 1;
 
  public:
   explicit WrappedFunction(JSFunction* fun);
@@ -2683,6 +2684,7 @@ class WrappedFunction : public TempObject {
   bool isConstructor() const { return isConstructor_; }
   bool isClassConstructor() const { return isClassConstructor_; }
   bool isSelfHostedBuiltin() const { return isSelfHostedBuiltin_; }
+  bool isExtended() const { return isExtended_; }
 
   // fun->native() and fun->jitInfo() can safely be called off-thread: these
   // fields never change.
@@ -7934,9 +7936,8 @@ class MArrayPopShift : public MUnaryInstruction,
 };
 
 // Array.prototype.push on a dense array. Returns the new array length.
-class MArrayPush
-    : public MBinaryInstruction,
-      public MixPolicy<SingleObjectPolicy, NoFloatPolicy<1>>::Data {
+class MArrayPush : public MBinaryInstruction,
+                   public MixPolicy<SingleObjectPolicy, BoxPolicy<1>>::Data {
   MArrayPush(MDefinition* object, MDefinition* value)
       : MBinaryInstruction(classOpcode, object, value) {
     setResultType(MIRType::Int32);
@@ -12143,8 +12144,6 @@ bool PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
                                    PropertyName* name, MDefinition** pvalue,
                                    bool canModify,
                                    MIRType implicitType = MIRType::None);
-AbortReasonOr<bool> ArrayPrototypeHasIndexedProperty(IonBuilder* builder,
-                                                     JSScript* script);
 AbortReasonOr<bool> TypeCanHaveExtraIndexedProperties(IonBuilder* builder,
                                                       TemporaryTypeSet* types);
 

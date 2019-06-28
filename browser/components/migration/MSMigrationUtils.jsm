@@ -640,7 +640,7 @@ Cookies.prototype = {
                            false, // session
                            expireTime,
                            {},
-                           Ci.nsICookie2.SAMESITE_UNSET);
+                           Ci.nsICookie.SAMESITE_NONE);
     }
   },
 };
@@ -834,7 +834,7 @@ WindowsVaultFormPasswords.prototype = {
           // create a new login
           logins.push({
             username, password,
-            hostname: realURL.prePath,
+            origin: realURL.prePath,
             timeCreated: creation,
           });
 

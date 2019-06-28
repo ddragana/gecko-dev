@@ -65,19 +65,14 @@ function TestServer() {
 }
 
 TestServer.prototype = {
-    QueryInterface: function(iid) {
-        if (iid.equals(Ci.nsIServerSocket) ||
-            iid.equals(Ci.nsISupports))
-            return this;
-        throw Cr.NS_ERROR_NO_INTERFACE;
-    },
-    onSocketAccepted: function(socket, trans) {
+    QueryInterface: ChromeUtils.generateQI(["nsIServerSocket"]),
+    onSocketAccepted(socket, trans) {
         try { this.listener.close(); } catch(e) {}
         Assert.ok(true);
         next_test();
     },
 
-    onStopListening: function(socket) {}
+    onStopListening(socket) {}
 };
 
 /** TestFailedStreamCallback
@@ -93,21 +88,15 @@ function TestFailedStreamCallback(transport, hostname, next) {
 }
 
 TestFailedStreamCallback.prototype = {
-    QueryInterface: function(iid) {
-        if (iid.equals(Ci.nsIInputStreamCallback) ||
-            iid.equals(Ci.nsIOutputStreamCallback) ||
-            iid.equals(Ci.nsISupports))
-            return this;
-        throw Cr.NS_ERROR_NO_INTERFACE;
-    },
-    processException: function(e) {
+    QueryInterface: ChromeUtils.generateQI(["nsIInputStreamCallback", "nsIOutputStreamCallback"]),
+    processException(e) {
         do_check_instanceof(e, Ci.nsIException);
         // A refusal to connect speculatively should throw an error.
         Assert.equal(e.result, Cr.NS_ERROR_CONNECTION_REFUSED);
         this.transport.close(Cr.NS_BINDING_ABORTED);
         return true;
     },
-    onOutputStreamReady: function(outstream) {
+    onOutputStreamReady(outstream) {
         info("outputstream handler.");
         Assert.notEqual(typeof(outstream), undefined);
         try {
@@ -119,7 +108,7 @@ TestFailedStreamCallback.prototype = {
         }
         info("no exception on write. Wait for read.");
     },
-    onInputStreamReady: function(instream) {
+    onInputStreamReady(instream) {
         info("inputstream handler.");
         Assert.notEqual(typeof(instream), undefined);
         try {
@@ -173,7 +162,7 @@ function test_hostnames_resolving_to_addresses(host, next) {
     var sts = Cc["@mozilla.org/network/socket-transport-service;1"]
               .getService(Ci.nsISocketTransportService);
     Assert.notEqual(typeof(sts), undefined);
-    var transport = sts.createTransport(null, 0, host, 80, null);
+    var transport = sts.createTransport([], host, 80, null);
     Assert.notEqual(typeof(transport), undefined);
 
     transport.connectionFlags = Ci.nsISocketTransport.DISABLE_RFC1918;
@@ -248,7 +237,7 @@ function test_proxies(proxyHost, next) {
     var proxyInfo = pps.newProxyInfo("http", proxyHost, 8080, "", "", 0, 1, null);
     Assert.notEqual(typeof(proxyInfo), undefined);
 
-    var transport = sts.createTransport(null, 0, "dummyHost", 80, proxyInfo);
+    var transport = sts.createTransport([], "dummyHost", 80, proxyInfo);
     Assert.notEqual(typeof(transport), undefined);
 
     transport.connectionFlags = Ci.nsISocketTransport.DISABLE_RFC1918;

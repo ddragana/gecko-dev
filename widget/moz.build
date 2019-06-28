@@ -59,6 +59,7 @@ if toolkit == 'windows':
 elif toolkit == 'cocoa':
     XPIDL_SOURCES += [
         'nsIMacDockSupport.idl',
+        'nsIMacFinderProgress.idl',
         'nsIMacSharingService.idl',
         'nsIMacWebAppUtils.idl',
         'nsIStandaloneNativeMenu.idl',
@@ -250,10 +251,8 @@ EXPORTS.ipc = ['nsGUIEventIPC.h']
 
 if CONFIG['MOZ_X11']:
     DIRS += ['x11']
-    UNIFIED_SOURCES += [
-        'GfxInfoX11.cpp'
-    ]
     SOURCES += [
+        'GfxInfoX11.cpp',
         'nsShmImage.cpp',
         'WindowSurfaceX11SHM.cpp',
     ]

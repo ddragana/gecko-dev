@@ -59,7 +59,6 @@
 using namespace js;
 
 using JS::AutoStableStringChars;
-using JS::DoubleNaNValue;
 using mozilla::Atomic;
 using mozilla::DebugOnly;
 using mozilla::NegativeInfinity;
@@ -72,6 +71,8 @@ Atomic<size_t> JSRuntime::liveRuntimesCount;
 Atomic<JS::LargeAllocationFailureCallback> js::OnLargeAllocationFailure;
 
 namespace js {
+void (*HelperThreadTaskCallback)(js::RunnableTask*);
+
 bool gCanUseExtraThreads = true;
 }  // namespace js
 
@@ -132,9 +133,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       selfHostingGlobal_(nullptr),
       gc(thisFromCtor()),
       gcInitialized(false),
-      NaNValue(DoubleNaNValue()),
-      negativeInfinityValue(DoubleValue(NegativeInfinity<double>())),
-      positiveInfinityValue(DoubleValue(PositiveInfinity<double>())),
       emptyString(nullptr),
       defaultFreeOp_(nullptr),
 #if !EXPOSE_INTL_API
@@ -637,9 +635,15 @@ void JSRuntime::addUnhandledRejectedPromise(JSContext* cx,
     return;
   }
 
+  bool mutedErrors = false;
+  if (JSScript* script = cx->currentScript()) {
+    mutedErrors = script->mutedErrors();
+  }
+
   void* data = cx->promiseRejectionTrackerCallbackData;
   cx->promiseRejectionTrackerCallback(
-      cx, promise, JS::PromiseRejectionHandlingState::Unhandled, data);
+      cx, mutedErrors, promise, JS::PromiseRejectionHandlingState::Unhandled,
+      data);
 }
 
 void JSRuntime::removeUnhandledRejectedPromise(JSContext* cx,
@@ -649,9 +653,15 @@ void JSRuntime::removeUnhandledRejectedPromise(JSContext* cx,
     return;
   }
 
+  bool mutedErrors = false;
+  if (JSScript* script = cx->currentScript()) {
+    mutedErrors = script->mutedErrors();
+  }
+
   void* data = cx->promiseRejectionTrackerCallbackData;
   cx->promiseRejectionTrackerCallback(
-      cx, promise, JS::PromiseRejectionHandlingState::Handled, data);
+      cx, mutedErrors, promise, JS::PromiseRejectionHandlingState::Handled,
+      data);
 }
 
 mozilla::non_crypto::XorShift128PlusRNG& JSRuntime::randomKeyGenerator() {

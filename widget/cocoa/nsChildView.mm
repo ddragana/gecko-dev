@@ -83,7 +83,6 @@
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "gfxUtils.h"
-#include "gfxPrefs.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/BorrowedContext.h"
 #include "mozilla/gfx/MacIOSurface.h"
@@ -93,6 +92,7 @@
 #endif
 
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 
 #include <dlfcn.h>
 
@@ -372,7 +372,7 @@ void nsChildView::ReleaseTitlebarCGContext() {
 
 nsresult nsChildView::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
                              const LayoutDeviceIntRect& aRect, nsWidgetInitData* aInitData) {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   // Because the hidden window is created outside of an event loop,
   // we need to provide an autorelease pool to avoid leaking cocoa objects
@@ -723,14 +723,12 @@ void nsChildView::Enable(bool aState) {}
 
 bool nsChildView::IsEnabled() const { return true; }
 
-nsresult nsChildView::SetFocus(bool aRaise) {
+void nsChildView::SetFocus(Raise) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
   NSWindow* window = [mView window];
   if (window) [window makeFirstResponder:mView];
-  return NS_OK;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 // Override to set the cursor on the mac
@@ -991,7 +989,24 @@ nsresult nsChildView::SynthesizeNativeMouseScrollEvent(
     return NS_ERROR_FAILURE;
   }
 
-  CGEventPost(kCGHIDEventTap, cgEvent);
+  // On macOS 10.14 and up CGEventPost won't work because of changes in macOS
+  // to improve security. This code makes an NSEvent corresponding to the
+  // wheel event and dispatches it directly to the scrollWheel handler. Some
+  // fiddling is needed with the coordinates in order to simulate what macOS
+  // would do; this code adapted from the Chromium equivalent function at
+  // https://chromium.googlesource.com/chromium/src.git/+/62.0.3178.1/ui/events/test/cocoa_test_event_utils.mm#38
+  CGPoint location = CGEventGetLocation(cgEvent);
+  location.y += NSMinY([[mView window] frame]);
+  location.x -= NSMinX([[mView window] frame]);
+  CGEventSetLocation(cgEvent, location);
+
+  uint64_t kNanosPerSec = 1000000000L;
+  CGEventSetTimestamp(cgEvent, [[NSProcessInfo processInfo] systemUptime] * kNanosPerSec);
+
+  NSEvent* event = [NSEvent eventWithCGEvent:cgEvent];
+  [event setValue:[mView window] forKey:@"_window"];
+  [mView scrollWheel:event];
+
   CFRelease(cgEvent);
   return NS_OK;
 
@@ -3274,7 +3289,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   // Make the context opaque for fullscreen (since it performs better), and transparent
   // for windowed (since we need it for rounded corners), but allow overriding
   // it to opaque for testing purposes, even if that breaks the rounded corners.
-  GLint opaque = aOpaque || gfxPrefs::CompositorGLContextOpaque();
+  GLint opaque = aOpaque || StaticPrefs::gfx_compositor_glcontext_opaque();
   [mGLContext setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
   CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
 }
@@ -3560,7 +3575,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
 
   // FIXME: bug 1525793 -- this may need to handle zooming or not on a per-document basis.
-  if (gfxPrefs::APZAllowZooming()) {
+  if (StaticPrefs::apz_allow_zooming()) {
     NSPoint locationInWindow = nsCocoaUtils::EventLocationForWindow(anEvent, [self window]);
     ScreenPoint position =
         ViewAs<ScreenPixel>([self convertWindowCoordinatesRoundDown:locationInWindow],
@@ -4377,7 +4392,7 @@ static gfx::IntPoint GetIntegerDeltaForEvent(NSEvent* aEvent) {
     geckoChildDeathGrip->DispatchAPZWheelInputEvent(wheelEvent, false);
   } else {
     ScrollWheelInput::ScrollMode scrollMode = ScrollWheelInput::SCROLLMODE_INSTANT;
-    if (gfxPrefs::SmoothScrollEnabled() && gfxPrefs::WheelSmoothScrollEnabled()) {
+    if (StaticPrefs::general_smoothScroll() && StaticPrefs::general_smoothScroll_mouseWheel()) {
       scrollMode = ScrollWheelInput::SCROLLMODE_SMOOTH;
     }
     ScrollWheelInput wheelEvent(eventIntervalTime, eventTimeStamp, modifiers, scrollMode,

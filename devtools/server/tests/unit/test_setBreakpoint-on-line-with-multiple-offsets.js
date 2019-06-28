@@ -2,7 +2,7 @@
 
 const SOURCE_URL = getFileUrl("setBreakpoint-on-line-with-multiple-offsets.js");
 
-add_task(threadClientTest(async ({ threadClient, debuggee, client }) => {
+add_task(threadClientTest(async ({ threadClient, debuggee }) => {
   const promise = waitForNewSource(threadClient, SOURCE_URL);
   loadSubScript(SOURCE_URL, debuggee);
   const { source } = await promise;
@@ -13,8 +13,7 @@ add_task(threadClientTest(async ({ threadClient, debuggee, client }) => {
 
   let packet = await executeOnNextTickAndWaitForPause(function() {
     Cu.evalInSandbox("f()", debuggee);
-  }, client);
-  Assert.equal(packet.type, "paused");
+  }, threadClient);
   let why = packet.why;
   Assert.equal(why.type, "breakpoint");
   Assert.equal(why.actors.length, 1);
@@ -30,9 +29,8 @@ add_task(threadClientTest(async ({ threadClient, debuggee, client }) => {
 
   packet = await executeOnNextTickAndWaitForPause(
     () => resume(threadClient),
-    client
+    threadClient
   );
-  Assert.equal(packet.type, "paused");
   why = packet.why;
   Assert.equal(why.type, "breakpoint");
   Assert.equal(why.actors.length, 1);

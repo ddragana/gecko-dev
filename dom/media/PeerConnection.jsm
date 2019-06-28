@@ -396,8 +396,8 @@ class RTCPeerConnection {
     // is set to true or false based on the presence of the "trickle" ice-option
     this._canTrickle = null;
 
-    // States
-    this._iceGatheringState = this._iceConnectionState = "new";
+    // So we can record telemetry on state transitions
+    this._iceConnectionState = "new";
 
     this._hasStunServer = this._hasTurnServer = false;
     this._iceGatheredRelayCandidates = false;
@@ -446,6 +446,27 @@ class RTCPeerConnection {
       this._mustValidateRTCConfiguration(rtcConfig,
         "RTCPeerConnection constructor passed invalid RTCConfiguration");
     }
+
+    let certificates = rtcConfig.certificates || [];
+
+    if (certificates.some(c => c.expires <= Date.now())) {
+      throw new this._win.DOMException(
+        "Unable to create RTCPeerConnection with an expired certificate",
+        "InvalidAccessError");
+    }
+
+    // TODO(bug 1531875): Check origin of certs
+
+    // TODO(bug 1176518): Remove this code once we support multiple certs
+    let certificate;
+    if (certificates.length == 1) {
+      certificate = certificates[0];
+    } else if (certificates.length) {
+      throw new this._win.DOMException(
+        "RTCPeerConnection does not currently support multiple certificates",
+        "NotSupportedError");
+    }
+
     var principal = Cu.getWebIDLCallerPrincipal();
     this._isChrome = principal.isSystemPrincipal;
 
@@ -485,7 +506,7 @@ class RTCPeerConnection {
     this._impl.initialize(observer, this._win, rtcConfig,
                           Services.tm.currentThread);
 
-    this._certificateReady = this._initCertificate(rtcConfig.certificates);
+    this._certificateReady = this._initCertificate(certificate);
     this._initIdp();
     _globalPCList.notifyLifecycleObservers(this, "initialized");
   }
@@ -503,22 +524,7 @@ class RTCPeerConnection {
     return this._config;
   }
 
-  async _initCertificate(certificates = []) {
-    let certificate;
-    if (certificates.length > 1) {
-      throw new this._win.DOMException(
-        "RTCPeerConnection does not currently support multiple certificates",
-        "NotSupportedError");
-    }
-    if (certificates.length) {
-      certificate = certificates.find(c => c.expires > Date.now());
-      if (!certificate) {
-        throw new this._win.DOMException(
-          "Unable to create RTCPeerConnection with an expired certificate",
-          "InvalidParameterError");
-      }
-    }
-
+  async _initCertificate(certificate) {
     if (!certificate) {
       certificate = await this._win.RTCPeerConnection.generateCertificate({
         name: "ECDSA", namedCurve: "P-256",
@@ -1005,42 +1011,48 @@ class RTCPeerConnection {
     // Only run a single identity verification at a time.  We have to do this to
     // avoid problems with the fact that identity validation doesn't block the
     // resolution of setRemoteDescription().
-    let p = (async () => {
-      // Should never throw
+    const validate = async () => {
       await this._lastIdentityValidation;
-      try {
-        const msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
-        // If this pc has an identity already, then the identity in sdp must match
-        if (this._impl.peerIdentity && (!msg || msg.identity !== this._impl.peerIdentity)) {
-          throw new this._win.DOMException(
-            "Peer Identity mismatch, expected: " + this._impl.peerIdentity,
-            "IncompatibleSessionDescriptionError");
-        }
-
-        if (msg) {
-          // Set new identity and generate an event.
-          this._impl.peerIdentity = msg.identity;
-          this._resolvePeerIdentity(Cu.cloneInto({
-            idp: this._remoteIdp.provider,
-            name: msg.identity,
-          }, this._win));
-        }
-      } catch (e) {
-        this._rejectPeerIdentity(e);
-        // If we don't expect a specific peer identity, failure to get a valid
-        // peer identity is not a terminal state, so replace the promise to
-        // allow another attempt.
-        if (!this._impl.peerIdentity) {
-          this._resetPeerIdentityPromise();
-        }
-        throw e;
+      const msg = await this._remoteIdp.verifyIdentityFromSDP(sdp, origin);
+      // If this pc has an identity already, then the identity in sdp must match
+      if (this._impl.peerIdentity && (!msg || msg.identity !== this._impl.peerIdentity)) {
+        throw new this._win.DOMException(
+          "Peer Identity mismatch, expected: " + this._impl.peerIdentity,
+          "OperationError");
       }
-    })();
-    this._lastIdentityValidation = p.catch(() => {});
+
+      if (msg) {
+        // Set new identity and generate an event.
+        this._impl.peerIdentity = msg.identity;
+        this._resolvePeerIdentity(Cu.cloneInto({
+          idp: this._remoteIdp.provider,
+          name: msg.identity,
+        }, this._win));
+      }
+    };
+
+    const haveValidation = validate();
+
+    // Always eat errors on this chain
+    this._lastIdentityValidation = haveValidation.catch(() => {});
+
+    // If validation fails, we have some work to do. Fork it so it cannot
+    // interfere with the validation chain itself, even if the catch function
+    // throws.
+    haveValidation.catch(e => {
+      this._rejectPeerIdentity(e);
+
+      // If we don't expect a specific peer identity, failure to get a valid
+      // peer identity is not a terminal state, so replace the promise to
+      // allow another attempt.
+      if (!this._impl.peerIdentity) {
+        this._resetPeerIdentityPromise();
+      }
+    });
 
     // Only wait for IdP validation if we need identity matching
     if (this._impl.peerIdentity) {
-      await p;
+      await haveValidation;
     }
   }
 
@@ -1559,7 +1571,7 @@ class RTCPeerConnection {
   get idpLoginUrl() { return this._localIdp.idpLoginUrl; }
   get id() { return this._impl.id; }
   set id(s) { this._impl.id = s; }
-  get iceGatheringState() { return this._iceGatheringState; }
+  get iceGatheringState() { return this._pc.iceGatheringState; }
   get iceConnectionState() { return this._iceConnectionState; }
 
   get signalingState() {
@@ -1568,21 +1580,16 @@ class RTCPeerConnection {
     if (this._closed) {
       return "closed";
     }
-    return {
-      "SignalingInvalid":            "",
-      "SignalingStable":             "stable",
-      "SignalingHaveLocalOffer":     "have-local-offer",
-      "SignalingHaveRemoteOffer":    "have-remote-offer",
-      "SignalingHaveLocalPranswer":  "have-local-pranswer",
-      "SignalingHaveRemotePranswer": "have-remote-pranswer",
-      "SignalingClosed":             "closed",
-    }[this._impl.signalingState];
+    return this._impl.signalingState;
   }
 
-  changeIceGatheringState(state) {
-    this._iceGatheringState = state;
+  handleIceGatheringStateChange() {
     _globalPCList.notifyLifecycleObservers(this, "icegatheringstatechange");
     this.dispatchEvent(new this._win.Event("icegatheringstatechange"));
+    if (this.iceGatheringState === "complete") {
+      this.dispatchEvent(new this._win.RTCPeerConnectionIceEvent(
+        "icecandidate", { candidate: null }));
+    }
   }
 
   changeIceConnectionState(state) {
@@ -1781,8 +1788,6 @@ class PeerConnectionObserver {
         this._dompc._iceGatheredRelayCandidates = true;
       }
       candidate = new win.RTCIceCandidate({ candidate, sdpMid, sdpMLineIndex, usernameFragment });
-    } else {
-      candidate = null;
     }
     this.dispatchEvent(new win.RTCPeerConnectionIceEvent("icecandidate",
                                                          { candidate }));
@@ -1851,29 +1856,6 @@ class PeerConnectionObserver {
     pc.changeIceConnectionState(iceConnectionState);
   }
 
-  // This method is responsible for updating iceGatheringState. This
-  // state is defined in the WebRTC specification as follows:
-  //
-  // iceGatheringState:
-  // ------------------
-  //   new        The object was just created, and no networking has occurred
-  //              yet.
-  //
-  //   gathering  The ICE agent is in the process of gathering candidates for
-  //              this RTCPeerConnection.
-  //
-  //   complete   The ICE agent has completed gathering. Events such as adding
-  //              a new interface or a new TURN server will cause the state to
-  //              go back to gathering.
-  //
-  handleIceGatheringStateChange(gatheringState) {
-    let pc = this._dompc;
-    if (pc.iceGatheringState === gatheringState) {
-      return;
-    }
-    pc.changeIceGatheringState(gatheringState);
-  }
-
   onStateChange(state) {
     if (!this._dompc) {
       return;
@@ -1897,7 +1879,7 @@ class PeerConnectionObserver {
         break;
 
       case "IceGatheringState":
-        this.handleIceGatheringStateChange(this._dompc._pc.iceGatheringState);
+        this._dompc.handleIceGatheringStateChange();
         break;
 
       default:

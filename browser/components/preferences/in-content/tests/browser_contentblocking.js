@@ -273,6 +273,9 @@ add_task(async function testContentBlockingStrictCategory() {
     case "cookieBehavior4":
       is(Services.prefs.getIntPref(NCB_PREF), Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER, `${NCB_PREF} has been set to ${Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER}`);
       break;
+    case "cookieBehavior5":
+      is(Services.prefs.getIntPref(NCB_PREF), Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN, `${NCB_PREF} has been set to ${Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN}`);
+      break;
     default:
       ok(false, "unknown option was added to the strict pref");
       break;
@@ -325,6 +328,7 @@ add_task(async function testContentBlockingCustomCategory() {
     nonDefaultNCB = Ci.nsICookieService.BEHAVIOR_REJECT;
     break;
   case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+  case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN:
     nonDefaultNCB = Ci.nsICookieService.BEHAVIOR_ACCEPT;
     break;
   default:
@@ -521,6 +525,8 @@ add_task(async function testContentBlockingReloadWarning() {
 add_task(async function testReloadTabsMessage() {
   Services.prefs.setStringPref(CAT_PREF, "strict");
   let exampleTab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com");
+  let examplePinnedTab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com");
+  gBrowser.pinTab(examplePinnedTab);
   await openPreferencesViaOpenPreferencesAPI("privacy", {leaveOpen: true});
   let doc = gBrowser.contentDocument;
   let standardWarning = doc.querySelector("#contentBlockingOptionStandard .content-blocking-warning.reload-tabs");
@@ -529,14 +535,19 @@ add_task(async function testReloadTabsMessage() {
   Services.prefs.setStringPref(CAT_PREF, "standard");
   ok(!BrowserTestUtils.is_hidden(standardWarning), "The warning in the standard section should be showing");
 
+  let exampleTabBrowserDiscardedPromise = BrowserTestUtils.waitForEvent(exampleTab, "TabBrowserDiscarded");
+  let examplePinnedTabLoadPromise = BrowserTestUtils.browserLoaded(examplePinnedTab.linkedBrowser);
   standardReloadButton.click();
-  // The example page had a load event
-  await BrowserTestUtils.browserLoaded(exampleTab.linkedBrowser);
+  // The pinned example page had a load event
+  await examplePinnedTabLoadPromise;
+  // The other one had its browser discarded
+  await exampleTabBrowserDiscardedPromise;
 
   ok(BrowserTestUtils.is_hidden(standardWarning), "The warning in the standard section should have hidden after being clicked");
 
   // cleanup
   Services.prefs.setStringPref(CAT_PREF, "standard");
   gBrowser.removeTab(exampleTab);
+  gBrowser.removeTab(examplePinnedTab);
   gBrowser.removeCurrentTab();
 });

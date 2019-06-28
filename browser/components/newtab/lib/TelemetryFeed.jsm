@@ -316,7 +316,6 @@ this.TelemetryFeed = class TelemetryFeed {
       perf: {
         load_trigger_type,
         is_preloaded: false,
-        is_prerendered: false,
       },
     };
 
@@ -407,22 +406,6 @@ this.TelemetryFeed = class TelemetryFeed {
       this.sendEvent(payload);
       this.sendStructuredIngestionEvent(payload, "impression-stats", "1");
     });
-  }
-
-  /**
-   * handlePagePrerendered - Set the session as prerendered
-   *
-   * @param  {string} portID the portID of the target session
-   */
-  handlePagePrerendered(portID) {
-    const session = this.sessions.get(portID);
-
-    if (!session) {
-      // It's possible the tab was never visible – in which case, there was no user session.
-      return;
-    }
-
-    session.perf.is_prerendered = true;
   }
 
   /**
@@ -742,9 +725,6 @@ this.TelemetryFeed = class TelemetryFeed {
       case at.NEW_TAB_UNLOAD:
         this.endSession(au.getPortIdOfSender(action));
         break;
-      case at.PAGE_PRERENDERED:
-        this.handlePagePrerendered(au.getPortIdOfSender(action));
-        break;
       case at.SAVE_SESSION_PERF_DATA:
         this.saveSessionPerfData(au.getPortIdOfSender(action), action.data);
         break;
@@ -802,8 +782,12 @@ this.TelemetryFeed = class TelemetryFeed {
 
     const impressionSets = session.impressionSets || {};
     const impressions = impressionSets[data.source] || [];
-    // The payload might contain other properties, we need `id` and `pos` here.
-    data.tiles.forEach(tile => impressions.push({id: tile.id, pos: tile.pos}));
+    // The payload might contain other properties, we need `id`, `pos` and potentially `shim` here.
+    data.tiles.forEach(tile => impressions.push({
+      id: tile.id,
+      pos: tile.pos,
+      ...(tile.shim ? {shim: tile.shim} : {}),
+    }));
     impressionSets[data.source] = impressions;
     session.impressionSets = impressionSets;
   }

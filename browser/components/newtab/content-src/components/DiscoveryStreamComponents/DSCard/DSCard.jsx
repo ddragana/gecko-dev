@@ -1,5 +1,4 @@
 import {actionCreators as ac} from "common/Actions.jsm";
-import {clampTotalLines} from "content-src/lib/clamp-total-lines";
 import {DSImage} from "../DSImage/DSImage.jsx";
 import {DSLinkMenu} from "../DSLinkMenu/DSLinkMenu";
 import {ImpressionStats} from "../../DiscoveryStreamImpressionStats/ImpressionStats";
@@ -24,7 +23,11 @@ export class DSCard extends React.PureComponent {
       this.props.dispatch(ac.ImpressionStats({
         source: this.props.type.toUpperCase(),
         click: 0,
-        tiles: [{id: this.props.id, pos: this.props.pos}],
+        tiles: [{
+          id: this.props.id,
+          pos: this.props.pos,
+          ...(this.props.shim && this.props.shim.click ? {shim: this.props.shim.click} : {}),
+        }],
       }));
     }
   }
@@ -41,11 +44,9 @@ export class DSCard extends React.PureComponent {
             <DSImage extraClassNames="img" source={this.props.image_src} rawSource={this.props.raw_image_src} />
           </div>
           <div className="meta">
-            <div className="info-wrap"
-              data-total-lines="7"
-              ref={clampTotalLines}>
-              <p className="source clamp" data-clamp="1">{this.props.source}</p>
-              <header className="title clamp" data-clamp="4">{this.props.title}</header>
+            <div className="info-wrap">
+              <p className="source clamp">{this.props.source}</p>
+              <header className="title clamp">{this.props.title}</header>
               {this.props.excerpt && <p className="excerpt clamp">{this.props.excerpt}</p>}
             </div>
             {this.props.context && (
@@ -54,7 +55,11 @@ export class DSCard extends React.PureComponent {
           </div>
           <ImpressionStats
             campaignId={this.props.campaignId}
-            rows={[{id: this.props.id, pos: this.props.pos}]}
+            rows={[{
+              id: this.props.id,
+              pos: this.props.pos,
+              ...(this.props.shim && this.props.shim.impression ? {shim: this.props.shim.impression} : {}),
+            }]}
             dispatch={this.props.dispatch}
             source={this.props.type} />
         </SafeAnchor>
@@ -68,6 +73,7 @@ export class DSCard extends React.PureComponent {
           source={this.props.source}
           type={this.props.type}
           pocket_id={this.props.pocket_id}
+          shim={this.props.shim}
           bookmarkGuid={this.props.bookmarkGuid} />}
       </div>
     );

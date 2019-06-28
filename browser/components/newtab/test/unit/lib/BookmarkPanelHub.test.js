@@ -1,5 +1,6 @@
 import {_BookmarkPanelHub} from "lib/BookmarkPanelHub.jsm";
 import {GlobalOverrider} from "test/unit/utils";
+import {PanelTestProvider} from "lib/PanelTestProvider.jsm";
 
 describe("BookmarkPanelHub", () => {
   let globals;
@@ -9,6 +10,7 @@ describe("BookmarkPanelHub", () => {
   let fakeHandleMessageRequest;
   let fakeL10n;
   let fakeMessage;
+  let fakeMessageFluent;
   let fakeTarget;
   let fakeContainer;
   let fakeDispatch;
@@ -18,7 +20,7 @@ describe("BookmarkPanelHub", () => {
     sandbox = sinon.createSandbox();
     globals = new GlobalOverrider();
 
-    fakeL10n = {setAttributes: sandbox.stub(), translateElements: sandbox.stub()};
+    fakeL10n = {setAttributes: sandbox.stub()};
     globals.set("DOMLocalization", function() { return fakeL10n; }); // eslint-disable-line prefer-arrow-callback
     globals.set("FxAccounts", {config: {promiseEmailFirstURI: sandbox.stub()}});
     isBrowserPrivateStub = sandbox.stub().returns(false);
@@ -27,41 +29,39 @@ describe("BookmarkPanelHub", () => {
     instance = new _BookmarkPanelHub();
     fakeAddImpression = sandbox.stub();
     fakeHandleMessageRequest = sandbox.stub();
-    fakeMessage = {
-      text: "text",
-      title: "title",
-      link: {
-        url: "url",
-        text: "text",
-      },
-      color: "white",
-      background_color_1: "#7d31ae",
-      background_color_2: "#5033be",
-      info_icon: {tooltiptext: "cfr-bookmark-tooltip-text"},
-      close_button: {tooltiptext: "cfr-bookmark-tooltip-text"},
-    };
+    [{content: fakeMessageFluent}, {content: fakeMessage}] = PanelTestProvider.getMessages();
     fakeContainer = {
       addEventListener: sandbox.stub(),
       setAttribute: sandbox.stub(),
+      removeAttribute: sandbox.stub(),
       classList: {add: sandbox.stub()},
       appendChild: sandbox.stub(),
+      querySelector: sandbox.stub(),
       children: [],
       style: {},
     };
+    fakeWindow = {
+      ownerGlobal: {openLinkIn: sandbox.stub(), gBrowser: {selectedBrowser: "browser"}},
+      MozXULElement: {insertFTLIfNeeded: sandbox.stub()},
+    };
+    const document = {
+      createElementNS: sandbox.stub().returns(fakeContainer),
+      getElementById: sandbox.stub().returns(fakeContainer),
+    };
     fakeTarget = {
-      document: {
-        createElementNS: sandbox.stub().returns(fakeContainer),
-      },
+      document,
       container: {
         querySelector: sandbox.stub(),
         appendChild: sandbox.stub(),
+        setAttribute: sandbox.stub(),
+        removeAttribute: sandbox.stub(),
       },
       hidePopup: sandbox.stub(),
       infoButton: {},
       close: sandbox.stub(),
+      browser: {ownerGlobal: {gBrowser: {ownerDocument: document}, window: fakeWindow}},
     };
     fakeDispatch = sandbox.stub();
-    fakeWindow = {ownerGlobal: {openLinkIn: sandbox.stub(), gBrowser: {selectedBrowser: "browser"}}};
   });
   afterEach(() => {
     instance.uninit();
@@ -140,6 +140,13 @@ describe("BookmarkPanelHub", () => {
       assert.calledWithExactly(instance.showMessage, "content", fakeTarget, fakeWindow);
       assert.calledOnce(instance.sendImpression);
     });
+    it("should insert the appropriate ftl files with translations", () => {
+      instance.onResponse({content: "content"}, fakeTarget, fakeWindow);
+
+      assert.calledTwice(fakeWindow.MozXULElement.insertFTLIfNeeded);
+      assert.calledWith(fakeWindow.MozXULElement.insertFTLIfNeeded, "browser/newtab/asrouter.ftl");
+      assert.calledWith(fakeWindow.MozXULElement.insertFTLIfNeeded, "browser/branding/sync-brand.ftl");
+    });
     it("should dispatch a user impression", () => {
       sandbox.spy(instance, "sendUserEventTelemetry");
 
@@ -184,6 +191,22 @@ describe("BookmarkPanelHub", () => {
 
       assert.equal(fakeTarget.document.createElementNS.callCount, 5);
       assert.calledOnce(fakeTarget.container.appendChild);
+      assert.notCalled(fakeL10n.setAttributes);
+    });
+    it("should create a container (fluent message)", () => {
+      fakeTarget.container.querySelector.returns(false);
+
+      instance.showMessage(fakeMessageFluent, fakeTarget);
+
+      assert.equal(fakeTarget.document.createElementNS.callCount, 5);
+      assert.calledOnce(fakeTarget.container.appendChild);
+    });
+    it("should set l10n attributes", () => {
+      fakeTarget.container.querySelector.returns(false);
+
+      instance.showMessage(fakeMessageFluent, fakeTarget);
+
+      assert.equal(fakeL10n.setAttributes.callCount, 4);
     });
     it("should reuse the container", () => {
       fakeTarget.container.querySelector.returns(true);
@@ -294,7 +317,7 @@ describe("BookmarkPanelHub", () => {
     beforeEach(() => {
       target = {
         infoButton: {},
-        recommendationContainer: {
+        container: {
           setAttribute: sandbox.stub(),
           removeAttribute: sandbox.stub(),
         },
@@ -318,43 +341,52 @@ describe("BookmarkPanelHub", () => {
 
       assert.isFalse(target.infoButton.checked);
     });
-    it("should disable recommendationContainer", () => {
+    it("should disable the container", () => {
       target.infoButton.checked = true;
 
       instance.toggleRecommendation();
 
-      assert.calledOnce(target.recommendationContainer.setAttribute);
+      assert.calledOnce(target.container.setAttribute);
     });
-    it("should enable recommendationContainer", () => {
+    it("should enable container", () => {
       target.infoButton.checked = false;
 
       instance.toggleRecommendation();
 
-      assert.calledOnce(target.recommendationContainer.removeAttribute);
+      assert.calledOnce(target.container.removeAttribute);
     });
   });
   describe("#_forceShowMessage", () => {
     it("should call showMessage with the correct args", () => {
-      const msg = {content: "foo"};
-      const target = {infoButton: {disabled: false}, recommendationContainer: {removeAttribute: sandbox.stub()}};
-      sandbox.stub(instance, "showMessage");
-      sandbox.stub(instance, "_response").value({target, win: "win"});
+      sandbox.spy(instance, "showMessage");
+      sandbox.stub(instance, "hideMessage");
 
-      instance._forceShowMessage(msg);
+      instance._forceShowMessage(fakeTarget, {content: fakeMessage});
 
       assert.calledOnce(instance.showMessage);
-      assert.calledWithExactly(instance.showMessage, "foo", target, "win");
+      assert.calledOnce(instance.hideMessage);
+      assert.calledWithExactly(instance.showMessage, fakeMessage, sinon.match.object, fakeWindow);
     });
-    it("should call toggleRecommendation with true", () => {
-      const msg = {content: "foo"};
+    it("should insert required fluent files", () => {
       sandbox.stub(instance, "showMessage");
+
+      instance._forceShowMessage(fakeTarget, {content: fakeMessage});
+
+      assert.calledTwice(fakeWindow.MozXULElement.insertFTLIfNeeded);
+    });
+    it("should insert a message you can collapse", () => {
+      sandbox.spy(instance, "showMessage");
       sandbox.stub(instance, "toggleRecommendation");
-      sandbox.stub(instance, "_response").value({fakeTarget, win: "win"});
+      sandbox.stub(instance, "sendUserEventTelemetry");
 
-      instance._forceShowMessage(msg);
+      instance._forceShowMessage(fakeTarget, {content: fakeMessage});
 
-      assert.calledOnce(instance.toggleRecommendation);
-      assert.calledWithExactly(instance.toggleRecommendation, true);
+      const [, eventListenerCb] = fakeContainer.addEventListener.secondCall.args;
+      // Called with `true` to show the message
+      instance.toggleRecommendation.reset();
+      eventListenerCb({stopPropagation: sandbox.stub()});
+
+      assert.calledWithExactly(instance.toggleRecommendation, false);
     });
   });
   describe("#sendImpression", () => {

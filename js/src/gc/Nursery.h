@@ -11,6 +11,8 @@
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/TimeStamp.h"
 
+#include "gc/GCParallelTask.h"
+#include "gc/Heap.h"
 #include "js/Class.h"
 #include "js/HeapAPI.h"
 #include "js/TracingAPI.h"
@@ -70,6 +72,22 @@ class TenuredCell;
 namespace jit {
 class MacroAssembler;
 }  // namespace jit
+
+class NurseryDecommitChunksTask
+    : public GCParallelTaskHelper<NurseryDecommitChunksTask> {
+ public:
+  explicit NurseryDecommitChunksTask(JSRuntime* rt)
+      : GCParallelTaskHelper(rt) {}
+  void queueChunk(NurseryChunk* chunk, const AutoLockHelperThreadState& lock);
+  void run();
+  void decommitChunk(gc::Chunk* chunk);
+
+ private:
+  // Use the next pointers in Chunk::info to form a singly-linked list.
+  MainThreadOrGCTaskData<gc::Chunk*> queue;
+
+  gc::Chunk* popChunk();
+};
 
 class TenuringTracer : public JSTracer {
   friend class Nursery;
@@ -401,6 +419,8 @@ class Nursery {
   static const size_t NurseryChunkUsableSize =
       gc::ChunkSize - gc::ChunkTrailerSize;
 
+  void joinDecommitTask() { decommitChunksTask.join(); }
+
  private:
   JSRuntime* runtime_;
 
@@ -545,6 +565,8 @@ class Nursery {
   Vector<MapObject*, 0, SystemAllocPolicy> mapsWithNurseryMemory_;
   Vector<SetObject*, 0, SystemAllocPolicy> setsWithNurseryMemory_;
 
+  NurseryDecommitChunksTask decommitChunksTask;
+
 #ifdef JS_GC_ZEAL
   struct Canary;
   Canary* lastCanary_;
@@ -585,6 +607,9 @@ class Nursery {
   void* allocate(size_t size);
 
   void doCollection(JS::GCReason reason, gc::TenureCountCache& tenureCounts);
+
+  float doPretenuring(JSRuntime* rt, JS::GCReason reason,
+                      gc::TenureCountCache& tenureCounts);
 
   /*
    * Move the object at |src| in the Nursery to an already-allocated cell

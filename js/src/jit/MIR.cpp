@@ -1523,7 +1523,8 @@ WrappedFunction::WrappedFunction(JSFunction* fun)
       isNativeWithJitEntry_(fun->isNativeWithJitEntry()),
       isConstructor_(fun->isConstructor()),
       isClassConstructor_(fun->isClassConstructor()),
-      isSelfHostedBuiltin_(fun->isSelfHostedBuiltin()) {}
+      isSelfHostedBuiltin_(fun->isSelfHostedBuiltin()),
+      isExtended_(fun->isExtended()) {}
 
 MCall* MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
                   size_t numActualArgs, bool construct, bool ignoresReturnValue,
@@ -5970,16 +5971,6 @@ AbortReasonOr<bool> PrototypeHasIndexedProperty(IonBuilder* builder,
   } while (obj);
 
   return false;
-}
-
-// Whether Array.prototype, or an object on its proto chain, has an indexed
-// property.
-AbortReasonOr<bool> jit::ArrayPrototypeHasIndexedProperty(IonBuilder* builder,
-                                                          JSScript* script) {
-  if (JSObject* proto = script->global().maybeGetArrayPrototype()) {
-    return PrototypeHasIndexedProperty(builder, proto);
-  }
-  return true;
 }
 
 // Whether obj or any of its prototypes have an indexed property.

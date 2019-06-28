@@ -239,6 +239,9 @@ var BrowserPageActions = {
       "subviewbutton-iconic",
       "pageAction-panel-button"
     );
+    if (action.isBadged) {
+      buttonNode.setAttribute("badged", "true");
+    }
     buttonNode.setAttribute("actionid", action.id);
     buttonNode.addEventListener("command", event => {
       this.doCommandForAction(action, event, buttonNode);
@@ -1126,7 +1129,6 @@ BrowserPageActions.addSearchEngine = {
     this._updateTitleAndIcon();
     this.action.setWantsSubview(this.engines.length > 1, window);
     let button = BrowserPageActions.panelButtonNodeForActionID(this.action.id);
-    button.classList.add("badged-button");
     button.setAttribute("image", this.engines[0].icon);
     button.setAttribute("uri", this.engines[0].uri);
     button.setAttribute("crop", "center");
@@ -1188,7 +1190,7 @@ BrowserPageActions.addSearchEngine = {
         let brandName = brandBundle.getString("brandShortName");
         let title = searchBundle.GetStringFromName("error_invalid_engine_title");
         let text = searchBundle.formatStringFromName("error_duplicate_engine_msg",
-                                                     [brandName, uri], 2);
+                                                     [brandName, uri]);
         Services.prompt.QueryInterface(Ci.nsIPromptFactory);
         let prompt = Services.prompt.getPrompt(gBrowser.contentWindow, Ci.nsIPrompt);
         prompt.QueryInterface(Ci.nsIWritablePropertyBag2);

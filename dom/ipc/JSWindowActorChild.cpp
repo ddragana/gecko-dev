@@ -6,8 +6,10 @@
 
 #include "mozilla/dom/JSWindowActorBinding.h"
 #include "mozilla/dom/JSWindowActorChild.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/dom/MessageManagerBinding.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "nsGlobalWindowInner.h"
@@ -22,7 +24,7 @@ JSObject* JSWindowActorChild::WrapObject(JSContext* aCx,
   return JSWindowActorChild_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-WindowGlobalChild* JSWindowActorChild::Manager() const { return mManager; }
+WindowGlobalChild* JSWindowActorChild::GetManager() const { return mManager; }
 
 void JSWindowActorChild::Init(const nsAString& aName,
                               WindowGlobalChild* aManager) {
@@ -37,22 +39,25 @@ class AsyncMessageToParent : public Runnable {
  public:
   AsyncMessageToParent(const JSWindowActorMessageMeta& aMetadata,
                        ipc::StructuredCloneData&& aData,
-                       WindowGlobalParent* aParent)
+                       WindowGlobalChild* aManager)
       : mozilla::Runnable("WindowGlobalParent::HandleAsyncMessage"),
         mMetadata(aMetadata),
         mData(std::move(aData)),
-        mParent(aParent) {}
+        mManager(aManager) {}
 
   NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread.");
-    mParent->ReceiveRawMessage(mMetadata, std::move(mData));
+    RefPtr<WindowGlobalParent> parent = mManager->GetParentActor();
+    if (parent) {
+      parent->ReceiveRawMessage(mMetadata, std::move(mData));
+    }
     return NS_OK;
   }
 
  private:
   JSWindowActorMessageMeta mMetadata;
   ipc::StructuredCloneData mData;
-  RefPtr<WindowGlobalParent> mParent;
+  RefPtr<WindowGlobalChild> mManager;
 };
 
 }  // anonymous namespace
@@ -66,9 +71,8 @@ void JSWindowActorChild::SendRawMessage(const JSWindowActorMessageMeta& aMeta,
   }
 
   if (mManager->IsInProcess()) {
-    RefPtr<WindowGlobalParent> wgp = mManager->GetParentActor();
     nsCOMPtr<nsIRunnable> runnable =
-        new AsyncMessageToParent(aMeta, std::move(aData), wgp);
+        new AsyncMessageToParent(aMeta, std::move(aData), mManager);
     NS_DispatchToMainThread(runnable.forget());
     return;
   }
@@ -104,6 +108,14 @@ BrowsingContext* JSWindowActorChild::GetBrowsingContext(ErrorResult& aRv) {
   }
 
   return mManager->BrowsingContext();
+}
+
+nsIDocShell* JSWindowActorChild::GetDocShell(ErrorResult& aRv) {
+  if (BrowsingContext* bc = GetBrowsingContext(aRv)) {
+    return bc->GetDocShell();
+  }
+
+  return nullptr;
 }
 
 Nullable<WindowProxyHolder> JSWindowActorChild::GetContentWindow(

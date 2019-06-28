@@ -26,9 +26,7 @@ function run_test() {
 }
 
 function test_simple_new_source() {
-  gThreadClient.addOneTimeListener("newSource", function(event, packet) {
-    Assert.equal(event, "newSource");
-    Assert.equal(packet.type, "newSource");
+  gThreadClient.once("newSource", function(packet) {
     Assert.ok(!!packet.source);
     Assert.ok(!!packet.source.url.match(/test_new_source-01.js$/));
 

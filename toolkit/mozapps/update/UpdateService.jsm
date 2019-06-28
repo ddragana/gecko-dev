@@ -29,32 +29,27 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 
 const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}");
 
-const PREF_APP_UPDATE_ALTWINDOWTYPE        = "app.update.altwindowtype";
+const PREF_APP_UPDATE_ALTUPDATEDIRPATH     = "app.update.altUpdateDirPath";
 const PREF_APP_UPDATE_BACKGROUNDERRORS     = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS  = "app.update.backgroundMaxErrors";
 const PREF_APP_UPDATE_BITS_ENABLED         = "app.update.BITS.enabled";
-const PREF_APP_UPDATE_BITS_INTRIALGROUP    = "app.update.BITS.inTrialGroup";
 const PREF_APP_UPDATE_CANCELATIONS         = "app.update.cancelations";
 const PREF_APP_UPDATE_CANCELATIONS_OSX     = "app.update.cancelations.osx";
 const PREF_APP_UPDATE_CANCELATIONS_OSX_MAX = "app.update.cancelations.osx.max";
-const PREF_APP_UPDATE_DOORHANGER           = "app.update.doorhanger";
+const PREF_APP_UPDATE_DISABLEDFORTESTING   = "app.update.disabledForTesting";
 const PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS    = "app.update.download.attempts";
 const PREF_APP_UPDATE_DOWNLOAD_MAXATTEMPTS = "app.update.download.maxAttempts";
 const PREF_APP_UPDATE_ELEVATE_NEVER        = "app.update.elevate.never";
 const PREF_APP_UPDATE_ELEVATE_VERSION      = "app.update.elevate.version";
 const PREF_APP_UPDATE_ELEVATE_ATTEMPTS     = "app.update.elevate.attempts";
 const PREF_APP_UPDATE_ELEVATE_MAXATTEMPTS  = "app.update.elevate.maxAttempts";
-const PREF_APP_UPDATE_DISABLEDFORTESTING   = "app.update.disabledForTesting";
-const PREF_APP_UPDATE_IDLETIME             = "app.update.idletime";
 const PREF_APP_UPDATE_LOG                  = "app.update.log";
 const PREF_APP_UPDATE_LOG_FILE             = "app.update.log.file";
-const PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED  = "app.update.notifiedUnsupported";
 const PREF_APP_UPDATE_POSTUPDATE           = "app.update.postupdate";
 const PREF_APP_UPDATE_PROMPTWAITTIME       = "app.update.promptWaitTime";
 const PREF_APP_UPDATE_SERVICE_ENABLED      = "app.update.service.enabled";
 const PREF_APP_UPDATE_SERVICE_ERRORS       = "app.update.service.errors";
 const PREF_APP_UPDATE_SERVICE_MAXERRORS    = "app.update.service.maxErrors";
-const PREF_APP_UPDATE_SILENT               = "app.update.silent";
 const PREF_APP_UPDATE_SOCKET_MAXERRORS     = "app.update.socket.maxErrors";
 const PREF_APP_UPDATE_SOCKET_RETRYTIMEOUT  = "app.update.socket.retryTimeout";
 const PREF_APP_UPDATE_STAGING_ENABLED      = "app.update.staging.enabled";
@@ -63,9 +58,7 @@ const PREF_APP_UPDATE_URL_DETAILS          = "app.update.url.details";
 const PREF_NETWORK_PROXY_TYPE              = "network.proxy.type";
 
 const URI_BRAND_PROPERTIES      = "chrome://branding/locale/brand.properties";
-const URI_UPDATE_HISTORY_DIALOG = "chrome://mozapps/content/update/history.xul";
 const URI_UPDATE_NS             = "http://www.mozilla.org/2005/app-update";
-const URI_UPDATE_PROMPT_DIALOG  = "chrome://mozapps/content/update/updates.xul";
 const URI_UPDATES_PROPERTIES    = "chrome://mozapps/locale/update/updates.properties";
 
 const KEY_EXECUTABLE      = "XREExeF";
@@ -120,6 +113,8 @@ const SERVICE_COULD_NOT_LOCK_UPDATER       = 32;
 const SERVICE_INSTALLDIR_ERROR             = 33;
 const WRITE_ERROR_ACCESS_DENIED            = 35;
 const WRITE_ERROR_CALLBACK_APP             = 37;
+const UNEXPECTED_STAGING_ERROR             = 43;
+const DELETE_ERROR_STAGING_LOCK_FILE       = 44;
 const SERVICE_COULD_NOT_COPY_UPDATER       = 49;
 const SERVICE_STILL_APPLYING_TERMINATED    = 50;
 const SERVICE_STILL_APPLYING_NO_EXIT_CODE  = 51;
@@ -187,8 +182,6 @@ const HTTP_ERROR_OFFSET                 = 1000;
 const HRESULT_E_ACCESSDENIED            = -2147024891;
 
 const DOWNLOAD_CHUNK_SIZE           = 300000; // bytes
-
-const UPDATE_WINDOW_NAME      = "Update:Wizard";
 
 // The number of consecutive failures when updating using the service before
 // setting the app.update.service.enabled preference to false.
@@ -274,13 +267,15 @@ function testWriteAccess(updateTestFile, createDirectory) {
  * @param handle The handle to close
  */
 function closeHandle(handle) {
-  let lib = ctypes.open("kernel32.dll");
-  let CloseHandle = lib.declare("CloseHandle",
-                                ctypes.winapi_abi,
-                                ctypes.int32_t, /* success */
-                                ctypes.void_t.ptr); /* handle */
-  CloseHandle(handle);
-  lib.close();
+  if (handle) {
+    let lib = ctypes.open("kernel32.dll");
+    let CloseHandle = lib.declare("CloseHandle",
+                                  ctypes.winapi_abi,
+                                  ctypes.int32_t, /* success */
+                                  ctypes.void_t.ptr); /* handle */
+    CloseHandle(handle);
+    lib.close();
+  }
 }
 
 /**
@@ -583,19 +578,6 @@ function getCanUseBits() {
     return "NoBits_FeatureOff";
   }
 
-  // By default, enable BITS for 50% of the eligible population (Bug 1542100)
-  let inTrialGroup;
-  if (Services.prefs.getPrefType(PREF_APP_UPDATE_BITS_INTRIALGROUP) ==
-      Services.prefs.PREF_INVALID) {
-    inTrialGroup = (Math.floor(Math.random() * 2) == 1);
-    Services.prefs.setBoolPref(PREF_APP_UPDATE_BITS_INTRIALGROUP, inTrialGroup);
-  } else {
-    inTrialGroup = Services.prefs.getBoolPref(PREF_APP_UPDATE_BITS_INTRIALGROUP,
-                                              false);
-  }
-  let defaultPrefs = Services.prefs.getDefaultBranch("");
-  defaultPrefs.setBoolPref(PREF_APP_UPDATE_BITS_ENABLED, inTrialGroup);
-
   if (!Services.prefs.getBoolPref(PREF_APP_UPDATE_BITS_ENABLED, true)) {
     LOG("getCanUseBits - Not using BITS. Disabled by pref.");
     return "NoBits_Pref";
@@ -674,6 +656,29 @@ function LOG(string) {
  * @return  nsIFile object for the location specified.
  */
 function getUpdateDirCreate(pathArray) {
+  if (Cu.isInAutomation) {
+    // This allows tests to use an alternate updates directory so they can test
+    // startup behavior.
+    const MAGIC_TEST_ROOT_PREFIX = "<test-root>";
+    const PREF_TEST_ROOT = "mochitest.testRoot";
+    let alternatePath =
+      Services.prefs.getCharPref(PREF_APP_UPDATE_ALTUPDATEDIRPATH, null);
+    if (alternatePath && alternatePath.startsWith(MAGIC_TEST_ROOT_PREFIX)) {
+      let testRoot = Services.prefs.getCharPref(PREF_TEST_ROOT);
+      let relativePath = alternatePath.substring(MAGIC_TEST_ROOT_PREFIX.length);
+      if (AppConstants.platform == "win") {
+        relativePath = relativePath.replace(/\//g, "\\");
+      }
+      alternatePath = testRoot + relativePath;
+      let updateDir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+      updateDir.initWithPath(alternatePath);
+      for (let i = 0; i < pathArray.length; ++i) {
+        updateDir.append(pathArray[i]);
+      }
+      return updateDir;
+    }
+  }
+
   return FileUtils.getDir(KEY_UPDROOT, pathArray, true);
 }
 
@@ -1009,29 +1014,24 @@ function readStringFromFile(file) {
 function handleUpdateFailure(update, errorCode) {
   update.errorCode = parseInt(errorCode);
   if (WRITE_ERRORS.includes(update.errorCode)) {
-    Cc["@mozilla.org/updates/update-prompt;1"].
-      createInstance(Ci.nsIUpdatePrompt).
-      showUpdateError(update);
     writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
     return true;
   }
 
   if (update.errorCode == ELEVATION_CANCELED) {
-    if (Services.prefs.getBoolPref(PREF_APP_UPDATE_DOORHANGER, false)) {
-      let elevationAttempts = Services.prefs.getIntPref(PREF_APP_UPDATE_ELEVATE_ATTEMPTS, 0);
-      elevationAttempts++;
-      Services.prefs.setIntPref(PREF_APP_UPDATE_ELEVATE_ATTEMPTS, elevationAttempts);
-      let maxAttempts = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_ELEVATE_MAXATTEMPTS, 2), 10);
+    let elevationAttempts = Services.prefs.getIntPref(PREF_APP_UPDATE_ELEVATE_ATTEMPTS, 0);
+    elevationAttempts++;
+    Services.prefs.setIntPref(PREF_APP_UPDATE_ELEVATE_ATTEMPTS, elevationAttempts);
+    let maxAttempts = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_ELEVATE_MAXATTEMPTS, 2), 10);
 
-      if (elevationAttempts > maxAttempts) {
-        LOG("handleUpdateFailure - notifying observers of error. " +
-            "topic: update-error, status: elevation-attempts-exceeded");
-        Services.obs.notifyObservers(update, "update-error", "elevation-attempts-exceeded");
-      } else {
-        LOG("handleUpdateFailure - notifying observers of error. " +
-            "topic: update-error, status: elevation-attempt-failed");
-        Services.obs.notifyObservers(update, "update-error", "elevation-attempt-failed");
-      }
+    if (elevationAttempts > maxAttempts) {
+      LOG("handleUpdateFailure - notifying observers of error. " +
+          "topic: update-error, status: elevation-attempts-exceeded");
+      Services.obs.notifyObservers(update, "update-error", "elevation-attempts-exceeded");
+    } else {
+      LOG("handleUpdateFailure - notifying observers of error. " +
+          "topic: update-error, status: elevation-attempt-failed");
+      Services.obs.notifyObservers(update, "update-error", "elevation-attempt-failed");
     }
 
     let cancelations = Services.prefs.getIntPref(PREF_APP_UPDATE_CANCELATIONS, 0);
@@ -1055,11 +1055,6 @@ function handleUpdateFailure(update, errorCode) {
                         update.state = STATE_PENDING_ELEVATE);
       }
       update.statusText = gUpdateBundle.GetStringFromName("elevationFailure");
-      update.QueryInterface(Ci.nsIWritablePropertyBag);
-      update.setProperty("patchingFailed", "elevationFailure");
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateError(update);
     } else {
       writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
     }
@@ -1132,8 +1127,6 @@ function handleFallbackToCompleteUpdate(update, postStaging) {
         "oldType: " + oldType);
     Services.obs.notifyObservers(update, "update-error", "unknown");
   }
-  update.QueryInterface(Ci.nsIWritablePropertyBag);
-  update.setProperty("patchingFailed", oldType);
 }
 
 function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
@@ -1612,7 +1605,7 @@ function Update(update) {
     let brandBundle = Services.strings.createBundle(URI_BRAND_PROPERTIES);
     let appName = brandBundle.GetStringFromName("brandShortName");
     this.name = gUpdateBundle.formatStringFromName("updateName",
-                                                   [appName, this.displayVersion], 2);
+                                                   [appName, this.displayVersion]);
   }
 }
 Update.prototype = {
@@ -1885,6 +1878,7 @@ UpdateService.prototype = {
         // (Bug 1420514), so clear it out on the next update to avoid confusion
         // regarding its use.
         Services.prefs.clearUserPref("app.update.enabled");
+        Services.prefs.clearUserPref("app.update.BITS.inTrialGroup");
 
         if (readStatusFile(getUpdatesDir()) == STATE_SUCCEEDED) {
           // After a successful update the post update preference needs to be
@@ -1941,6 +1935,7 @@ UpdateService.prototype = {
           // The OS would clean this up sometime after shutdown,
           // but that would have no guarantee on timing.
           closeHandle(gUpdateMutexHandle);
+          gUpdateMutexHandle = null;
         }
         if (this._retryTimer) {
           this._retryTimer.cancel();
@@ -2183,9 +2178,17 @@ UpdateService.prototype = {
 
       Services.prefs.setIntPref(PREF_APP_UPDATE_ELEVATE_ATTEMPTS, 0);
     } else if (status == STATE_PENDING_ELEVATE) {
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateElevationRequired();
+      // In case the active-update.xml file is deleted.
+      if (!um.activeUpdate) {
+        LOG("UpdateService:_postUpdateProcessing - status is pending-elevate " +
+            "but there isn't an active update, removing update");
+        cleanupActiveUpdate();
+      } else {
+        let uri = "chrome://mozapps/content/update/updateElevation.xul";
+        let features = "chrome,centerscreen,resizable=no,titlebar,toolbar=no," +
+                       "dialog=no";
+        Services.ww.openWindow(null, uri, "Update:Elevation", features, null);
+      }
     } else {
       // If there was an I/O error it is assumed that the patch is not invalid
       // and it is set to pending so an attempt to apply it again will happen
@@ -2198,9 +2201,6 @@ UpdateService.prototype = {
 
       // Something went wrong with the patch application process.
       handleFallbackToCompleteUpdate(update, false);
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateError(update);
     }
   },
 
@@ -2239,7 +2239,7 @@ UpdateService.prototype = {
     this._attemptResume();
   },
 
-  onCheckComplete: function AUS_onCheckComplete(request, updates, updateCount) {
+  onCheckComplete: function AUS_onCheckComplete(request, updates) {
     this._selectAndInstallUpdate(updates);
   },
 
@@ -2266,12 +2266,9 @@ UpdateService.prototype = {
     let maxErrors = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_BACKGROUNDMAXERRORS, 10), 20);
 
     if (errCount >= maxErrors) {
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
       LOG("UpdateService:onError - notifying observers of error. " +
           "topic: update-error, status: check-attempts-exceeded");
       Services.obs.notifyObservers(update, "update-error", "check-attempts-exceeded");
-      prompter.showUpdateError(update);
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_GENERAL_ERROR_PROMPT);
     } else {
       LOG("UpdateService:onError - notifying observers of error. " +
@@ -2603,7 +2600,7 @@ UpdateService.prototype = {
       return;
     }
 
-    var update = this.selectUpdate(updates, updates.length);
+    var update = this.selectUpdate(updates);
     if (!update || update.elevationFailure) {
       return;
     }
@@ -2612,12 +2609,6 @@ UpdateService.prototype = {
       LOG("UpdateService:_selectAndInstallUpdate - update not supported for " +
           "this system. Notifying observers. topic: update-available, " +
           "status: unsupported");
-      if (!Services.prefs.getBoolPref(PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED, false)) {
-        LOG("UpdateService:_selectAndInstallUpdate - notifying that the " +
-            "update is not supported for this system");
-        this._showPrompt(update);
-      }
-
       Services.obs.notifyObservers(update, "update-available", "unsupported");
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNSUPPORTED);
       return;
@@ -2627,9 +2618,7 @@ UpdateService.prototype = {
       LOG("UpdateService:_selectAndInstallUpdate - the user is unable to " +
           "apply updates... prompting. Notifying observers. " +
           "topic: update-available, status: cant-apply");
-
       Services.obs.notifyObservers(null, "update-available", "cant-apply");
-      this._showPrompt(update);
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNABLE_TO_APPLY);
       return;
     }
@@ -2655,9 +2644,7 @@ UpdateService.prototype = {
           "install is disabled. Notifying observers. topic: update-available, " +
           "status: show-prompt");
       AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_SHOWPROMPT_PREF);
-
       Services.obs.notifyObservers(update, "update-available", "show-prompt");
-      this._showPrompt(update);
       return;
     }
 
@@ -2667,12 +2654,6 @@ UpdateService.prototype = {
       cleanupActiveUpdate();
     }
     AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_DOWNLOAD_UPDATE);
-  },
-
-  _showPrompt: function AUS__showPrompt(update) {
-    let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                   createInstance(Ci.nsIUpdatePrompt);
-    prompter.showUpdateAvailable(update);
   },
 
   /**
@@ -3225,14 +3206,12 @@ UpdateManager.prototype = {
     cleanUpUpdatesDir(false);
 
     if (update.state == STATE_FAILED && parts[1]) {
-      if (!handleUpdateFailure(update, parts[1])) {
+      if (parts[1] == DELETE_ERROR_STAGING_LOCK_FILE ||
+          parts[1] == UNEXPECTED_STAGING_ERROR) {
+        writeStatusFile(getUpdatesDir(), update.state = STATE_PENDING);
+      } else if (!handleUpdateFailure(update, parts[1])) {
         handleFallbackToCompleteUpdate(update, true);
       }
-
-      // This can be removed after the update ui under update/content is
-      // removed.
-      update.QueryInterface(Ci.nsIWritablePropertyBag);
-      update.setProperty("stagingFailed", "true");
     }
     if (update.state == STATE_APPLIED && shouldUseService()) {
       writeStatusFile(getUpdatesDir(), update.state = STATE_APPLIED_SERVICE);
@@ -3260,25 +3239,6 @@ UpdateManager.prototype = {
     LOG("UpdateManager:refreshUpdateStatus - Notifying observers that " +
         "the update was staged. topic: update-staged, status: " + update.state);
     Services.obs.notifyObservers(update, "update-staged", update.state);
-
-    // Only prompt when the UI isn't already open.
-    let windowType = Services.prefs.getCharPref(PREF_APP_UPDATE_ALTWINDOWTYPE, null);
-    if (Services.wm.getMostRecentWindow(UPDATE_WINDOW_NAME) ||
-        windowType && Services.wm.getMostRecentWindow(windowType)) {
-      return;
-    }
-
-    if (update.state == STATE_APPLIED ||
-        update.state == STATE_APPLIED_SERVICE ||
-        update.state == STATE_PENDING ||
-        update.state == STATE_PENDING_SERVICE ||
-        update.state == STATE_PENDING_ELEVATE) {
-      // Notify the user that an update has been staged and is ready for
-      // installation (i.e. that they should restart the application).
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateDownloaded(update, true);
-    }
   },
 
   /**
@@ -3568,7 +3528,7 @@ Checker.prototype = {
       }
 
       // Tell the callback about the updates
-      this._callback.onCheckComplete(event.target, updates, updates.length);
+      this._callback.onCheckComplete(event.target, updates);
     } catch (e) {
       LOG("Checker:onLoad - there was a problem checking for updates. " +
           "Exception: " + e);
@@ -3988,10 +3948,13 @@ Downloader.prototype = {
     this._patch.QueryInterface(Ci.nsIWritablePropertyBag);
     this.isCompleteUpdate = this._patch.type == "complete";
 
-    let canUseBits = this._canUseBits(this._patch);
+    let canUseBits = false;
     // Allow the advertised update to disable BITS.
     if (this._update.getProperty("disableBITS") != null) {
-      canUseBits = false;
+      LOG("Downloader:downloadUpdate - BITS downloads disabled by update " +
+          "advertisement");
+    } else {
+      canUseBits = this._canUseBits(this._patch);
     }
 
     this._downloaderName = canUseBits ? "bits" : "internal";
@@ -4028,7 +3991,7 @@ Downloader.prototype = {
         this._bitsActiveNotifications = true;
       }
 
-      let updateRootDir = FileUtils.getDir("UpdRootD", [], true);
+      let updateRootDir = FileUtils.getDir(KEY_UPDROOT, [], true);
       let jobName = "MozillaUpdate " + updateRootDir.leafName;
       let updatePath = updateDir.path;
       if (!Bits.initialized) {
@@ -4586,37 +4549,23 @@ Downloader.prototype = {
       }
 
       if (allFailed && !permissionFixingInProgress) {
-        if (Services.prefs.getBoolPref(PREF_APP_UPDATE_DOORHANGER, false)) {
-          let downloadAttempts = Services.prefs.getIntPref(PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS, 0);
-          downloadAttempts++;
-          Services.prefs.setIntPref(PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS, downloadAttempts);
-          let maxAttempts = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_DOWNLOAD_MAXATTEMPTS, 2), 10);
+        let downloadAttempts = Services.prefs.getIntPref(PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS, 0);
+        downloadAttempts++;
+        Services.prefs.setIntPref(PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS, downloadAttempts);
+        let maxAttempts = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_DOWNLOAD_MAXATTEMPTS, 2), 10);
 
-          AUSTLMY.pingUpdatePhases(this._update, false);
-          if (downloadAttempts > maxAttempts) {
-            LOG("Downloader:onStopRequest - notifying observers of error. " +
-                "topic: update-error, status: download-attempts-exceeded, " +
-                "downloadAttempts: " + downloadAttempts + " " +
-                "maxAttempts: " + maxAttempts);
-            Services.obs.notifyObservers(this._update, "update-error", "download-attempts-exceeded");
-          } else {
-            this._update.selectedPatch.selected = false;
-            LOG("Downloader:onStopRequest - notifying observers of error. " +
-                "topic: update-error, status: download-attempt-failed");
-            Services.obs.notifyObservers(this._update, "update-error", "download-attempt-failed");
-          }
-        }
-
-        // If the update UI is not open (e.g. the user closed the window while
-        // downloading) and if at any point this was a foreground download
-        // notify the user about the error. If the update was a background
-        // update there is no notification since the user won't be expecting it.
-        this._update.QueryInterface(Ci.nsIWritablePropertyBag);
-        if (!Services.wm.getMostRecentWindow(UPDATE_WINDOW_NAME) &&
-            this._update.getProperty("foregroundDownload") == "true") {
-          let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                         createInstance(Ci.nsIUpdatePrompt);
-          prompter.showUpdateError(this._update);
+        AUSTLMY.pingUpdatePhases(this._update, false);
+        if (downloadAttempts > maxAttempts) {
+          LOG("Downloader:onStopRequest - notifying observers of error. " +
+              "topic: update-error, status: download-attempts-exceeded, " +
+              "downloadAttempts: " + downloadAttempts + " " +
+              "maxAttempts: " + maxAttempts);
+          Services.obs.notifyObservers(this._update, "update-error", "download-attempts-exceeded");
+        } else {
+          this._update.selectedPatch.selected = false;
+          LOG("Downloader:onStopRequest - notifying observers of error. " +
+              "topic: update-error, status: download-attempt-failed");
+          Services.obs.notifyObservers(this._update, "update-error", "download-attempt-failed");
         }
       }
       if (allFailed) {
@@ -4656,12 +4605,9 @@ Downloader.prototype = {
     // Do this after *everything* else, since it will likely cause the app
     // to shut down.
     if (shouldShowPrompt) {
-      // Notify the user that an update has been downloaded and is ready for
-      // installation (i.e. that they should restart the application). We do
-      // not notify on failed update attempts.
-      let prompter = Cc["@mozilla.org/updates/update-prompt;1"].
-                     createInstance(Ci.nsIUpdatePrompt);
-      prompter.showUpdateDownloaded(this._update, true);
+      LOG("UpdateManager:refreshUpdateStatus - Notifying observers that " +
+          "an update was downloaded. topic: update-downloaded, status: " + this._update.state);
+      Services.obs.notifyObservers(this._update, "update-downloaded", this._update.state);
     }
 
     if (shouldRegisterOnlineObserver) {
@@ -4716,298 +4662,4 @@ Downloader.prototype = {
                                           Ci.nsIInterfaceRequestor]),
 };
 
-/**
- * UpdatePrompt
- * An object which can prompt the user with information about updates, request
- * action, etc. Embedding clients can override this component with one that
- * invokes a native front end.
- * @constructor
- */
-function UpdatePrompt() {
-}
-UpdatePrompt.prototype = {
-  /**
-   * See nsIUpdateService.idl
-   */
-  checkForUpdates: function UP_checkForUpdates() {
-    if (this._getAltUpdateWindow())
-      return;
-
-    this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null, UPDATE_WINDOW_NAME,
-                 null, null);
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateAvailable: function UP_showUpdateAvailable(update) {
-    if (Services.prefs.getBoolPref(PREF_APP_UPDATE_SILENT, false) ||
-        Services.prefs.getBoolPref(PREF_APP_UPDATE_DOORHANGER, false) ||
-        this._getUpdateWindow() || this._getAltUpdateWindow()) {
-      return;
-    }
-
-    this._showUnobtrusiveUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                           UPDATE_WINDOW_NAME, "updatesavailable", update);
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateDownloaded: function UP_showUpdateDownloaded(update, background) {
-    if (background && Services.prefs.getBoolPref(PREF_APP_UPDATE_SILENT, false)) {
-      return;
-    }
-
-    // Trigger the display of the hamburger doorhanger.
-    LOG("showUpdateDownloaded - Notifying observers that " +
-        "an update was downloaded. topic: update-downloaded, status: " + update.state);
-    Services.obs.notifyObservers(update, "update-downloaded", update.state);
-
-    if (Services.prefs.getBoolPref(PREF_APP_UPDATE_DOORHANGER, false)) {
-      return;
-    }
-
-    if (this._getAltUpdateWindow())
-      return;
-
-    if (background) {
-      this._showUnobtrusiveUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                              UPDATE_WINDOW_NAME, "finishedBackground", update);
-    } else {
-      this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                   UPDATE_WINDOW_NAME, "finishedBackground", update);
-    }
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateError: function UP_showUpdateError(update) {
-    if (Services.prefs.getBoolPref(PREF_APP_UPDATE_SILENT, false) ||
-        Services.prefs.getBoolPref(PREF_APP_UPDATE_DOORHANGER, false) ||
-        this._getAltUpdateWindow())
-      return;
-
-    // In some cases, we want to just show a simple alert dialog.
-    if (update.state == STATE_FAILED &&
-        WRITE_ERRORS.includes(update.errorCode)) {
-      var title = gUpdateBundle.GetStringFromName("updaterIOErrorTitle");
-      var text = gUpdateBundle.formatStringFromName("updaterIOErrorMsg",
-                                                    [Services.appinfo.name,
-                                                     Services.appinfo.name], 2);
-      Services.ww.getNewPrompter(null).alert(title, text);
-      return;
-    }
-
-    if (update.errorCode == BACKGROUNDCHECK_MULTIPLE_FAILURES) {
-      this._showUIWhenIdle(null, URI_UPDATE_PROMPT_DIALOG, null,
-                           UPDATE_WINDOW_NAME, null, update);
-      return;
-    }
-
-    this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null, UPDATE_WINDOW_NAME,
-                 "errors", update);
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateHistory: function UP_showUpdateHistory(parent) {
-    this._showUI(parent, URI_UPDATE_HISTORY_DIALOG, "modal,dialog=yes",
-                 "Update:History", null, null);
-  },
-
-  /**
-   * See nsIUpdateService.idl
-   */
-  showUpdateElevationRequired: function UP_showUpdateElevationRequired() {
-    if (Services.prefs.getBoolPref(PREF_APP_UPDATE_SILENT, false) ||
-        this._getAltUpdateWindow()) {
-      return;
-    }
-
-    let um = Cc["@mozilla.org/updates/update-manager;1"].
-             getService(Ci.nsIUpdateManager);
-    this._showUI(null, URI_UPDATE_PROMPT_DIALOG, null,
-                 UPDATE_WINDOW_NAME, "finishedBackground", um.activeUpdate);
-  },
-
-  /**
-   * Returns the update window if present.
-   */
-  _getUpdateWindow: function UP__getUpdateWindow() {
-    return Services.wm.getMostRecentWindow(UPDATE_WINDOW_NAME);
-  },
-
-  /**
-   * Returns an alternative update window if present. When a window with this
-   * windowtype is open the application update service won't open the normal
-   * application update user interface window.
-   */
-  _getAltUpdateWindow: function UP__getAltUpdateWindow() {
-    let windowType = Services.prefs.getCharPref(PREF_APP_UPDATE_ALTWINDOWTYPE, null);
-    if (!windowType)
-      return null;
-    return Services.wm.getMostRecentWindow(windowType);
-  },
-
-  /**
-   * Display the update UI after the prompt wait time has elapsed.
-   * @param   parent
-   *          A parent window, can be null
-   * @param   uri
-   *          The URI string of the dialog to show
-   * @param   name
-   *          The Window Name of the dialog to show, in case it is already open
-   *          and can merely be focused
-   * @param   page
-   *          The page of the wizard to be displayed, if one is already open.
-   * @param   update
-   *          An update to pass to the UI in the window arguments.
-   *          Can be null
-   */
-  _showUnobtrusiveUI: function UP__showUnobUI(parent, uri, features, name, page,
-                                              update) {
-    var observer = {
-      updatePrompt: this,
-      service: null,
-      timer: null,
-      notify() {
-        // the user hasn't restarted yet => prompt when idle
-        this.service.removeObserver(this, "quit-application");
-        // If the update window is already open skip showing the UI
-        if (this.updatePrompt._getUpdateWindow())
-          return;
-        this.updatePrompt._showUIWhenIdle(parent, uri, features, name, page, update);
-      },
-      observe(aSubject, aTopic, aData) {
-        switch (aTopic) {
-          case "quit-application":
-            if (this.timer)
-              this.timer.cancel();
-            this.service.removeObserver(this, "quit-application");
-            break;
-        }
-      },
-    };
-
-    // bug 534090 - show the UI for update available notifications when the
-    // the system has been idle for at least IDLE_TIME.
-    if (page == "updatesavailable") {
-      var idleService = Cc["@mozilla.org/widget/idleservice;1"].
-                        getService(Ci.nsIIdleService);
-      // Don't allow the preference to set a value greater than 600 seconds for the idle time.
-      const IDLE_TIME = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_IDLETIME, 60), 600);
-      if (idleService.idleTime / 1000 >= IDLE_TIME) {
-        this._showUI(parent, uri, features, name, page, update);
-        return;
-      }
-    }
-
-    observer.service = Services.obs;
-    observer.service.addObserver(observer, "quit-application");
-
-    // bug 534090 - show the UI when idle for update available notifications.
-    if (page == "updatesavailable") {
-      this._showUIWhenIdle(parent, uri, features, name, page, update);
-      return;
-    }
-
-    // Give the user x seconds to react before prompting as defined by
-    // promptWaitTime
-    observer.timer = Cc["@mozilla.org/timer;1"].
-                     createInstance(Ci.nsITimer);
-    observer.timer.initWithCallback(observer, update.promptWaitTime * 1000,
-                                    observer.timer.TYPE_ONE_SHOT);
-  },
-
-  /**
-   * Show the UI when the user was idle
-   * @param   parent
-   *          A parent window, can be null
-   * @param   uri
-   *          The URI string of the dialog to show
-   * @param   name
-   *          The Window Name of the dialog to show, in case it is already open
-   *          and can merely be focused
-   * @param   page
-   *          The page of the wizard to be displayed, if one is already open.
-   * @param   update
-   *          An update to pass to the UI in the window arguments.
-   *          Can be null
-   */
-  _showUIWhenIdle: function UP__showUIWhenIdle(parent, uri, features, name,
-                                               page, update) {
-    var idleService = Cc["@mozilla.org/widget/idleservice;1"].
-                      getService(Ci.nsIIdleService);
-
-    // Don't allow the preference to set a value greater than 600 seconds for the idle time.
-    const IDLE_TIME = Math.min(Services.prefs.getIntPref(PREF_APP_UPDATE_IDLETIME, 60), 600);
-    if (idleService.idleTime / 1000 >= IDLE_TIME) {
-      this._showUI(parent, uri, features, name, page, update);
-    } else {
-      var observer = {
-        updatePrompt: this,
-        observe(aSubject, aTopic, aData) {
-          switch (aTopic) {
-            case "idle":
-              // If the update window is already open skip showing the UI
-              if (!this.updatePrompt._getUpdateWindow())
-                this.updatePrompt._showUI(parent, uri, features, name, page, update);
-              // fall thru
-            case "quit-application":
-              idleService.removeIdleObserver(this, IDLE_TIME);
-              Services.obs.removeObserver(this, "quit-application");
-              break;
-          }
-        },
-      };
-      idleService.addIdleObserver(observer, IDLE_TIME);
-      Services.obs.addObserver(observer, "quit-application");
-    }
-  },
-
-  /**
-   * Show the Update Checking UI
-   * @param   parent
-   *          A parent window, can be null
-   * @param   uri
-   *          The URI string of the dialog to show
-   * @param   name
-   *          The Window Name of the dialog to show, in case it is already open
-   *          and can merely be focused
-   * @param   page
-   *          The page of the wizard to be displayed, if one is already open.
-   * @param   update
-   *          An update to pass to the UI in the window arguments.
-   *          Can be null
-   */
-  _showUI: function UP__showUI(parent, uri, features, name, page, update) {
-    var ary = null;
-    if (update) {
-      ary = Cc["@mozilla.org/array;1"].
-            createInstance(Ci.nsIMutableArray);
-      ary.appendElement(update);
-    }
-
-    var win = this._getUpdateWindow();
-    if (win) {
-      if (page && "setCurrentPage" in win)
-        win.setCurrentPage(page);
-      win.focus();
-    } else {
-      var openFeatures = "chrome,centerscreen,dialog=no,resizable=no,titlebar,toolbar=no";
-      if (features)
-        openFeatures += "," + features;
-      Services.ww.openWindow(parent, uri, "", openFeatures, ary);
-    }
-  },
-
-  classDescription: "Update Prompt",
-  contractID: "@mozilla.org/updates/update-prompt;1",
-  classID: Components.ID("{27ABA825-35B5-4018-9FDD-F99250A0E722}"),
-  QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdatePrompt]),
-};
-
-var EXPORTED_SYMBOLS = ["UpdateService", "Checker", "UpdatePrompt", "UpdateManager"];
+var EXPORTED_SYMBOLS = ["UpdateService", "Checker", "UpdateManager"];

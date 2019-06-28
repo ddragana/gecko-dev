@@ -92,15 +92,15 @@
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var content_src_components_Base_Base__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(3);
-/* harmony import */ var content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(52);
+/* harmony import */ var content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(50);
 /* harmony import */ var content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(7);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_5__);
-/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(16);
+/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(15);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_6__);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(58);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(55);
 
 
 
@@ -109,22 +109,15 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const store = Object(content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__["initStore"])(common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["reducers"], global.gActivityStreamPrerenderedState);
-new content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__["DetectUserSessionStart"](store).sendEventOrAddListener(); // If we are starting in a prerendered state, we must wait until the first render
-// to request state rehydration (see Base.jsx). If we are NOT in a prerendered state,
-// we can request it immedately.
-
-if (!global.gActivityStreamPrerenderedState) {
-  store.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-    type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_STATE_REQUEST
-  }));
-}
-
+const store = Object(content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__["initStore"])(common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["reducers"]);
+new content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__["DetectUserSessionStart"](store).sendEventOrAddListener();
+store.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
+  type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_STATE_REQUEST
+}));
 react_dom__WEBPACK_IMPORTED_MODULE_6___default.a.hydrate(react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(react_redux__WEBPACK_IMPORTED_MODULE_4__["Provider"], {
   store: store
 }, react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(content_src_components_Base_Base__WEBPACK_IMPORTED_MODULE_1__["Base"], {
   isFirstrun: global.document.location.href === "about:welcome",
-  isPrerendered: !!global.gActivityStreamPrerenderedState,
   locale: global.document.documentElement.lang,
   strings: global.gActivityStreamStrings
 })), document.getElementById("root"));
@@ -197,7 +190,7 @@ const globalImportContext = typeof Window === "undefined" ? BACKGROUND_PROCESS :
 // }
 const actionTypes = {};
 
-for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_INITIALIZED", "AS_ROUTER_PREF_CHANGED", "AS_ROUTER_TARGETING_UPDATE", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISCOVERY_STREAM_CONFIG_CHANGE", "DISCOVERY_STREAM_CONFIG_SETUP", "DISCOVERY_STREAM_CONFIG_SET_VALUE", "DISCOVERY_STREAM_FEEDS_UPDATE", "DISCOVERY_STREAM_FEED_UPDATE", "DISCOVERY_STREAM_IMPRESSION_STATS", "DISCOVERY_STREAM_LAYOUT_RESET", "DISCOVERY_STREAM_LAYOUT_UPDATE", "DISCOVERY_STREAM_LINK_BLOCKED", "DISCOVERY_STREAM_LOADED_CONTENT", "DISCOVERY_STREAM_SPOCS_CAPS", "DISCOVERY_STREAM_SPOCS_ENDPOINT", "DISCOVERY_STREAM_SPOCS_FILL", "DISCOVERY_STREAM_SPOCS_UPDATE", "DISCOVERY_STREAM_SPOC_IMPRESSION", "DOWNLOAD_CHANGED", "FAKE_FOCUS_SEARCH", "FILL_SEARCH_TERM", "HANDOFF_SEARCH_TO_AWESOMEBAR", "HIDE_SEARCH", "INIT", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PAGE_PRERENDERED", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "POCKET_CTA", "POCKET_LINK_DELETED_OR_ARCHIVED", "POCKET_LOGGED_IN", "POCKET_WAITING_FOR_SPOC", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SHOW_SEARCH", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_PREVIEW_MODE", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "TRAILHEAD_ENROLL_EVENT", "UNINIT", "UPDATE_PINNED_SEARCH_SHORTCUTS", "UPDATE_SEARCH_SHORTCUTS", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
+for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM_POCKET", "AS_ROUTER_INITIALIZED", "AS_ROUTER_PREF_CHANGED", "AS_ROUTER_TARGETING_UPDATE", "AS_ROUTER_TELEMETRY_USER_EVENT", "BLOCK_URL", "BOOKMARK_URL", "COPY_DOWNLOAD_LINK", "DELETE_BOOKMARK_BY_ID", "DELETE_FROM_POCKET", "DELETE_HISTORY_URL", "DIALOG_CANCEL", "DIALOG_OPEN", "DISCOVERY_STREAM_CONFIG_CHANGE", "DISCOVERY_STREAM_CONFIG_SETUP", "DISCOVERY_STREAM_CONFIG_SET_VALUE", "DISCOVERY_STREAM_FEEDS_UPDATE", "DISCOVERY_STREAM_FEED_UPDATE", "DISCOVERY_STREAM_IMPRESSION_STATS", "DISCOVERY_STREAM_LAYOUT_RESET", "DISCOVERY_STREAM_LAYOUT_UPDATE", "DISCOVERY_STREAM_LINK_BLOCKED", "DISCOVERY_STREAM_LOADED_CONTENT", "DISCOVERY_STREAM_RETRY_FEED", "DISCOVERY_STREAM_SPOCS_CAPS", "DISCOVERY_STREAM_SPOCS_ENDPOINT", "DISCOVERY_STREAM_SPOCS_FILL", "DISCOVERY_STREAM_SPOCS_UPDATE", "DISCOVERY_STREAM_SPOC_IMPRESSION", "DOWNLOAD_CHANGED", "FAKE_FOCUS_SEARCH", "FILL_SEARCH_TERM", "HANDOFF_SEARCH_TO_AWESOMEBAR", "HIDE_SEARCH", "INIT", "NEW_TAB_INIT", "NEW_TAB_INITIAL_STATE", "NEW_TAB_LOAD", "NEW_TAB_REHYDRATED", "NEW_TAB_STATE_REQUEST", "NEW_TAB_UNLOAD", "OPEN_DOWNLOAD_FILE", "OPEN_LINK", "OPEN_NEW_WINDOW", "OPEN_PRIVATE_WINDOW", "OPEN_WEBEXT_SETTINGS", "PLACES_BOOKMARK_ADDED", "PLACES_BOOKMARK_REMOVED", "PLACES_HISTORY_CLEARED", "PLACES_LINKS_CHANGED", "PLACES_LINK_BLOCKED", "PLACES_LINK_DELETED", "PLACES_SAVED_TO_POCKET", "POCKET_CTA", "POCKET_LINK_DELETED_OR_ARCHIVED", "POCKET_LOGGED_IN", "POCKET_WAITING_FOR_SPOC", "PREFS_INITIAL_VALUES", "PREF_CHANGED", "PREVIEW_REQUEST", "PREVIEW_REQUEST_CANCEL", "PREVIEW_RESPONSE", "REMOVE_DOWNLOAD_FILE", "RICH_ICON_MISSING", "SAVE_SESSION_PERF_DATA", "SAVE_TO_POCKET", "SCREENSHOT_UPDATED", "SECTION_DEREGISTER", "SECTION_DISABLE", "SECTION_ENABLE", "SECTION_MOVE", "SECTION_OPTIONS_CHANGED", "SECTION_REGISTER", "SECTION_UPDATE", "SECTION_UPDATE_CARD", "SETTINGS_CLOSE", "SETTINGS_OPEN", "SET_PREF", "SHOW_DOWNLOAD_FILE", "SHOW_FIREFOX_ACCOUNTS", "SHOW_SEARCH", "SKIPPED_SIGNIN", "SNIPPETS_BLOCKLIST_CLEARED", "SNIPPETS_BLOCKLIST_UPDATED", "SNIPPETS_DATA", "SNIPPETS_PREVIEW_MODE", "SNIPPETS_RESET", "SNIPPET_BLOCKED", "SUBMIT_EMAIL", "SYSTEM_TICK", "TELEMETRY_IMPRESSION_STATS", "TELEMETRY_PERFORMANCE_EVENT", "TELEMETRY_UNDESIRED_EVENT", "TELEMETRY_USER_EVENT", "TOP_SITES_CANCEL_EDIT", "TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_EDIT", "TOP_SITES_INSERT", "TOP_SITES_OPEN_SEARCH_SHORTCUTS_MODAL", "TOP_SITES_PIN", "TOP_SITES_PREFS_UPDATED", "TOP_SITES_UNPIN", "TOP_SITES_UPDATED", "TOTAL_BOOKMARKS_REQUEST", "TOTAL_BOOKMARKS_RESPONSE", "TRAILHEAD_ENROLL_EVENT", "UNINIT", "UPDATE_PINNED_SEARCH_SHORTCUTS", "UPDATE_SEARCH_SHORTCUTS", "UPDATE_SECTION_PREFS", "WEBEXT_CLICK", "WEBEXT_DISMISS"]) {
   actionTypes[type] = type;
 } // These are acceptable actions for AS Router messages to have. They can show up
 // as call-to-action buttons in snippets, onboarding tour, etc.
@@ -567,16 +560,15 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var content_src_components_ASRouterAdmin_ASRouterAdmin__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(5);
 /* harmony import */ var _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(6);
-/* harmony import */ var content_src_components_ConfirmDialog_ConfirmDialog__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(29);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(26);
+/* harmony import */ var content_src_components_ConfirmDialog_ConfirmDialog__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(28);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_5__);
-/* harmony import */ var content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(53);
-/* harmony import */ var content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(36);
-/* harmony import */ var common_PrerenderData_jsm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(46);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_9___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_9__);
-/* harmony import */ var content_src_components_Search_Search__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(47);
-/* harmony import */ var content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(48);
+/* harmony import */ var content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(51);
+/* harmony import */ var content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(34);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
+/* harmony import */ var content_src_components_Search_Search__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(49);
+/* harmony import */ var content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(38);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -590,10 +582,9 @@ function _extends() { _extends = Object.assign || function (target) { for (var i
 
 
 
-
-const PrefsButton = Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(props => react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", {
+const PrefsButton = Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(props => react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
   className: "prefs-button"
-}, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
+}, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
   className: "icon icon-settings",
   onClick: props.onClick,
   title: props.intl.formatMessage({
@@ -628,7 +619,7 @@ function debounce(func, wait) {
   };
 }
 
-class _Base extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureComponent {
+class _Base extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
   componentWillMount() {
     const {
       locale
@@ -637,20 +628,6 @@ class _Base extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureComponent {
 
     if (this.props.isFirstrun) {
       global.document.body.classList.add("welcome", "hide-main");
-    }
-  }
-
-  componentDidMount() {
-    // Request state AFTER the first render to ensure we don't cause the
-    // prerendered DOM to be unmounted. Otherwise, NEW_TAB_STATE_REQUEST is
-    // dispatched right after the store is ready.
-    if (this.props.isPrerendered) {
-      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_STATE_REQUEST
-      }));
-      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].PAGE_PRERENDERED
-      }));
     }
   }
 
@@ -678,25 +655,22 @@ class _Base extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureComponent {
       locale,
       strings
     } = props;
-    const {
-      initialized
-    } = App;
     const isDevtoolsEnabled = props.Prefs.values["asrouter.devtoolsEnabled"];
 
-    if (!props.isPrerendered && !initialized) {
+    if (!App.initialized) {
       return null;
     }
 
-    return react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["IntlProvider"], {
+    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["IntlProvider"], {
       locale: locale,
       messages: strings
-    }, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], {
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], {
       className: "base-content-fallback"
-    }, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_9___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(BaseContent, this.props), isDevtoolsEnabled ? react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ASRouterAdmin_ASRouterAdmin__WEBPACK_IMPORTED_MODULE_2__["ASRouterAdmin"], null) : null)));
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_8___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(BaseContent, this.props), isDevtoolsEnabled ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ASRouterAdmin_ASRouterAdmin__WEBPACK_IMPORTED_MODULE_2__["ASRouterAdmin"], null) : null)));
   }
 
 }
-class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureComponent {
+class BaseContent extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.openPreferences = this.openPreferences.bind(this);
@@ -748,7 +722,6 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureCompo
       initialized
     } = App;
     const prefs = props.Prefs.values;
-    const shouldBeFixedToTop = common_PrerenderData_jsm__WEBPACK_IMPORTED_MODULE_8__["PrerenderData"].arePrefsValid(name => prefs[name]);
     const isDiscoveryStream = props.DiscoveryStream.config && props.DiscoveryStream.config.enabled;
     let filteredSections = props.Sections; // Filter out highlights for DS
 
@@ -758,24 +731,24 @@ class BaseContent extends react__WEBPACK_IMPORTED_MODULE_9___default.a.PureCompo
 
     const noSectionsEnabled = !prefs["feeds.topsites"] && filteredSections.filter(section => section.enabled).length === 0;
     const searchHandoffEnabled = prefs["improvesearch.handoffToAwesomebar"];
-    const outerClassName = ["outer-wrapper", isDiscoveryStream && "ds-outer-wrapper-search-alignment", isDiscoveryStream && "ds-outer-wrapper-breakpoint-override", shouldBeFixedToTop && "fixed-to-top", prefs.showSearch && this.state.fixedSearch && !noSectionsEnabled && "fixed-search", prefs.showSearch && noSectionsEnabled && "only-search"].filter(v => v).join(" ");
-    return react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", {
+    const outerClassName = ["outer-wrapper", isDiscoveryStream && "ds-outer-wrapper-search-alignment", isDiscoveryStream && "ds-outer-wrapper-breakpoint-override", prefs.showSearch && this.state.fixedSearch && !noSectionsEnabled && "fixed-search", prefs.showSearch && noSectionsEnabled && "only-search"].filter(v => v).join(" ");
+    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
       className: outerClassName
-    }, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("main", null, prefs.showSearch && react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", {
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("main", null, prefs.showSearch && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
       className: "non-collapsible-section"
-    }, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], null, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_Search_Search__WEBPACK_IMPORTED_MODULE_10__["Search"], _extends({
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], null, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Search_Search__WEBPACK_IMPORTED_MODULE_9__["Search"], _extends({
       showLogo: noSectionsEnabled,
       handoffEnabled: searchHandoffEnabled
-    }, props.Search)))), react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_3__["ASRouterUISurface"], {
+    }, props.Search)))), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_3__["ASRouterUISurface"], {
       fxaEndpoint: this.props.Prefs.values.fxa_endpoint,
       dispatch: this.props.dispatch
-    }), react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", {
+    }), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
       className: `body-wrapper${initialized ? " on" : ""}`
-    }, isDiscoveryStream ? react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], {
+    }, isDiscoveryStream ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_7__["ErrorBoundary"], {
       className: "borderless-error"
-    }, react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_6__["DiscoveryStreamBase"], null)) : react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_11__["Sections"], null), react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(PrefsButton, {
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_DiscoveryStreamBase_DiscoveryStreamBase__WEBPACK_IMPORTED_MODULE_6__["DiscoveryStreamBase"], null)) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Sections_Sections__WEBPACK_IMPORTED_MODULE_10__["Sections"], null), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(PrefsButton, {
       onClick: this.openPreferences
-    })), react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(content_src_components_ConfirmDialog_ConfirmDialog__WEBPACK_IMPORTED_MODULE_4__["ConfirmDialog"], null))));
+    })), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ConfirmDialog_ConfirmDialog__WEBPACK_IMPORTED_MODULE_4__["ConfirmDialog"], null))));
   }
 
 }
@@ -807,12 +780,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ASRouterAdmin", function() { return ASRouterAdmin; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var _asrouter_asrouter_content__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(6);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var _asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(15);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(11);
+/* harmony import */ var _asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(14);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var _SimpleHashRouter__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(28);
+/* harmony import */ var _SimpleHashRouter__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(27);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -1344,10 +1317,9 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
   renderMessageFilter() {
     if (!this.state.providers) {
       return null;
-    } // eslint-disable-next-line jsx-a11y/no-onchange
+    }
 
-
-    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "Show messages from ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("select", {
+    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "Show messages from", " ", react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("select", {
       value: this.state.messageFilter,
       onChange: this.onChangeMessageFilter
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("option", {
@@ -1438,9 +1410,10 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
 
     const errors = this.refs.targetingParamsEval && this.refs.targetingParamsEval.innerText.length;
     return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(_asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_3__["ModalOverlay"], {
+      innerStyle: "pasteModal",
       title: "New targeting parameters",
       button_label: errors ? "Cancel" : "Done",
-      onDoneButton: this.onPasteTargetingParams
+      onDismissBundle: this.onPasteTargetingParams
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", {
       className: "onboardingMessage"
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("textarea", {
@@ -1768,19 +1741,19 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(2);
 /* harmony import */ var content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(7);
-/* harmony import */ var _rich_text_strings__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(9);
-/* harmony import */ var _components_ImpressionsWrapper_ImpressionsWrapper__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(10);
-/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(56);
-/* harmony import */ var content_src_lib_constants__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(13);
-/* harmony import */ var _templates_OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(14);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(11);
+/* harmony import */ var _rich_text_strings__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(54);
+/* harmony import */ var _components_ImpressionsWrapper_ImpressionsWrapper__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(9);
+/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(52);
+/* harmony import */ var content_src_lib_constants__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(12);
+/* harmony import */ var _templates_OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(13);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
-/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(16);
+/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(15);
 /* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_9___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_9__);
-/* harmony import */ var _templates_ReturnToAMO_ReturnToAMO__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(17);
-/* harmony import */ var _templates_template_manifest__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(54);
-/* harmony import */ var _templates_StartupOverlay_StartupOverlay__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(25);
-/* harmony import */ var _templates_Trailhead_Trailhead__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(27);
+/* harmony import */ var _templates_ReturnToAMO_ReturnToAMO__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(16);
+/* harmony import */ var _templates_template_manifest__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(53);
+/* harmony import */ var _templates_StartupOverlay_StartupOverlay__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(24);
+/* harmony import */ var _templates_Trailhead_Trailhead__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(26);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -2153,7 +2126,7 @@ class ASRouterUISurface extends react__WEBPACK_IMPORTED_MODULE_8___default.a.Pur
       ,
       document: this.props.document
     }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(fluent_react__WEBPACK_IMPORTED_MODULE_5__["LocalizationProvider"], {
-      messages: Object(_rich_text_strings__WEBPACK_IMPORTED_MODULE_3__["generateMessages"])(content)
+      bundles: Object(_rich_text_strings__WEBPACK_IMPORTED_MODULE_3__["generateBundles"])(content)
     }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(SnippetComponent, _extends({}, this.state.message, {
       UISurface: "NEWTAB_FOOTER_BAR",
       onBlock: this.onBlockById(this.state.message.id),
@@ -2195,7 +2168,7 @@ class ASRouterUISurface extends react__WEBPACK_IMPORTED_MODULE_8___default.a.Pur
     } else if (message.template === "return_to_amo_overlay") {
       global.document.body.classList.add("amo");
       return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(fluent_react__WEBPACK_IMPORTED_MODULE_5__["LocalizationProvider"], {
-        messages: Object(_rich_text_strings__WEBPACK_IMPORTED_MODULE_3__["generateMessages"])({
+        bundles: Object(_rich_text_strings__WEBPACK_IMPORTED_MODULE_3__["generateBundles"])({
           "amo_html": message.content.text
         })
       }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_templates_ReturnToAMO_ReturnToAMO__WEBPACK_IMPORTED_MODULE_10__["ReturnToAMO"], _extends({}, message, {
@@ -2290,7 +2263,7 @@ __webpack_require__.r(__webpack_exports__);
 const MERGE_STORE_ACTION = "NEW_TAB_INITIAL_STATE";
 const OUTGOING_MESSAGE_NAME = "ActivityStream:ContentToMain";
 const INCOMING_MESSAGE_NAME = "ActivityStream:MainToContent";
-const EARLY_QUEUED_ACTIONS = [common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].SAVE_SESSION_PERF_DATA, common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].PAGE_PRERENDERED];
+const EARLY_QUEUED_ACTIONS = [common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].SAVE_SESSION_PERF_DATA];
 /**
  * A higher-order function which returns a reducer that, on MERGE_STORE action,
  * will return the action.data object merged into the previous state.
@@ -2407,8 +2380,8 @@ const queueEarlyMessageMiddleware = store => next => action => {
  * @return {object}          A redux store
  */
 
-function initStore(reducers, initialState) {
-  const store = Object(redux__WEBPACK_IMPORTED_MODULE_1__["createStore"])(mergeStateReducer(Object(redux__WEBPACK_IMPORTED_MODULE_1__["combineReducers"])(reducers)), initialState, global.RPMAddMessageListener && Object(redux__WEBPACK_IMPORTED_MODULE_1__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
+function initStore(reducers) {
+  const store = Object(redux__WEBPACK_IMPORTED_MODULE_1__["createStore"])(mergeStateReducer(Object(redux__WEBPACK_IMPORTED_MODULE_1__["combineReducers"])(reducers)), global.RPMAddMessageListener && Object(redux__WEBPACK_IMPORTED_MODULE_1__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
   store._didRehydrate = false;
   store._didRequestInitialState = false;
 
@@ -2440,60 +2413,10 @@ module.exports = Redux;
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "RICH_TEXT_KEYS", function() { return RICH_TEXT_KEYS; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "generateMessages", function() { return generateMessages; });
-/* harmony import */ var fluent__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(55);
-
-/**
- * Properties that allow rich text MUST be added to this list.
- *   key: the localization_id that should be used
- *   value: a property or array of properties on the message.content object
- */
-
-const RICH_TEXT_CONFIG = {
-  "text": ["text", "scene1_text"],
-  "success_text": "success_text",
-  "error_text": "error_text",
-  "scene2_text": "scene2_text",
-  "amo_html": "amo_html",
-  "privacy_html": "scene2_privacy_html",
-  "disclaimer_html": "scene2_disclaimer_html"
-};
-const RICH_TEXT_KEYS = Object.keys(RICH_TEXT_CONFIG);
-/**
- * Generates an array of messages suitable for fluent's localization provider
- * including all needed strings for rich text.
- * @param {object} content A .content object from an ASR message (i.e. message.content)
- * @returns {MessageContext[]} A array containing the fluent message context
- */
-
-function generateMessages(content) {
-  const cx = new fluent__WEBPACK_IMPORTED_MODULE_0__["MessageContext"]("en-US");
-  RICH_TEXT_KEYS.forEach(key => {
-    const attrs = RICH_TEXT_CONFIG[key];
-    const attrsToTry = Array.isArray(attrs) ? [...attrs] : [attrs];
-    let string = "";
-
-    while (!string && attrsToTry.length) {
-      const attr = attrsToTry.pop();
-      string = content[attr];
-    }
-
-    cx.addMessages(`${key} = ${string}`);
-  });
-  return [cx];
-}
-
-/***/ }),
-/* 10 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "VISIBLE", function() { return VISIBLE; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "VISIBILITY_CHANGE_EVENT", function() { return VISIBILITY_CHANGE_EVENT; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ImpressionsWrapper", function() { return ImpressionsWrapper; });
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 
 const VISIBLE = "visible";
@@ -2562,19 +2485,19 @@ ImpressionsWrapper.defaultProps = {
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 11 */
+/* 10 */
 /***/ (function(module, exports) {
 
 module.exports = React;
 
 /***/ }),
-/* 12 */
+/* 11 */
 /***/ (function(module, exports) {
 
 module.exports = PropTypes;
 
 /***/ }),
-/* 13 */
+/* 12 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2611,15 +2534,15 @@ const NEWTAB_DARK_THEME = {
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 14 */
+/* 13 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "OnboardingCard", function() { return OnboardingCard; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "OnboardingMessage", function() { return OnboardingMessage; });
-/* harmony import */ var _components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(15);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
+/* harmony import */ var _components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(14);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
@@ -2705,14 +2628,14 @@ class OnboardingMessage extends react__WEBPACK_IMPORTED_MODULE_1___default.a.Pur
 }
 
 /***/ }),
-/* 15 */
+/* 14 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ModalOverlayWrapper", function() { return ModalOverlayWrapper; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ModalOverlay", function() { return ModalOverlay; });
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 
 class ModalOverlayWrapper extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
@@ -2741,12 +2664,19 @@ class ModalOverlayWrapper extends react__WEBPACK_IMPORTED_MODULE_0___default.a.P
     const {
       props
     } = this;
+    let className = props.unstyled ? "" : "modalOverlayInner active";
+
+    if (props.innerClassName) {
+      className += ` ${props.innerClassName}`;
+    }
+
     return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_0___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
       className: "modalOverlayOuter active",
       onClick: props.onClose,
+      onKeyDown: this.onKeyDown,
       role: "presentation"
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
-      className: `modalOverlayInner active ${props.innerClassName || ""}`,
+      className: className,
       "aria-labelledby": props.headerId,
       id: props.id,
       role: "dialog"
@@ -2777,21 +2707,21 @@ class ModalOverlay extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 16 */
+/* 15 */
 /***/ (function(module, exports) {
 
 module.exports = ReactDOM;
 
 /***/ }),
-/* 17 */
+/* 16 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ReturnToAMO", function() { return ReturnToAMO; });
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var _components_RichText_RichText__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(18);
+/* harmony import */ var _components_RichText_RichText__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(17);
 
  // Alt text if available; in the future this should come from the server. See bug 1551711
 
@@ -2872,18 +2802,18 @@ class ReturnToAMO extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureCompo
 }
 
 /***/ }),
-/* 18 */
+/* 17 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "convertLinks", function() { return convertLinks; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "RichText", function() { return RichText; });
-/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(56);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
+/* harmony import */ var fluent_react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(52);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var _rich_text_strings__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(9);
-/* harmony import */ var _template_utils__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(19);
+/* harmony import */ var _rich_text_strings__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(54);
+/* harmony import */ var _template_utils__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(18);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -2912,10 +2842,11 @@ function convertLinks(links, sendClick, doNotAutoBlock, openNewWindow = false) {
       } = links[linkTag]; // Setting the value to false will not include the attribute in the anchor
 
       const url = action ? false : Object(_template_utils__WEBPACK_IMPORTED_MODULE_3__["safeURI"])(links[linkTag].url);
-      acc[linkTag] = react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
-        href: url // eslint-disable-line jsx-a11y/anchor-has-content
-        // eslint was getting a false positive caused by the dynamic injection of content.
-        ,
+      acc[linkTag] = // eslint was getting a false positive caused by the dynamic injection
+      // of content.
+      // eslint-disable-next-line jsx-a11y/anchor-has-content
+      react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
+        href: url,
         target: openNewWindow ? "_blank" : "",
         "data-metric": links[linkTag].metric,
         "data-action": action,
@@ -2944,7 +2875,7 @@ function RichText(props) {
 }
 
 /***/ }),
-/* 19 */
+/* 18 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -2968,37 +2899,37 @@ function safeURI(url) {
 }
 
 /***/ }),
+/* 19 */
+/***/ (function(module) {
+
+module.exports = {"title":"EOYSnippet","description":"Fundraising Snippet","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"donation_form_url":{"type":"string","description":"Url to the donation form."},"currency_code":{"type":"string","description":"The code for the currency. Examle gbp, cad, usd.","default":"usd"},"locale":{"type":"string","description":"String for the locale code.","default":"en-US"},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"text_color":{"type":"string","description":"Modify the text message color"},"background_color":{"type":"string","description":"Snippet background color."},"highlight_color":{"type":"string","description":"Paragraph em highlight color."},"donation_amount_first":{"type":"number","description":"First button amount."},"donation_amount_second":{"type":"number","description":"Second button amount."},"donation_amount_third":{"type":"number","description":"Third button amount."},"donation_amount_fourth":{"type":"number","description":"Fourth button amount."},"selected_button":{"type":"string","description":"Default donation_amount_second. Donation amount button that's selected by default.","default":"donation_amount_second"},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"icon_alt_text":{"type":"string","description":"Alt text for accessibility","default":""},"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button."},"monthly_checkbox_label_text":{"type":"string","description":"Label text for monthly checkbox.","default":"Make my donation monthly"},"test":{"type":"string","description":"Different styles for the snippet. Options are bold and takeover."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}}},"additionalProperties":false,"required":["text","donation_form_url","donation_amount_first","donation_amount_second","donation_amount_third","donation_amount_fourth","button_label","currency_code"],"dependencies":{"button_color":["button_label"],"button_background_color":["button_label"]}};
+
+/***/ }),
 /* 20 */
 /***/ (function(module) {
 
-module.exports = {"title":"EOYSnippet","description":"Fundraising Snippet","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"donation_form_url":{"type":"string","description":"Url to the donation form."},"currency_code":{"type":"string","description":"The code for the currency. Examle gbp, cad, usd.","default":"usd"},"locale":{"type":"string","description":"String for the locale code.","default":"en-US"},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"text_color":{"type":"string","description":"Modify the text message color"},"background_color":{"type":"string","description":"Snippet background color."},"highlight_color":{"type":"string","description":"Paragraph em highlight color."},"donation_amount_first":{"type":"number","description":"First button amount."},"donation_amount_second":{"type":"number","description":"Second button amount."},"donation_amount_third":{"type":"number","description":"Third button amount."},"donation_amount_fourth":{"type":"number","description":"Fourth button amount."},"selected_button":{"type":"string","description":"Default donation_amount_second. Donation amount button that's selected by default.","default":"donation_amount_second"},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button."},"monthly_checkbox_label_text":{"type":"string","description":"Label text for monthly checkbox.","default":"Make my donation monthly"},"test":{"type":"string","description":"Different styles for the snippet. Options are bold and takeover."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}}},"additionalProperties":false,"required":["text","donation_form_url","donation_amount_first","donation_amount_second","donation_amount_third","donation_amount_fourth","button_label","currency_code"],"dependencies":{"button_color":["button_label"],"button_background_color":["button_label"]}};
+module.exports = {"title":"SimpleSnippet","description":"A simple template with an icon, text, and optional button.","version":"1.1.1","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"icon_dark_theme":{"type":"string","description":"Snippet icon, dark theme variant. 64x64px. SVG or PNG preferred."},"icon_alt_text":{"type":"string","description":"Alt text describing icon for screen readers","default":""},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"title_icon_alt_text":{"type":"string","description":"Alt text describing title icon for screen readers","default":""},"button_action":{"type":"string","description":"The type of action the button should trigger."},"button_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, button_label links to this"}]},"button_action_args":{"type":"string","description":"Additional parameters for button action, example which specific menu the button should open"},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button.","default":"Remove this"},"tall":{"type":"boolean","description":"To be used by fundraising only, increases height to roughly 120px. Defaults to false."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}},"section_title_icon":{"type":"string","description":"Section title icon. 16x16px. SVG or PNG preferred. section_title_text must also be specified to display."},"section_title_icon_dark_theme":{"type":"string","description":"Section title icon, dark theme variant. 16x16px. SVG or PNG preferred. section_title_text must also be specified to display."},"section_title_text":{"type":"string","description":"Section title text. section_title_icon must also be specified to display."},"section_title_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, section_title_text links to this"}]}},"additionalProperties":false,"required":["text"],"dependencies":{"button_action":["button_label"],"button_url":["button_label"],"button_color":["button_label"],"button_background_color":["button_label"],"section_title_url":["section_title_text"]}};
 
 /***/ }),
 /* 21 */
 /***/ (function(module) {
 
-module.exports = {"title":"SimpleSnippet","description":"A simple template with an icon, text, and optional button.","version":"1.1.1","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Snippet title displayed before snippet text"}]},"text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"icon_dark_theme":{"type":"string","description":"Snippet icon, dark theme variant. 64x64px. SVG or PNG preferred."},"title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"button_action":{"type":"string","description":"The type of action the button should trigger."},"button_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, button_label links to this"}]},"button_action_args":{"type":"string","description":"Additional parameters for button action, example which specific menu the button should open"},"button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}]},"button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"block_button_text":{"type":"string","description":"Tooltip text used for dismiss button.","default":"Remove this"},"tall":{"type":"boolean","description":"To be used by fundraising only, increases height to roughly 120px. Defaults to false."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."},"args":{"type":"string","description":"Additional parameters for link action, example which specific menu the button should open"}}},"section_title_icon":{"type":"string","description":"Section title icon. 16x16px. SVG or PNG preferred. section_title_text must also be specified to display."},"section_title_icon_dark_theme":{"type":"string","description":"Section title icon, dark theme variant. 16x16px. SVG or PNG preferred. section_title_text must also be specified to display."},"section_title_text":{"type":"string","description":"Section title text. section_title_icon must also be specified to display."},"section_title_url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"A url, section_title_text links to this"}]}},"additionalProperties":false,"required":["text"],"dependencies":{"button_action":["button_label"],"button_url":["button_label"],"button_color":["button_label"],"button_background_color":["button_label"],"section_title_url":["section_title_text"]}};
+module.exports = {"title":"FXASignupSnippet","description":"A snippet template for FxA sign up/sign in","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"number","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
 /* 22 */
 /***/ (function(module) {
 
-module.exports = {"title":"FXASignupSnippet","description":"A snippet template for FxA sign up/sign in","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"number","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
+module.exports = {"title":"NewsletterSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_privacy_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"fmt":{"type":"string","description":"","default":"H"}}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"scene2_newsletter":{"type":"string","description":"Newsletter/basket id user is subscribing to.","default":"mozilla-foundation"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
 /* 23 */
 /***/ (function(module) {
 
-module.exports = {"title":"NewsletterSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_privacy_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"fmt":{"type":"string","description":"","default":"H"}}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"scene2_newsletter":{"type":"string","description":"Newsletter/basket id user is subscribing to.","default":"mozilla-foundation"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
-
-/***/ }),
-/* 24 */
-/***/ (function(module) {
-
 module.exports = {"title":"SendToDeviceSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"country":{"type":"string","description":"Two character string for the country code (used for SMS)","default":"us"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene2_icon":{"type":"string","description":"(send to device) Image to display above the form. Dark theme variant. 98x98px. SVG or PNG preferred."},"scene2_icon_dark_theme":{"type":"string","description":"(send to device) Image to display above the form. 98x98px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Send"},"scene2_input_placeholder":{"type":"string","description":"(send to device) Value to show while input is empty.","default":"Your email here"},"scene2_disclaimer_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"string","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_title":{"type":"string","description":"(send to device) Title shown before text on successful registration."},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"include_sms":{"type":"boolean","description":"(send to device) Allow users to send an SMS message with the form?","default":false},"message_id_sms":{"type":"string","description":"(send to device) Newsletter/basket id representing the SMS message to be sent."},"message_id_email":{"type":"string","description":"(send to device) Newsletter/basket id representing the email message to be sent. Must be a value from the 'Slug' column here: https://basket.mozilla.org/news/."},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
-/* 25 */
+/* 24 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3008,9 +2939,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
 
 
@@ -3305,13 +3236,13 @@ const getState = state => ({
 const StartupOverlay = Object(react_redux__WEBPACK_IMPORTED_MODULE_2__["connect"])(getState)(Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(_StartupOverlay));
 
 /***/ }),
-/* 26 */
+/* 25 */
 /***/ (function(module, exports) {
 
 module.exports = ReactRedux;
 
 /***/ }),
-/* 27 */
+/* 26 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3321,9 +3252,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var _components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(15);
-/* harmony import */ var _OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(14);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(11);
+/* harmony import */ var _components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(14);
+/* harmony import */ var _OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(13);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_4__);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
@@ -3368,11 +3299,15 @@ class _Trailhead extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompon
       link.href = file;
       link.rel = "localization";
     });
+    await this.componentWillUpdate(this.props);
+  } // Get the fxa data if we don't have it yet from mount or update
 
-    if (this.props.fxaEndpoint && !this.fxaMetricsInitialized) {
+
+  async componentWillUpdate(props) {
+    if (props.fxaEndpoint && !this.fxaMetricsInitialized) {
       try {
         this.fxaMetricsInitialized = true;
-        const url = new URL(`${this.props.fxaEndpoint}/metrics-flow?entrypoint=activity-stream-firstrun&form_type=email`);
+        const url = new URL(`${props.fxaEndpoint}/metrics-flow?entrypoint=activity-stream-firstrun&form_type=email`);
         this.addUtmParams(url);
         const response = await fetch(url, {
           credentials: "omit"
@@ -3390,7 +3325,7 @@ class _Trailhead extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompon
             flowBeginTime
           });
         } else {
-          this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+          props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
             type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TELEMETRY_UNDESIRED_EVENT,
             data: {
               event: "FXA_METRICS_FETCH_ERROR",
@@ -3399,7 +3334,7 @@ class _Trailhead extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureCompon
           }));
         }
       } catch (error) {
-        this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
+        props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].OnlyToMain({
           type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TELEMETRY_UNDESIRED_EVENT,
           data: {
             event: "FXA_METRICS_ERROR"
@@ -3749,13 +3684,13 @@ const Trailhead = Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 28 */
+/* 27 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SimpleHashRouter", function() { return SimpleHashRouter; });
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 
 class SimpleHashRouter extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
@@ -3795,7 +3730,7 @@ class SimpleHashRouter extends react__WEBPACK_IMPORTED_MODULE_0___default.a.Pure
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 29 */
+/* 28 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3803,11 +3738,11 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_ConfirmDialog", function() { return _ConfirmDialog; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ConfirmDialog", function() { return ConfirmDialog; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_1__);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
 
 
@@ -3877,7 +3812,8 @@ class _ConfirmDialog extends react__WEBPACK_IMPORTED_MODULE_3___default.a.PureCo
       className: "confirmation-dialog"
     }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("div", {
       className: "modal-overlay",
-      onClick: this._handleCancelBtn
+      onClick: this._handleCancelBtn,
+      role: "presentation"
     }), react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("div", {
       className: "modal"
     }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("section", {
@@ -3902,43 +3838,7 @@ class _ConfirmDialog extends react__WEBPACK_IMPORTED_MODULE_3___default.a.PureCo
 const ConfirmDialog = Object(react_redux__WEBPACK_IMPORTED_MODULE_1__["connect"])(state => state.Dialog)(_ConfirmDialog);
 
 /***/ }),
-/* 30 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "clampTotalLines", function() { return clampTotalLines; });
-/**
- * Adjusts line-clamps of a node's children to fill a desired number of lines.
- *
- * This is a React callback ref that should be set on a parent node that also
- * has a data-total-lines attribute. Children with "clamp" class name are
- * clamped to allow as many lines to earlier children while making sure every
- * child gets at least one line. Each child can be explicitly clamped to a max
- * lines with a data-clamp attribute.
- */
-function clampTotalLines(parentNode) {
-  // Nothing to do if the node is removed or didn't configure how many lines
-  if (!parentNode || !parentNode.dataset.totalLines) {
-    return;
-  } // Only handle clamp-able children that are displayed (not hidden)
-
-
-  const toClamp = Array.from(parentNode.querySelectorAll(".clamp")).filter(child => child.scrollHeight); // Start with total allowed lines while reserving 1 line for each child
-
-  let maxLines = parentNode.dataset.totalLines - toClamp.length + 1;
-  toClamp.forEach(child => {
-    // Clamp to the remaining allowed, explicit limit or the natural line count
-    const lines = Math.min(maxLines, child.dataset.clamp || Infinity, child.scrollHeight / parseInt(global.getComputedStyle(child).lineHeight, 10));
-    child.style.webkitLineClamp = `${lines}`; // Update the remaining line allowance less the already reserved 1 line
-
-    maxLines -= lines - 1;
-  });
-}
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
-
-/***/ }),
-/* 31 */
+/* 29 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -3946,13 +3846,13 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_LinkMenu", function() { return _LinkMenu; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "LinkMenu", function() { return LinkMenu; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var content_src_components_ContextMenu_ContextMenu__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(32);
+/* harmony import */ var content_src_components_ContextMenu_ContextMenu__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(30);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_3__);
-/* harmony import */ var content_src_lib_link_menu_options__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(33);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(11);
+/* harmony import */ var content_src_lib_link_menu_options__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(31);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_5__);
 
 
@@ -4037,14 +3937,14 @@ const getState = state => ({
 const LinkMenu = Object(react_redux__WEBPACK_IMPORTED_MODULE_1__["connect"])(getState)(Object(react_intl__WEBPACK_IMPORTED_MODULE_3__["injectIntl"])(_LinkMenu));
 
 /***/ }),
-/* 32 */
+/* 30 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ContextMenu", function() { return ContextMenu; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ContextMenuItem", function() { return ContextMenuItem; });
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 
 class ContextMenu extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
@@ -4084,20 +3984,25 @@ class ContextMenu extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureCompo
   }
 
   render() {
-    return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", {
-      className: "context-menu",
-      onClick: this.onClick
-    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("ul", {
-      role: "menu",
-      className: "context-menu-list"
-    }, this.props.options.map((option, i) => option.type === "separator" ? react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("li", {
-      key: i,
-      className: "separator"
-    }) : option.type !== "empty" && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(ContextMenuItem, {
-      key: i,
-      option: option,
-      hideContext: this.hideContext
-    }))));
+    // Disabling focus on the menu span allows the first tab to focus on the first menu item instead of the wrapper.
+    return (// eslint-disable-next-line jsx-a11y/interactive-supports-focus
+      react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", {
+        role: "menu",
+        className: "context-menu",
+        onClick: this.onClick,
+        onKeyDown: this.onClick
+      }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("ul", {
+        className: "context-menu-list"
+      }, this.props.options.map((option, i) => option.type === "separator" ? react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("li", {
+        key: i,
+        className: "separator"
+      }) : option.type !== "empty" && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(ContextMenuItem, {
+        key: i,
+        option: option,
+        hideContext: this.hideContext,
+        tabIndex: "0"
+      }))))
+    );
   }
 
 }
@@ -4111,6 +4016,22 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
   onClick() {
     this.props.hideContext();
     this.props.option.onClick();
+  } // This selects the correct node based on the key pressed
+
+
+  focusSibling(target, key) {
+    const parent = target.parentNode;
+    const closestSiblingSelector = key === "ArrowUp" ? "previousSibling" : "nextSibling";
+
+    if (!parent[closestSiblingSelector]) {
+      return;
+    }
+
+    if (parent[closestSiblingSelector].firstElementChild) {
+      parent[closestSiblingSelector].firstElementChild.focus();
+    } else {
+      parent[closestSiblingSelector][closestSiblingSelector].firstElementChild.focus();
+    }
   }
 
   onKeyDown(event) {
@@ -4129,9 +4050,19 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
 
         break;
 
+      case "ArrowUp":
+      case "ArrowDown":
+        event.preventDefault();
+        this.focusSibling(event.target, event.key);
+        break;
+
       case "Enter":
         this.props.hideContext();
         option.onClick();
+        break;
+
+      case "Escape":
+        this.props.hideContext();
         break;
     }
   }
@@ -4143,11 +4074,11 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
     return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("li", {
       role: "menuitem",
       className: "context-menu-item"
-    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("a", {
-      onClick: this.onClick,
-      onKeyDown: this.onKeyDown,
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+      className: option.disabled ? "disabled" : "",
       tabIndex: "0",
-      className: option.disabled ? "disabled" : ""
+      onClick: this.onClick,
+      onKeyDown: this.onKeyDown
     }, option.icon && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", {
       className: `icon icon-spacer icon-${option.icon}`
     }), option.label));
@@ -4157,7 +4088,7 @@ class ContextMenuItem extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureC
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 33 */
+/* 31 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4258,7 +4189,10 @@ const LinkMenuOptions = {
       block: 0,
       tiles: [{
         id: site.guid,
-        pos: index
+        pos: index,
+        ...(site.shim && site.shim.delete ? {
+          shim: site.shim.delete
+        } : {})
       }]
     }),
     userEvent: "BLOCK"
@@ -4405,7 +4339,10 @@ const LinkMenuOptions = {
       pocket: 0,
       tiles: [{
         id: site.guid,
-        pos: index
+        pos: index,
+        ...(site.shim && site.shim.save ? {
+          shim: site.shim.save
+        } : {})
       }]
     }),
     userEvent: "SAVE_TO_POCKET"
@@ -4450,7 +4387,7 @@ const LinkMenuOptions = {
 };
 
 /***/ }),
-/* 34 */
+/* 32 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4458,7 +4395,7 @@ __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "INTERSECTION_RATIO", function() { return INTERSECTION_RATIO; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ImpressionStats", function() { return ImpressionStats; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
 
 
@@ -4523,7 +4460,10 @@ class ImpressionStats extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureC
         source: props.source.toUpperCase(),
         tiles: cards.map(link => ({
           id: link.id,
-          pos: link.pos
+          pos: link.pos,
+          ...(link.shim ? {
+            shim: link.shim
+          } : {})
         }))
       }));
       this.impressionCardGuids = cards.map(link => link.id);
@@ -4671,7 +4611,7 @@ ImpressionStats.defaultProps = {
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 35 */
+/* 33 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -4681,11 +4621,11 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(2);
-/* harmony import */ var content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(36);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(11);
+/* harmony import */ var content_src_components_ErrorBoundary_ErrorBoundary__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(34);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
-/* harmony import */ var content_src_components_SectionMenu_SectionMenu__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(37);
-/* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(38);
+/* harmony import */ var content_src_components_SectionMenu_SectionMenu__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(36);
+/* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(37);
 
 
 
@@ -4704,6 +4644,7 @@ class _CollapsibleSection extends react__WEBPACK_IMPORTED_MODULE_3___default.a.P
     super(props);
     this.onBodyMount = this.onBodyMount.bind(this);
     this.onHeaderClick = this.onHeaderClick.bind(this);
+    this.onKeyPress = this.onKeyPress.bind(this);
     this.onTransitionEnd = this.onTransitionEnd.bind(this);
     this.enableOrDisableAnimation = this.enableOrDisableAnimation.bind(this);
     this.onMenuButtonClick = this.onMenuButtonClick.bind(this);
@@ -4787,6 +4728,12 @@ class _CollapsibleSection extends react__WEBPACK_IMPORTED_MODULE_3___default.a.P
       event: userEvent,
       source: this.props.source
     }));
+  }
+
+  onKeyPress(event) {
+    if (event.key === "Enter" || event.key === " ") {
+      this.onHeaderClick();
+    }
   }
 
   _getSectionBodyHeight() {
@@ -4893,7 +4840,8 @@ class _CollapsibleSection extends react__WEBPACK_IMPORTED_MODULE_3___default.a.P
     }
 
     return react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("section", {
-      className: `collapsible-section ${this.props.className}${enableAnimation ? " animation-enabled" : ""}${collapsed ? " collapsed" : ""}${active ? " active" : ""}` // Note: data-section-id is used for web extension api tests in mozilla central
+      className: `collapsible-section ${this.props.className}${enableAnimation ? " animation-enabled" : ""}${collapsed ? " collapsed" : ""}${active ? " active" : ""}`,
+      "aria-expanded": !collapsed // Note: data-section-id is used for web extension api tests in mozilla central
       ,
       "data-section-id": id
     }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("div", {
@@ -4904,9 +4852,15 @@ class _CollapsibleSection extends react__WEBPACK_IMPORTED_MODULE_3___default.a.P
       className: "click-target-container"
     }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("span", {
       className: "click-target",
+      role: "button",
+      tabIndex: "0",
+      onKeyPress: this.onKeyPress,
       onClick: this.onHeaderClick
     }, this.renderIcon(), getFormattedMessage(title)), react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("span", {
       className: "click-target",
+      role: "button",
+      tabIndex: "0",
+      onKeyPress: this.onKeyPress,
       onClick: this.onHeaderClick
     }, isCollapsible && react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("span", {
       className: `collapsible-arrow icon ${collapsed ? "icon-arrowhead-forward-small" : "icon-arrowhead-down-small"}`
@@ -4919,6 +4873,7 @@ class _CollapsibleSection extends react__WEBPACK_IMPORTED_MODULE_3___default.a.P
     }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
       id: learnMore.link.id
     })))))), react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("button", {
+      "aria-haspopup": "true",
       className: "context-menu-button icon",
       title: this.props.intl.formatMessage({
         id: "context_menu_title"
@@ -4967,20 +4922,22 @@ const CollapsibleSection = Object(react_intl__WEBPACK_IMPORTED_MODULE_0__["injec
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 36 */
+/* 34 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ErrorBoundaryFallback", function() { return ErrorBoundaryFallback; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ErrorBoundary", function() { return ErrorBoundary; });
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var content_src_components_A11yLinkButton_A11yLinkButton__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(35);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
 
 
-class ErrorBoundaryFallback extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
+
+class ErrorBoundaryFallback extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.windowObj = this.props.windowObj || window;
@@ -5004,19 +4961,18 @@ class ErrorBoundaryFallback extends react__WEBPACK_IMPORTED_MODULE_1___default.a
       className = `${this.props.className} ${defaultClass}`;
     } else {
       className = defaultClass;
-    } // href="#" to force normal link styling stuff (eg cursor on hover)
+    } // "A11yLinkButton" to force normal link styling stuff (eg cursor on hover)
 
 
-    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("div", {
+    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("div", {
       className: className
-    }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
+    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
       defaultMessage: "Oops, something went wrong loading this content.",
       id: "error_fallback_default_info"
-    })), react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
-      href: "#",
+    })), react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(content_src_components_A11yLinkButton_A11yLinkButton__WEBPACK_IMPORTED_MODULE_0__["A11yLinkButton"], {
       className: "reload-button",
       onClick: this.onClick
-    }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
+    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
       defaultMessage: "Refresh page to try again.",
       id: "error_fallback_default_refresh_suggestion"
     }))));
@@ -5026,7 +4982,7 @@ class ErrorBoundaryFallback extends react__WEBPACK_IMPORTED_MODULE_1___default.a
 ErrorBoundaryFallback.defaultProps = {
   className: "as-error-fallback"
 };
-class ErrorBoundary extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
+class ErrorBoundary extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.state = {
@@ -5045,7 +5001,7 @@ class ErrorBoundary extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureCom
       return this.props.children;
     }
 
-    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(this.props.FallbackComponent, {
+    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(this.props.FallbackComponent, {
       className: this.props.className
     });
   }
@@ -5056,7 +5012,34 @@ ErrorBoundary.defaultProps = {
 };
 
 /***/ }),
-/* 37 */
+/* 35 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "A11yLinkButton", function() { return A11yLinkButton; });
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
+function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
+
+
+function A11yLinkButton(props) {
+  // function for merging classes, if necessary
+  let className = "a11y-link-button";
+
+  if (props.className) {
+    className += ` ${props.className}`;
+  }
+
+  return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", _extends({
+    type: "button"
+  }, props, {
+    className: className
+  }), props.children);
+}
+
+/***/ }),
+/* 36 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -5064,12 +5047,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_SectionMenu", function() { return _SectionMenu; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SectionMenu", function() { return SectionMenu; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var content_src_components_ContextMenu_ContextMenu__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(32);
+/* harmony import */ var content_src_components_ContextMenu_ContextMenu__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(30);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_3__);
-/* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(38);
+/* harmony import */ var content_src_lib_section_menu_options__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(37);
 
 
 
@@ -5144,7 +5127,7 @@ class _SectionMenu extends react__WEBPACK_IMPORTED_MODULE_3___default.a.PureComp
 const SectionMenu = Object(react_intl__WEBPACK_IMPORTED_MODULE_2__["injectIntl"])(_SectionMenu);
 
 /***/ }),
-/* 38 */
+/* 37 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -5271,27 +5254,29 @@ const SectionMenuOptions = {
 };
 
 /***/ }),
-/* 39 */
+/* 38 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_TopSites", function() { return _TopSites; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSites", function() { return TopSites; });
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Section", function() { return Section; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SectionIntl", function() { return SectionIntl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_Sections", function() { return _Sections; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Sections", function() { return Sections; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(40);
-/* harmony import */ var content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(35);
-/* harmony import */ var content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(41);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(26);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_5__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_6__);
-/* harmony import */ var _SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(43);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(58);
-/* harmony import */ var _TopSiteForm__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(57);
-/* harmony import */ var _TopSite__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(44);
+/* harmony import */ var content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(56);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_2__);
+/* harmony import */ var content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(33);
+/* harmony import */ var content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(40);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(25);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_5__);
+/* harmony import */ var content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(42);
+/* harmony import */ var content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(43);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
+/* harmony import */ var content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(44);
+/* harmony import */ var content_src_components_TopSites_TopSites__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(45);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -5305,199 +5290,404 @@ function _extends() { _extends = Object.assign || function (target) { for (var i
 
 
 
+const VISIBLE = "visible";
+const VISIBILITY_CHANGE_EVENT = "visibilitychange";
+const CARDS_PER_ROW_DEFAULT = 3;
+const CARDS_PER_ROW_COMPACT_WIDE = 4;
 
-function topSiteIconType(link) {
-  if (link.customScreenshotURL) {
-    return "custom_screenshot";
-  }
-
-  if (link.tippyTopIcon || link.faviconRef === "tippytop") {
-    return "tippytop";
-  }
-
-  if (link.faviconSize >= _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["MIN_RICH_FAVICON_SIZE"]) {
-    return "rich_icon";
-  }
-
-  if (link.screenshot && link.faviconSize >= _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["MIN_CORNER_FAVICON_SIZE"]) {
-    return "screenshot_with_icon";
-  }
-
-  if (link.screenshot) {
-    return "screenshot";
-  }
-
-  return "no_image";
-}
-/**
- * Iterates through TopSites and counts types of images.
- * @param acc Accumulator for reducer.
- * @param topsite Entry in TopSites.
- */
-
-
-function countTopSitesIconsTypes(topSites) {
-  const countTopSitesTypes = (acc, link) => {
-    acc[topSiteIconType(link)]++;
-    return acc;
-  };
-
-  return topSites.reduce(countTopSitesTypes, {
-    "custom_screenshot": 0,
-    "screenshot_with_icon": 0,
-    "screenshot": 0,
-    "tippytop": 0,
-    "rich_icon": 0,
-    "no_image": 0
-  });
+function getFormattedMessage(message) {
+  return typeof message === "string" ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", null, message) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_2__["FormattedMessage"], message);
 }
 
-class _TopSites extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureComponent {
-  constructor(props) {
-    super(props);
-    this.onEditFormClose = this.onEditFormClose.bind(this);
-    this.onSearchShortcutsFormClose = this.onSearchShortcutsFormClose.bind(this);
+class Section extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
+  get numRows() {
+    const {
+      rowsPref,
+      maxRows,
+      Prefs
+    } = this.props;
+    return rowsPref ? Prefs.values[rowsPref] : maxRows;
   }
-  /**
-   * Dispatch session statistics about the quality of TopSites icons and pinned count.
-   */
 
+  _dispatchImpressionStats() {
+    const {
+      props
+    } = this;
+    let cardsPerRow = CARDS_PER_ROW_DEFAULT;
 
-  _dispatchTopSitesStats() {
-    const topSites = this._getVisibleTopSites();
-
-    const topSitesIconsStats = countTopSitesIconsTypes(topSites);
-    const topSitesPinned = topSites.filter(site => !!site.isPinned).length;
-    const searchShortcuts = topSites.filter(site => !!site.searchTopSite).length; // Dispatch telemetry event with the count of TopSites images types.
-
-    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].SAVE_SESSION_PERF_DATA,
-      data: {
-        topsites_icon_stats: topSitesIconsStats,
-        topsites_pinned: topSitesPinned,
-        topsites_search_shortcuts: searchShortcuts
-      }
-    }));
-  }
-  /**
-   * Return the TopSites that are visible based on prefs and window width.
-   */
-
-
-  _getVisibleTopSites() {
-    // We hide 2 sites per row when not in the wide layout.
-    let sitesPerRow = common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_8__["TOP_SITES_MAX_SITES_PER_ROW"]; // $break-point-widest = 1072px (from _variables.scss)
-
-    if (!global.matchMedia(`(min-width: 1072px)`).matches) {
-      sitesPerRow -= 2;
+    if (props.compactCards && global.matchMedia(`(min-width: 1072px)`).matches) {
+      // If the section has compact cards and the viewport is wide enough, we show
+      // 4 columns instead of 3.
+      // $break-point-widest = 1072px (from _variables.scss)
+      cardsPerRow = CARDS_PER_ROW_COMPACT_WIDE;
     }
 
-    return this.props.TopSites.rows.slice(0, this.props.TopSitesRows * sitesPerRow);
+    const maxCards = cardsPerRow * this.numRows;
+    const cards = props.rows.slice(0, maxCards);
+
+    if (this.needsImpressionStats(cards)) {
+      props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].ImpressionStats({
+        source: props.eventSource,
+        tiles: cards.map(link => ({
+          id: link.guid
+        }))
+      }));
+      this.impressionCardGuids = cards.map(link => link.guid);
+    }
+  } // This sends an event when a user sees a set of new content. If content
+  // changes while the page is hidden (i.e. preloaded or on a hidden tab),
+  // only send the event if the page becomes visible again.
+
+
+  sendImpressionStatsOrAddListener() {
+    const {
+      props
+    } = this;
+
+    if (!props.shouldSendImpressionStats || !props.dispatch) {
+      return;
+    }
+
+    if (props.document.visibilityState === VISIBLE) {
+      this._dispatchImpressionStats();
+    } else {
+      // We should only ever send the latest impression stats ping, so remove any
+      // older listeners.
+      if (this._onVisibilityChange) {
+        props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+      } // When the page becomes visible, send the impression stats ping if the section isn't collapsed.
+
+
+      this._onVisibilityChange = () => {
+        if (props.document.visibilityState === VISIBLE) {
+          if (!this.props.pref.collapsed) {
+            this._dispatchImpressionStats();
+          }
+
+          props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+        }
+      };
+
+      props.document.addEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+    }
   }
 
-  componentDidUpdate() {
-    this._dispatchTopSitesStats();
+  componentWillMount() {
+    this.sendNewTabRehydrated(this.props.initialized);
   }
 
   componentDidMount() {
-    this._dispatchTopSitesStats();
+    if (this.props.rows.length && !this.props.pref.collapsed) {
+      this.sendImpressionStatsOrAddListener();
+    }
   }
 
-  onEditFormClose() {
-    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
-      source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
-      event: "TOP_SITES_EDIT_CLOSE"
-    }));
-    this.props.dispatch({
-      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CANCEL_EDIT
-    });
+  componentDidUpdate(prevProps) {
+    const {
+      props
+    } = this;
+    const isCollapsed = props.pref.collapsed;
+    const wasCollapsed = prevProps.pref.collapsed;
+
+    if ( // Don't send impression stats for the empty state
+    props.rows.length && ( // We only want to send impression stats if the content of the cards has changed
+    // and the section is not collapsed...
+    props.rows !== prevProps.rows && !isCollapsed || // or if we are expanding a section that was collapsed.
+    wasCollapsed && !isCollapsed)) {
+      this.sendImpressionStatsOrAddListener();
+    }
   }
 
-  onSearchShortcutsFormClose() {
-    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
-      source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
-      event: "SEARCH_EDIT_CLOSE"
-    }));
-    this.props.dispatch({
-      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL
-    });
+  componentWillUpdate(nextProps) {
+    this.sendNewTabRehydrated(nextProps.initialized);
+  }
+
+  componentWillUnmount() {
+    if (this._onVisibilityChange) {
+      this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
+    }
+  }
+
+  needsImpressionStats(cards) {
+    if (!this.impressionCardGuids || this.impressionCardGuids.length !== cards.length) {
+      return true;
+    }
+
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i].guid !== this.impressionCardGuids[i]) {
+        return true;
+      }
+    }
+
+    return false;
+  } // The NEW_TAB_REHYDRATED event is used to inform feeds that their
+  // data has been consumed e.g. for counting the number of tabs that
+  // have rendered that data.
+
+
+  sendNewTabRehydrated(initialized) {
+    if (initialized && !this.renderNotified) {
+      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
+        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_REHYDRATED,
+        data: {}
+      }));
+      this.renderNotified = true;
+    }
   }
 
   render() {
     const {
-      props
-    } = this;
+      id,
+      eventSource,
+      title,
+      icon,
+      rows,
+      Pocket,
+      topics,
+      emptyState,
+      dispatch,
+      compactCards,
+      read_more_endpoint,
+      contextMenuOptions,
+      initialized,
+      learnMore,
+      pref,
+      privacyNoticeURL,
+      isFirst,
+      isLast
+    } = this.props;
+    const waitingForSpoc = id === "topstories" && this.props.Pocket.waitingForSpoc;
+    const maxCardsPerRow = compactCards ? CARDS_PER_ROW_COMPACT_WIDE : CARDS_PER_ROW_DEFAULT;
     const {
-      editForm,
-      showSearchShortcutsForm
-    } = props.TopSites;
-    const extraMenuOptions = ["AddTopSite"];
+      numRows
+    } = this;
+    const maxCards = maxCardsPerRow * numRows;
+    const maxCardsOnNarrow = CARDS_PER_ROW_DEFAULT * numRows;
+    const {
+      pocketCta,
+      isUserLoggedIn
+    } = Pocket || {};
+    const {
+      useCta
+    } = pocketCta || {}; // Don't display anything until we have a definitve result from Pocket,
+    // to avoid a flash of logged out state while we render.
 
-    if (props.Prefs.values["improvesearch.topSiteSearchShortcuts"]) {
-      extraMenuOptions.push("AddSearchShortcut");
+    const isPocketLoggedInDefined = isUserLoggedIn === true || isUserLoggedIn === false;
+    const hasTopics = topics && topics.length > 0;
+    const shouldShowPocketCta = id === "topstories" && useCta && isUserLoggedIn === false; // Show topics only for top stories and if it has loaded with topics.
+    // The classs .top-stories-bottom-container ensures content doesn't shift as things load.
+
+    const shouldShowTopics = id === "topstories" && hasTopics && (useCta && isUserLoggedIn === true || !useCta && isPocketLoggedInDefined); // We use topics to determine language support for read more.
+
+    const shouldShowReadMore = read_more_endpoint && hasTopics;
+    const realRows = rows.slice(0, maxCards); // The empty state should only be shown after we have initialized and there is no content.
+    // Otherwise, we should show placeholders.
+
+    const shouldShowEmptyState = initialized && !rows.length;
+    const cards = [];
+
+    if (!shouldShowEmptyState) {
+      for (let i = 0; i < maxCards; i++) {
+        const link = realRows[i]; // On narrow viewports, we only show 3 cards per row. We'll mark the rest as
+        // .hide-for-narrow to hide in CSS via @media query.
+
+        const className = i >= maxCardsOnNarrow ? "hide-for-narrow" : "";
+        let usePlaceholder = !link; // If we are in the third card and waiting for spoc,
+        // use the placeholder.
+
+        if (!usePlaceholder && i === 2 && waitingForSpoc) {
+          usePlaceholder = true;
+        }
+
+        cards.push(!usePlaceholder ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__["Card"], {
+          key: i,
+          index: i,
+          className: className,
+          dispatch: dispatch,
+          link: link,
+          contextMenuOptions: contextMenuOptions,
+          eventSource: eventSource,
+          shouldSendImpressionStats: this.props.shouldSendImpressionStats,
+          isWebExtension: this.props.isWebExtension
+        }) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__["PlaceholderCard"], {
+          key: i,
+          className: className
+        }));
+      }
     }
 
-    return react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_3__["ComponentPerfTimer"], {
-      id: "topsites",
-      initialized: props.TopSites.initialized,
-      dispatch: props.dispatch
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_2__["CollapsibleSection"], {
-      className: "top-sites",
-      icon: "topsites",
-      id: "topsites",
-      title: this.props.title || {
-        id: "header_top_sites"
-      },
-      extraMenuOptions: extraMenuOptions,
-      showPrefName: "feeds.topsites",
-      eventSource: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
-      collapsed: props.TopSites.pref ? props.TopSites.pref.collapsed : undefined,
-      isFixed: props.isFixed,
-      isFirst: props.isFirst,
-      isLast: props.isLast,
-      dispatch: props.dispatch
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSite__WEBPACK_IMPORTED_MODULE_10__["TopSiteList"], {
-      TopSites: props.TopSites,
-      TopSitesRows: props.TopSitesRows,
-      dispatch: props.dispatch,
-      intl: props.intl,
-      topSiteIconType: topSiteIconType
-    }), react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "edit-topsites-wrapper"
-    }, editForm && react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "edit-topsites"
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "modal-overlay",
-      onClick: this.onEditFormClose,
-      role: "presentation"
-    }), react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "modal"
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_TopSiteForm__WEBPACK_IMPORTED_MODULE_9__["TopSiteForm"], _extends({
-      site: props.TopSites.rows[editForm.index],
-      onClose: this.onEditFormClose,
+    const sectionClassName = ["section", compactCards ? "compact-cards" : "normal-cards"].join(" "); // <Section> <-- React component
+    // <section> <-- HTML5 element
+
+    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_4__["ComponentPerfTimer"], this.props, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_3__["CollapsibleSection"], {
+      className: sectionClassName,
+      icon: icon,
+      title: title,
+      id: id,
+      eventSource: eventSource,
+      collapsed: this.props.pref.collapsed,
+      showPrefName: pref && pref.feed || id,
+      privacyNoticeURL: privacyNoticeURL,
+      Prefs: this.props.Prefs,
+      isFixed: this.props.isFixed,
+      isFirst: isFirst,
+      isLast: isLast,
+      learnMore: learnMore,
       dispatch: this.props.dispatch,
-      intl: this.props.intl
-    }, editForm)))), showSearchShortcutsForm && react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "edit-search-shortcuts"
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "modal-overlay",
-      onClick: this.onSearchShortcutsFormClose,
-      role: "presentation"
-    }), react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
-      className: "modal"
-    }, react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement(_SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_7__["SearchShortcutsForm"], {
-      TopSites: props.TopSites,
-      onClose: this.onSearchShortcutsFormClose,
-      dispatch: this.props.dispatch
-    }))))));
+      isWebExtension: this.props.isWebExtension
+    }, !shouldShowEmptyState && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("ul", {
+      className: "section-list",
+      style: {
+        padding: 0
+      }
+    }, cards), shouldShowEmptyState && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "section-empty-state"
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "empty-state"
+    }, emptyState.icon && emptyState.icon.startsWith("moz-extension://") ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", {
+      className: "empty-state-icon icon",
+      style: {
+        "background-image": `url('${emptyState.icon}')`
+      }
+    }) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", {
+      className: `empty-state-icon icon icon-${emptyState.icon}`
+    }), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("p", {
+      className: "empty-state-message"
+    }, getFormattedMessage(emptyState.message)))), id === "topstories" && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "top-stories-bottom-container"
+    }, shouldShowTopics && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "wrapper-topics"
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__["Topics"], {
+      topics: this.props.topics
+    })), shouldShowPocketCta && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "wrapper-cta"
+    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__["PocketLoggedInCta"], null)), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "wrapper-more-recommendations"
+    }, shouldShowReadMore && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__["MoreRecommendations"], {
+      read_more_endpoint: read_more_endpoint
+    })))));
   }
 
 }
-const TopSites = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(state => ({
-  TopSites: state.TopSites,
+Section.defaultProps = {
+  document: global.document,
+  rows: [],
+  emptyState: {},
+  pref: {},
+  title: ""
+};
+const SectionIntl = Object(react_redux__WEBPACK_IMPORTED_MODULE_5__["connect"])(state => ({
   Prefs: state.Prefs,
-  TopSitesRows: state.Prefs.values.topSitesRows
-}))(Object(react_intl__WEBPACK_IMPORTED_MODULE_5__["injectIntl"])(_TopSites));
+  Pocket: state.Pocket
+}))(Object(react_intl__WEBPACK_IMPORTED_MODULE_2__["injectIntl"])(Section));
+class _Sections extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
+  renderSections() {
+    const sections = [];
+    const enabledSections = this.props.Sections.filter(section => section.enabled);
+    const {
+      sectionOrder,
+      "feeds.topsites": showTopSites
+    } = this.props.Prefs.values; // Enabled sections doesn't include Top Sites, so we add it if enabled.
+
+    const expectedCount = enabledSections.length + ~~showTopSites;
+
+    for (const sectionId of sectionOrder.split(",")) {
+      const commonProps = {
+        key: sectionId,
+        isFirst: sections.length === 0,
+        isLast: sections.length === expectedCount - 1
+      };
+
+      if (sectionId === "topsites" && showTopSites) {
+        sections.push(react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_TopSites_TopSites__WEBPACK_IMPORTED_MODULE_10__["TopSites"], commonProps));
+      } else {
+        const section = enabledSections.find(s => s.id === sectionId);
+
+        if (section) {
+          sections.push(react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(SectionIntl, _extends({}, section, commonProps)));
+        }
+      }
+    }
+
+    return sections;
+  }
+
+  render() {
+    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
+      className: "sections-list"
+    }, this.renderSections());
+  }
+
+}
+const Sections = Object(react_redux__WEBPACK_IMPORTED_MODULE_5__["connect"])(state => ({
+  Sections: state.Sections,
+  Prefs: state.Prefs
+}))(_Sections);
+/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
+
+/***/ }),
+/* 39 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ScreenshotUtils", function() { return ScreenshotUtils; });
+/**
+ * List of helper functions for screenshot-based images.
+ *
+ * There are two kinds of images:
+ * 1. Remote Image: This is the image from the main process and it refers to
+ *    the image in the React props. This can either be an object with the `data`
+ *    and `path` properties, if it is a blob, or a string, if it is a normal image.
+ * 2. Local Image: This is the image object in the content process and it refers
+ *    to the image *object* in the React component's state. All local image
+ *    objects have the `url` property, and an additional property `path`, if they
+ *    are blobs.
+ */
+const ScreenshotUtils = {
+  isBlob(isLocal, image) {
+    return !!(image && image.path && (!isLocal && image.data || isLocal && image.url));
+  },
+
+  // This should always be called with a remote image and not a local image.
+  createLocalImageObject(remoteImage) {
+    if (!remoteImage) {
+      return null;
+    }
+
+    if (this.isBlob(false, remoteImage)) {
+      return {
+        url: global.URL.createObjectURL(remoteImage.data),
+        path: remoteImage.path
+      };
+    }
+
+    return {
+      url: remoteImage
+    };
+  },
+
+  // Revokes the object URL of the image if the local image is a blob.
+  // This should always be called with a local image and not a remote image.
+  maybeRevokeBlobObjectURL(localImage) {
+    if (this.isBlob(true, localImage)) {
+      global.URL.revokeObjectURL(localImage.url);
+    }
+  },
+
+  // Checks if remoteImage and localImage are the same.
+  isRemoteImageLocal(localImage, remoteImage) {
+    // Both remoteImage and localImage are present.
+    if (remoteImage && localImage) {
+      return this.isBlob(false, remoteImage) ? localImage.path === remoteImage.path : localImage.url === remoteImage;
+    } // This will only handle the remaining three possible outcomes.
+    // (i.e. everything except when both image and localImage are present)
+
+
+    return !remoteImage && !localImage;
+  }
+
+};
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
@@ -5506,30 +5696,10 @@ const TopSites = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(sta
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SOURCE", function() { return TOP_SITES_SOURCE; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_CONTEXT_MENU_OPTIONS; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_RICH_FAVICON_SIZE", function() { return MIN_RICH_FAVICON_SIZE; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_CORNER_FAVICON_SIZE", function() { return MIN_CORNER_FAVICON_SIZE; });
-const TOP_SITES_SOURCE = "TOP_SITES";
-const TOP_SITES_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"]; // the special top site for search shortcut experiment can only have the option to unpin (which removes) the topsite
-
-const TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "Separator", "BlockUrl"]; // minimum size necessary to show a rich icon instead of a screenshot
-
-const MIN_RICH_FAVICON_SIZE = 96; // minimum size necessary to show any icon in the top left corner with a screenshot
-
-const MIN_CORNER_FAVICON_SIZE = 16;
-
-/***/ }),
-/* 41 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ComponentPerfTimer", function() { return ComponentPerfTimer; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(42);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(11);
+/* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(41);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
 
 
@@ -5698,7 +5868,7 @@ class ComponentPerfTimer extends react__WEBPACK_IMPORTED_MODULE_2___default.a.Co
 }
 
 /***/ }),
-/* 42 */
+/* 41 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -5724,19 +5894,10 @@ if (typeof Services !== "undefined") {
   // Borrow the high-resolution timer from the hidden window....
   // eslint-disable-next-line block-scoped-var
   usablePerfObj = Services.appShell.hiddenDOMWindow.performance;
-} else if (typeof performance !== "undefined") {
+} else {
   // we must be running in content space
   // eslint-disable-next-line no-undef
   usablePerfObj = performance;
-} else {
-  // This is a dummy object so this file doesn't crash in the node prerendering
-  // task.
-  usablePerfObj = {
-    now() {},
-
-    mark() {}
-
-  };
 }
 
 function _PerfService(options) {
@@ -5836,7 +5997,376 @@ _PerfService.prototype = {
 var perfService = new _PerfService();
 
 /***/ }),
+/* 42 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MoreRecommendations", function() { return MoreRecommendations; });
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+
+
+class MoreRecommendations extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
+  render() {
+    const {
+      read_more_endpoint
+    } = this.props;
+
+    if (read_more_endpoint) {
+      return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
+        className: "more-recommendations",
+        href: read_more_endpoint
+      }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
+        id: "pocket_more_reccommendations"
+      }));
+    }
+
+    return null;
+  }
+
+}
+
+/***/ }),
 /* 43 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_PocketLoggedInCta", function() { return _PocketLoggedInCta; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "PocketLoggedInCta", function() { return PocketLoggedInCta; });
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(25);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
+
+
+
+class _PocketLoggedInCta extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
+  render() {
+    const {
+      pocketCta
+    } = this.props.Pocket;
+    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("span", {
+      className: "pocket-logged-in-cta"
+    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("a", {
+      className: "pocket-cta-button",
+      href: pocketCta.ctaUrl ? pocketCta.ctaUrl : "https://getpocket.com/"
+    }, pocketCta.ctaButton ? pocketCta.ctaButton : react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
+      id: "pocket_cta_button"
+    })), react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("a", {
+      href: pocketCta.ctaUrl ? pocketCta.ctaUrl : "https://getpocket.com/"
+    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("span", {
+      className: "cta-text"
+    }, pocketCta.ctaText ? pocketCta.ctaText : react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
+      id: "pocket_cta_text"
+    }))));
+  }
+
+}
+const PocketLoggedInCta = Object(react_redux__WEBPACK_IMPORTED_MODULE_0__["connect"])(state => ({
+  Pocket: state.Pocket
+}))(_PocketLoggedInCta);
+
+/***/ }),
+/* 44 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Topic", function() { return Topic; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Topics", function() { return Topics; });
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
+
+
+class Topic extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
+  render() {
+    const {
+      url,
+      name
+    } = this.props;
+    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("li", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
+      key: name,
+      href: url
+    }, name));
+  }
+
+}
+class Topics extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
+  render() {
+    const {
+      topics
+    } = this.props;
+    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", {
+      className: "topics"
+    }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
+      id: "pocket_read_more"
+    })), react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("ul", null, topics && topics.map(t => react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(Topic, {
+      key: t.name,
+      url: t.url,
+      name: t.name
+    }))));
+  }
+
+}
+
+/***/ }),
+/* 45 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_TopSites", function() { return _TopSites; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSites", function() { return TopSites; });
+/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
+/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(46);
+/* harmony import */ var content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(33);
+/* harmony import */ var content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(40);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(25);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_4__);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(4);
+/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_5__);
+/* harmony import */ var _asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(14);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(10);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_7__);
+/* harmony import */ var _SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(47);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(55);
+/* harmony import */ var _TopSiteForm__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(57);
+/* harmony import */ var _TopSite__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(48);
+function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+function topSiteIconType(link) {
+  if (link.customScreenshotURL) {
+    return "custom_screenshot";
+  }
+
+  if (link.tippyTopIcon || link.faviconRef === "tippytop") {
+    return "tippytop";
+  }
+
+  if (link.faviconSize >= _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["MIN_RICH_FAVICON_SIZE"]) {
+    return "rich_icon";
+  }
+
+  if (link.screenshot && link.faviconSize >= _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["MIN_CORNER_FAVICON_SIZE"]) {
+    return "screenshot_with_icon";
+  }
+
+  if (link.screenshot) {
+    return "screenshot";
+  }
+
+  return "no_image";
+}
+/**
+ * Iterates through TopSites and counts types of images.
+ * @param acc Accumulator for reducer.
+ * @param topsite Entry in TopSites.
+ */
+
+
+function countTopSitesIconsTypes(topSites) {
+  const countTopSitesTypes = (acc, link) => {
+    acc[topSiteIconType(link)]++;
+    return acc;
+  };
+
+  return topSites.reduce(countTopSitesTypes, {
+    "custom_screenshot": 0,
+    "screenshot_with_icon": 0,
+    "screenshot": 0,
+    "tippytop": 0,
+    "rich_icon": 0,
+    "no_image": 0
+  });
+}
+
+class _TopSites extends react__WEBPACK_IMPORTED_MODULE_7___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onEditFormClose = this.onEditFormClose.bind(this);
+    this.onSearchShortcutsFormClose = this.onSearchShortcutsFormClose.bind(this);
+  }
+  /**
+   * Dispatch session statistics about the quality of TopSites icons and pinned count.
+   */
+
+
+  _dispatchTopSitesStats() {
+    const topSites = this._getVisibleTopSites();
+
+    const topSitesIconsStats = countTopSitesIconsTypes(topSites);
+    const topSitesPinned = topSites.filter(site => !!site.isPinned).length;
+    const searchShortcuts = topSites.filter(site => !!site.searchTopSite).length; // Dispatch telemetry event with the count of TopSites images types.
+
+    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
+      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].SAVE_SESSION_PERF_DATA,
+      data: {
+        topsites_icon_stats: topSitesIconsStats,
+        topsites_pinned: topSitesPinned,
+        topsites_search_shortcuts: searchShortcuts
+      }
+    }));
+  }
+  /**
+   * Return the TopSites that are visible based on prefs and window width.
+   */
+
+
+  _getVisibleTopSites() {
+    // We hide 2 sites per row when not in the wide layout.
+    let sitesPerRow = common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_9__["TOP_SITES_MAX_SITES_PER_ROW"]; // $break-point-widest = 1072px (from _variables.scss)
+
+    if (!global.matchMedia(`(min-width: 1072px)`).matches) {
+      sitesPerRow -= 2;
+    }
+
+    return this.props.TopSites.rows.slice(0, this.props.TopSitesRows * sitesPerRow);
+  }
+
+  componentDidUpdate() {
+    this._dispatchTopSitesStats();
+  }
+
+  componentDidMount() {
+    this._dispatchTopSitesStats();
+  }
+
+  onEditFormClose() {
+    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
+      source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
+      event: "TOP_SITES_EDIT_CLOSE"
+    }));
+    this.props.dispatch({
+      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CANCEL_EDIT
+    });
+  }
+
+  onSearchShortcutsFormClose() {
+    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
+      source: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
+      event: "SEARCH_EDIT_CLOSE"
+    }));
+    this.props.dispatch({
+      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].TOP_SITES_CLOSE_SEARCH_SHORTCUTS_MODAL
+    });
+  }
+
+  render() {
+    const {
+      props
+    } = this;
+    const {
+      editForm,
+      showSearchShortcutsForm
+    } = props.TopSites;
+    const extraMenuOptions = ["AddTopSite"];
+
+    if (props.Prefs.values["improvesearch.topSiteSearchShortcuts"]) {
+      extraMenuOptions.push("AddSearchShortcut");
+    }
+
+    return react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_3__["ComponentPerfTimer"], {
+      id: "topsites",
+      initialized: props.TopSites.initialized,
+      dispatch: props.dispatch
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_2__["CollapsibleSection"], {
+      className: "top-sites",
+      icon: "topsites",
+      id: "topsites",
+      title: this.props.title || {
+        id: "header_top_sites"
+      },
+      extraMenuOptions: extraMenuOptions,
+      showPrefName: "feeds.topsites",
+      eventSource: _TopSitesConstants__WEBPACK_IMPORTED_MODULE_1__["TOP_SITES_SOURCE"],
+      collapsed: props.TopSites.pref ? props.TopSites.pref.collapsed : undefined,
+      isFixed: props.isFixed,
+      isFirst: props.isFirst,
+      isLast: props.isLast,
+      dispatch: props.dispatch
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_TopSite__WEBPACK_IMPORTED_MODULE_11__["TopSiteList"], {
+      TopSites: props.TopSites,
+      TopSitesRows: props.TopSitesRows,
+      dispatch: props.dispatch,
+      intl: props.intl,
+      topSiteIconType: topSiteIconType
+    }), react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("div", {
+      className: "edit-topsites-wrapper"
+    }, editForm && react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("div", {
+      className: "edit-topsites"
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_6__["ModalOverlayWrapper"], {
+      unstyled: true,
+      onClose: this.onEditFormClose,
+      innerClassName: "modal"
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_TopSiteForm__WEBPACK_IMPORTED_MODULE_10__["TopSiteForm"], _extends({
+      site: props.TopSites.rows[editForm.index],
+      onClose: this.onEditFormClose,
+      dispatch: this.props.dispatch,
+      intl: this.props.intl
+    }, editForm)))), showSearchShortcutsForm && react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("div", {
+      className: "edit-search-shortcuts"
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_asrouter_components_ModalOverlay_ModalOverlay__WEBPACK_IMPORTED_MODULE_6__["ModalOverlayWrapper"], {
+      unstyled: true,
+      onClose: this.onSearchShortcutsFormClose,
+      innerClassName: "modal"
+    }, react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_SearchShortcutsForm__WEBPACK_IMPORTED_MODULE_8__["SearchShortcutsForm"], {
+      TopSites: props.TopSites,
+      onClose: this.onSearchShortcutsFormClose,
+      dispatch: this.props.dispatch
+    }))))));
+  }
+
+}
+const TopSites = Object(react_redux__WEBPACK_IMPORTED_MODULE_4__["connect"])(state => ({
+  TopSites: state.TopSites,
+  Prefs: state.Prefs,
+  TopSitesRows: state.Prefs.values.topSitesRows
+}))(Object(react_intl__WEBPACK_IMPORTED_MODULE_5__["injectIntl"])(_TopSites));
+/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
+
+/***/ }),
+/* 46 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SOURCE", function() { return TOP_SITES_SOURCE; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_CONTEXT_MENU_OPTIONS; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS", function() { return TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_RICH_FAVICON_SIZE", function() { return MIN_RICH_FAVICON_SIZE; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MIN_CORNER_FAVICON_SIZE", function() { return MIN_CORNER_FAVICON_SIZE; });
+const TOP_SITES_SOURCE = "TOP_SITES";
+const TOP_SITES_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "EditTopSite", "Separator", "OpenInNewWindow", "OpenInPrivateWindow", "Separator", "BlockUrl", "DeleteUrl"]; // the special top site for search shortcut experiment can only have the option to unpin (which removes) the topsite
+
+const TOP_SITES_SEARCH_SHORTCUTS_CONTEXT_MENU_OPTIONS = ["CheckPinTopSite", "Separator", "BlockUrl"]; // minimum size necessary to show a rich icon instead of a screenshot
+
+const MIN_RICH_FAVICON_SIZE = 96; // minimum size necessary to show any icon in the top left corner with a screenshot
+
+const MIN_CORNER_FAVICON_SIZE = 16;
+
+/***/ }),
+/* 47 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -5846,9 +6376,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(11);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(40);
+/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(46);
 
 
 
@@ -6030,7 +6560,7 @@ class SearchShortcutsForm extends react__WEBPACK_IMPORTED_MODULE_2___default.a.P
 }
 
 /***/ }),
-/* 44 */
+/* 48 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -6043,12 +6573,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(40);
-/* harmony import */ var content_src_components_LinkMenu_LinkMenu__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(31);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(11);
+/* harmony import */ var _TopSitesConstants__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(46);
+/* harmony import */ var content_src_components_LinkMenu_LinkMenu__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(29);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_4__);
-/* harmony import */ var content_src_lib_screenshot_utils__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(45);
-/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(58);
+/* harmony import */ var content_src_lib_screenshot_utils__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(39);
+/* harmony import */ var common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(55);
 function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
 
 
@@ -6416,6 +6946,7 @@ class TopSite extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
       className: `${props.className || ""}${isContextMenuOpen ? " active" : ""}`,
       title: title
     }), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
+      "aria-haspopup": "true",
       className: "context-menu-button icon",
       title: this.props.intl.formatMessage({
         id: "context_menu_title"
@@ -6466,6 +6997,7 @@ class TopSitePlaceholder extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
       className: `placeholder ${this.props.className || ""}`,
       isDraggable: false
     }), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("button", {
+      "aria-haspopup": "true",
       className: "context-menu-button edit-button icon",
       title: this.props.intl.formatMessage({
         id: "edit_topsites_edit_button"
@@ -6689,210 +7221,7 @@ class _TopSiteList extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComp
 const TopSiteList = Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(_TopSiteList);
 
 /***/ }),
-/* 45 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ScreenshotUtils", function() { return ScreenshotUtils; });
-/**
- * List of helper functions for screenshot-based images.
- *
- * There are two kinds of images:
- * 1. Remote Image: This is the image from the main process and it refers to
- *    the image in the React props. This can either be an object with the `data`
- *    and `path` properties, if it is a blob, or a string, if it is a normal image.
- * 2. Local Image: This is the image object in the content process and it refers
- *    to the image *object* in the React component's state. All local image
- *    objects have the `url` property, and an additional property `path`, if they
- *    are blobs.
- */
-const ScreenshotUtils = {
-  isBlob(isLocal, image) {
-    return !!(image && image.path && (!isLocal && image.data || isLocal && image.url));
-  },
-
-  // This should always be called with a remote image and not a local image.
-  createLocalImageObject(remoteImage) {
-    if (!remoteImage) {
-      return null;
-    }
-
-    if (this.isBlob(false, remoteImage)) {
-      return {
-        url: global.URL.createObjectURL(remoteImage.data),
-        path: remoteImage.path
-      };
-    }
-
-    return {
-      url: remoteImage
-    };
-  },
-
-  // Revokes the object URL of the image if the local image is a blob.
-  // This should always be called with a local image and not a remote image.
-  maybeRevokeBlobObjectURL(localImage) {
-    if (this.isBlob(true, localImage)) {
-      global.URL.revokeObjectURL(localImage.url);
-    }
-  },
-
-  // Checks if remoteImage and localImage are the same.
-  isRemoteImageLocal(localImage, remoteImage) {
-    // Both remoteImage and localImage are present.
-    if (remoteImage && localImage) {
-      return this.isBlob(false, remoteImage) ? localImage.path === remoteImage.path : localImage.url === remoteImage;
-    } // This will only handle the remaining three possible outcomes.
-    // (i.e. everything except when both image and localImage are present)
-
-
-    return !remoteImage && !localImage;
-  }
-
-};
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
-
-/***/ }),
-/* 46 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_PrerenderData", function() { return _PrerenderData; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "PrerenderData", function() { return PrerenderData; });
-class _PrerenderData {
-  constructor(options) {
-    this.initialPrefs = options.initialPrefs;
-    this.initialSections = options.initialSections;
-
-    this._setValidation(options.validation);
-  }
-
-  get validation() {
-    return this._validation;
-  }
-
-  set validation(value) {
-    this._setValidation(value);
-  }
-
-  get invalidatingPrefs() {
-    return this._invalidatingPrefs;
-  } // This is needed so we can use it in the constructor
-
-
-  _setValidation(value = []) {
-    this._validation = value;
-    this._invalidatingPrefs = value.reduce((result, next) => {
-      if (typeof next === "string") {
-        result.push(next);
-        return result;
-      } else if (next && next.oneOf) {
-        return result.concat(next.oneOf);
-      } else if (next && next.indexedDB) {
-        return result.concat(next.indexedDB);
-      } else if (next && next.jsonPrefs) {
-        return result.concat(next.jsonPrefs);
-      }
-
-      throw new Error("Your validation configuration is not properly configured");
-    }, []);
-  }
-
-  _isPrefEnabled(prefObj) {
-    try {
-      let data = JSON.parse(prefObj);
-      return data && data.enabled ? true : false; // eslint-disable-line no-unneeded-ternary
-    } catch (e) {
-      return false;
-    }
-  }
-
-  arePrefsValid(getPref, indexedDBPrefs) {
-    for (const prefs of this.validation) {
-      // {oneOf: ["foo", "bar"]}
-      if (prefs && prefs.oneOf && !prefs.oneOf.some(name => getPref(name) === this.initialPrefs[name])) {
-        return false; // {indexedDB: ["foo", "bar"]}
-      } else if (indexedDBPrefs && prefs && prefs.indexedDB) {
-        const anyModifiedPrefs = prefs.indexedDB.some(prefName => indexedDBPrefs.some(pref => pref && pref[prefName]));
-
-        if (anyModifiedPrefs) {
-          return false;
-        } // {jsonPrefs: ["foo", "bar"]}
-
-      } else if (prefs && prefs.jsonPrefs) {
-        const isPrefModified = prefs.jsonPrefs.some(name => this._isPrefEnabled(getPref(name)) !== this.initialPrefs[name].enabled);
-
-        if (isPrefModified) {
-          return false;
-        } // "foo"
-
-      } else if (getPref(prefs) !== this.initialPrefs[prefs]) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-}
-var PrerenderData = new _PrerenderData({
-  initialPrefs: {
-    "feeds.topsites": true,
-    "showSearch": true,
-    "topSitesRows": 1,
-    "feeds.section.topstories": true,
-    "feeds.section.highlights": true,
-    "sectionOrder": "topsites,topstories,highlights",
-    "collapsed": false,
-    "discoverystream.config": {
-      "enabled": false
-    }
-  },
-  // Prefs listed as invalidating will prevent the prerendered version
-  // of AS from being used if their value is something other than what is listed
-  // here. This is required because some preferences cause the page layout to be
-  // too different for the prerendered version to be used. Unfortunately, this
-  // will result in users who have modified some of their preferences not being
-  // able to get the benefits of prerendering.
-  validation: ["feeds.topsites", "showSearch", "topSitesRows", "sectionOrder", // This means if either of these are set to their default values,
-  // prerendering can be used.
-  {
-    oneOf: ["feeds.section.topstories", "feeds.section.highlights"]
-  }, // If any component has the following preference set to `true` it will
-  // invalidate the prerendered version.
-  {
-    indexedDB: ["collapsed"]
-  }, // For below prefs, parse value to check enabled property. If enabled property
-  // differs from initial prefs enabled value, prerendering cannot be used
-  {
-    jsonPrefs: ["discoverystream.config"]
-  }],
-  initialSections: [{
-    enabled: true,
-    icon: "pocket",
-    id: "topstories",
-    order: 1,
-    title: {
-      id: "header_recommended_by",
-      values: {
-        provider: "Pocket"
-      }
-    }
-  }, {
-    enabled: true,
-    id: "highlights",
-    icon: "highlights",
-    order: 2,
-    title: {
-      id: "header_highlights"
-    }
-  }]
-});
-
-/***/ }),
-/* 47 */
+/* 49 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -6902,10 +7231,10 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
 /* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(26);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(25);
 /* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var content_src_lib_constants__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(13);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(11);
+/* harmony import */ var content_src_lib_constants__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(12);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(10);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_4___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_4__);
 /* globals ContentSearchUIController */
 
@@ -7100,506 +7429,14 @@ class _Search extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent
 const Search = Object(react_redux__WEBPACK_IMPORTED_MODULE_2__["connect"])()(Object(react_intl__WEBPACK_IMPORTED_MODULE_1__["injectIntl"])(_Search));
 
 /***/ }),
-/* 48 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Section", function() { return Section; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SectionIntl", function() { return SectionIntl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_Sections", function() { return _Sections; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Sections", function() { return Sections; });
-/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(59);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_2__);
-/* harmony import */ var content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(35);
-/* harmony import */ var content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(41);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(26);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_5__);
-/* harmony import */ var content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(49);
-/* harmony import */ var content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(50);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
-/* harmony import */ var content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(51);
-/* harmony import */ var content_src_components_TopSites_TopSites__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(39);
-function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
-
-
-
-
-
-
-
-
-
-
-
-
-const VISIBLE = "visible";
-const VISIBILITY_CHANGE_EVENT = "visibilitychange";
-const CARDS_PER_ROW_DEFAULT = 3;
-const CARDS_PER_ROW_COMPACT_WIDE = 4;
-
-function getFormattedMessage(message) {
-  return typeof message === "string" ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", null, message) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_2__["FormattedMessage"], message);
-}
-
-class Section extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
-  get numRows() {
-    const {
-      rowsPref,
-      maxRows,
-      Prefs
-    } = this.props;
-    return rowsPref ? Prefs.values[rowsPref] : maxRows;
-  }
-
-  _dispatchImpressionStats() {
-    const {
-      props
-    } = this;
-    let cardsPerRow = CARDS_PER_ROW_DEFAULT;
-
-    if (props.compactCards && global.matchMedia(`(min-width: 1072px)`).matches) {
-      // If the section has compact cards and the viewport is wide enough, we show
-      // 4 columns instead of 3.
-      // $break-point-widest = 1072px (from _variables.scss)
-      cardsPerRow = CARDS_PER_ROW_COMPACT_WIDE;
-    }
-
-    const maxCards = cardsPerRow * this.numRows;
-    const cards = props.rows.slice(0, maxCards);
-
-    if (this.needsImpressionStats(cards)) {
-      props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].ImpressionStats({
-        source: props.eventSource,
-        tiles: cards.map(link => ({
-          id: link.guid
-        }))
-      }));
-      this.impressionCardGuids = cards.map(link => link.guid);
-    }
-  } // This sends an event when a user sees a set of new content. If content
-  // changes while the page is hidden (i.e. preloaded or on a hidden tab),
-  // only send the event if the page becomes visible again.
-
-
-  sendImpressionStatsOrAddListener() {
-    const {
-      props
-    } = this;
-
-    if (!props.shouldSendImpressionStats || !props.dispatch) {
-      return;
-    }
-
-    if (props.document.visibilityState === VISIBLE) {
-      this._dispatchImpressionStats();
-    } else {
-      // We should only ever send the latest impression stats ping, so remove any
-      // older listeners.
-      if (this._onVisibilityChange) {
-        props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
-      } // When the page becomes visible, send the impression stats ping if the section isn't collapsed.
-
-
-      this._onVisibilityChange = () => {
-        if (props.document.visibilityState === VISIBLE) {
-          if (!this.props.pref.collapsed) {
-            this._dispatchImpressionStats();
-          }
-
-          props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
-        }
-      };
-
-      props.document.addEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
-    }
-  }
-
-  componentWillMount() {
-    this.sendNewTabRehydrated(this.props.initialized);
-  }
-
-  componentDidMount() {
-    if (this.props.rows.length && !this.props.pref.collapsed) {
-      this.sendImpressionStatsOrAddListener();
-    }
-  }
-
-  componentDidUpdate(prevProps) {
-    const {
-      props
-    } = this;
-    const isCollapsed = props.pref.collapsed;
-    const wasCollapsed = prevProps.pref.collapsed;
-
-    if ( // Don't send impression stats for the empty state
-    props.rows.length && ( // We only want to send impression stats if the content of the cards has changed
-    // and the section is not collapsed...
-    props.rows !== prevProps.rows && !isCollapsed || // or if we are expanding a section that was collapsed.
-    wasCollapsed && !isCollapsed)) {
-      this.sendImpressionStatsOrAddListener();
-    }
-  }
-
-  componentWillUpdate(nextProps) {
-    this.sendNewTabRehydrated(nextProps.initialized);
-  }
-
-  componentWillUnmount() {
-    if (this._onVisibilityChange) {
-      this.props.document.removeEventListener(VISIBILITY_CHANGE_EVENT, this._onVisibilityChange);
-    }
-  }
-
-  needsImpressionStats(cards) {
-    if (!this.impressionCardGuids || this.impressionCardGuids.length !== cards.length) {
-      return true;
-    }
-
-    for (let i = 0; i < cards.length; i++) {
-      if (cards[i].guid !== this.impressionCardGuids[i]) {
-        return true;
-      }
-    }
-
-    return false;
-  } // The NEW_TAB_REHYDRATED event is used to inform feeds that their
-  // data has been consumed e.g. for counting the number of tabs that
-  // have rendered that data.
-
-
-  sendNewTabRehydrated(initialized) {
-    if (initialized && !this.renderNotified) {
-      this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_REHYDRATED,
-        data: {}
-      }));
-      this.renderNotified = true;
-    }
-  }
-
-  render() {
-    const {
-      id,
-      eventSource,
-      title,
-      icon,
-      rows,
-      Pocket,
-      topics,
-      emptyState,
-      dispatch,
-      compactCards,
-      read_more_endpoint,
-      contextMenuOptions,
-      initialized,
-      learnMore,
-      pref,
-      privacyNoticeURL,
-      isFirst,
-      isLast
-    } = this.props;
-    const waitingForSpoc = id === "topstories" && this.props.Pocket.waitingForSpoc;
-    const maxCardsPerRow = compactCards ? CARDS_PER_ROW_COMPACT_WIDE : CARDS_PER_ROW_DEFAULT;
-    const {
-      numRows
-    } = this;
-    const maxCards = maxCardsPerRow * numRows;
-    const maxCardsOnNarrow = CARDS_PER_ROW_DEFAULT * numRows;
-    const {
-      pocketCta,
-      isUserLoggedIn
-    } = Pocket || {};
-    const {
-      useCta
-    } = pocketCta || {}; // Don't display anything until we have a definitve result from Pocket,
-    // to avoid a flash of logged out state while we render.
-
-    const isPocketLoggedInDefined = isUserLoggedIn === true || isUserLoggedIn === false;
-    const hasTopics = topics && topics.length > 0;
-    const shouldShowPocketCta = id === "topstories" && useCta && isUserLoggedIn === false; // Show topics only for top stories and if it has loaded with topics.
-    // The classs .top-stories-bottom-container ensures content doesn't shift as things load.
-
-    const shouldShowTopics = id === "topstories" && hasTopics && (useCta && isUserLoggedIn === true || !useCta && isPocketLoggedInDefined); // We use topics to determine language support for read more.
-
-    const shouldShowReadMore = read_more_endpoint && hasTopics;
-    const realRows = rows.slice(0, maxCards); // The empty state should only be shown after we have initialized and there is no content.
-    // Otherwise, we should show placeholders.
-
-    const shouldShowEmptyState = initialized && !rows.length;
-    const cards = [];
-
-    if (!shouldShowEmptyState) {
-      for (let i = 0; i < maxCards; i++) {
-        const link = realRows[i]; // On narrow viewports, we only show 3 cards per row. We'll mark the rest as
-        // .hide-for-narrow to hide in CSS via @media query.
-
-        const className = i >= maxCardsOnNarrow ? "hide-for-narrow" : "";
-        let usePlaceholder = !link; // If we are in the third card and waiting for spoc,
-        // use the placeholder.
-
-        if (!usePlaceholder && i === 2 && waitingForSpoc) {
-          usePlaceholder = true;
-        }
-
-        cards.push(!usePlaceholder ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__["Card"], {
-          key: i,
-          index: i,
-          className: className,
-          dispatch: dispatch,
-          link: link,
-          contextMenuOptions: contextMenuOptions,
-          eventSource: eventSource,
-          shouldSendImpressionStats: this.props.shouldSendImpressionStats,
-          isWebExtension: this.props.isWebExtension
-        }) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Card_Card__WEBPACK_IMPORTED_MODULE_1__["PlaceholderCard"], {
-          key: i,
-          className: className
-        }));
-      }
-    }
-
-    const sectionClassName = ["section", compactCards ? "compact-cards" : "normal-cards"].join(" "); // <Section> <-- React component
-    // <section> <-- HTML5 element
-
-    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_ComponentPerfTimer_ComponentPerfTimer__WEBPACK_IMPORTED_MODULE_4__["ComponentPerfTimer"], this.props, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_CollapsibleSection_CollapsibleSection__WEBPACK_IMPORTED_MODULE_3__["CollapsibleSection"], {
-      className: sectionClassName,
-      icon: icon,
-      title: title,
-      id: id,
-      eventSource: eventSource,
-      collapsed: this.props.pref.collapsed,
-      showPrefName: pref && pref.feed || id,
-      privacyNoticeURL: privacyNoticeURL,
-      Prefs: this.props.Prefs,
-      isFirst: isFirst,
-      isLast: isLast,
-      learnMore: learnMore,
-      dispatch: this.props.dispatch,
-      isWebExtension: this.props.isWebExtension
-    }, !shouldShowEmptyState && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("ul", {
-      className: "section-list",
-      style: {
-        padding: 0
-      }
-    }, cards), shouldShowEmptyState && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "section-empty-state"
-    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "empty-state"
-    }, emptyState.icon && emptyState.icon.startsWith("moz-extension://") ? react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", {
-      className: "empty-state-icon icon",
-      style: {
-        "background-image": `url('${emptyState.icon}')`
-      }
-    }) : react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("span", {
-      className: `empty-state-icon icon icon-${emptyState.icon}`
-    }), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("p", {
-      className: "empty-state-message"
-    }, getFormattedMessage(emptyState.message)))), id === "topstories" && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "top-stories-bottom-container"
-    }, shouldShowTopics && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "wrapper-topics"
-    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_Topics_Topics__WEBPACK_IMPORTED_MODULE_9__["Topics"], {
-      topics: this.props.topics
-    })), shouldShowPocketCta && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "wrapper-cta"
-    }, react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_PocketLoggedInCta_PocketLoggedInCta__WEBPACK_IMPORTED_MODULE_7__["PocketLoggedInCta"], null)), react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "wrapper-more-recommendations"
-    }, shouldShowReadMore && react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_MoreRecommendations_MoreRecommendations__WEBPACK_IMPORTED_MODULE_6__["MoreRecommendations"], {
-      read_more_endpoint: read_more_endpoint
-    })))));
-  }
-
-}
-Section.defaultProps = {
-  document: global.document,
-  rows: [],
-  emptyState: {},
-  pref: {},
-  title: ""
-};
-const SectionIntl = Object(react_redux__WEBPACK_IMPORTED_MODULE_5__["connect"])(state => ({
-  Prefs: state.Prefs,
-  Pocket: state.Pocket
-}))(Object(react_intl__WEBPACK_IMPORTED_MODULE_2__["injectIntl"])(Section));
-class _Sections extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent {
-  renderSections() {
-    const sections = [];
-    const enabledSections = this.props.Sections.filter(section => section.enabled);
-    const {
-      sectionOrder,
-      "feeds.topsites": showTopSites
-    } = this.props.Prefs.values; // Enabled sections doesn't include Top Sites, so we add it if enabled.
-
-    const expectedCount = enabledSections.length + ~~showTopSites;
-
-    for (const sectionId of sectionOrder.split(",")) {
-      const commonProps = {
-        key: sectionId,
-        isFirst: sections.length === 0,
-        isLast: sections.length === expectedCount - 1
-      };
-
-      if (sectionId === "topsites" && showTopSites) {
-        sections.push(react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(content_src_components_TopSites_TopSites__WEBPACK_IMPORTED_MODULE_10__["TopSites"], commonProps));
-      } else {
-        const section = enabledSections.find(s => s.id === sectionId);
-
-        if (section) {
-          sections.push(react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(SectionIntl, _extends({}, section, commonProps)));
-        }
-      }
-    }
-
-    return sections;
-  }
-
-  render() {
-    return react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", {
-      className: "sections-list"
-    }, this.renderSections());
-  }
-
-}
-const Sections = Object(react_redux__WEBPACK_IMPORTED_MODULE_5__["connect"])(state => ({
-  Sections: state.Sections,
-  Prefs: state.Prefs
-}))(_Sections);
-/* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
-
-/***/ }),
-/* 49 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MoreRecommendations", function() { return MoreRecommendations; });
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
-
-
-class MoreRecommendations extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
-  render() {
-    const {
-      read_more_endpoint
-    } = this.props;
-
-    if (read_more_endpoint) {
-      return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
-        className: "more-recommendations",
-        href: read_more_endpoint
-      }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
-        id: "pocket_more_reccommendations"
-      }));
-    }
-
-    return null;
-  }
-
-}
-
-/***/ }),
 /* 50 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_PocketLoggedInCta", function() { return _PocketLoggedInCta; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "PocketLoggedInCta", function() { return PocketLoggedInCta; });
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(26);
-/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_1__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_2__);
-
-
-
-class _PocketLoggedInCta extends react__WEBPACK_IMPORTED_MODULE_2___default.a.PureComponent {
-  render() {
-    const {
-      pocketCta
-    } = this.props.Pocket;
-    return react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("span", {
-      className: "pocket-logged-in-cta"
-    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("a", {
-      className: "pocket-cta-button",
-      href: pocketCta.ctaUrl ? pocketCta.ctaUrl : "https://getpocket.com/"
-    }, pocketCta.ctaButton ? pocketCta.ctaButton : react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
-      id: "pocket_cta_button"
-    })), react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("a", {
-      href: pocketCta.ctaUrl ? pocketCta.ctaUrl : "https://getpocket.com/"
-    }, react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement("span", {
-      className: "cta-text"
-    }, pocketCta.ctaText ? pocketCta.ctaText : react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_1__["FormattedMessage"], {
-      id: "pocket_cta_text"
-    }))));
-  }
-
-}
-const PocketLoggedInCta = Object(react_redux__WEBPACK_IMPORTED_MODULE_0__["connect"])(state => ({
-  Pocket: state.Pocket
-}))(_PocketLoggedInCta);
-
-/***/ }),
-/* 51 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Topic", function() { return Topic; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Topics", function() { return Topics; });
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(4);
-/* harmony import */ var react_intl__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react_intl__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(11);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_1__);
-
-
-class Topic extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
-  render() {
-    const {
-      url,
-      name
-    } = this.props;
-    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("li", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("a", {
-      key: name,
-      href: url
-    }, name));
-  }
-
-}
-class Topics extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureComponent {
-  render() {
-    const {
-      topics
-    } = this.props;
-    return react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", {
-      className: "topics"
-    }, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(react_intl__WEBPACK_IMPORTED_MODULE_0__["FormattedMessage"], {
-      id: "pocket_read_more"
-    })), react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement("ul", null, topics && topics.map(t => react__WEBPACK_IMPORTED_MODULE_1___default.a.createElement(Topic, {
-      key: t.name,
-      url: t.url,
-      name: t.name
-    }))));
-  }
-
-}
-
-/***/ }),
-/* 52 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DetectUserSessionStart", function() { return DetectUserSessionStart; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
-/* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(42);
+/* harmony import */ var common_PerfService_jsm__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(41);
 
 
 const VISIBLE = "visible";
@@ -7671,7 +7508,7 @@ class DetectUserSessionStart {
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
-/* 53 */
+/* 51 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -7680,15 +7517,12 @@ __webpack_require__.r(__webpack_exports__);
 // EXTERNAL MODULE: ./common/Actions.jsm
 var Actions = __webpack_require__(2);
 
-// EXTERNAL MODULE: ./content-src/lib/clamp-total-lines.js
-var clamp_total_lines = __webpack_require__(30);
-
 // EXTERNAL MODULE: external "React"
-var external_React_ = __webpack_require__(11);
+var external_React_ = __webpack_require__(10);
 var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_);
 
 // EXTERNAL MODULE: external "ReactDOM"
-var external_ReactDOM_ = __webpack_require__(16);
+var external_ReactDOM_ = __webpack_require__(15);
 var external_ReactDOM_default = /*#__PURE__*/__webpack_require__.n(external_ReactDOM_);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSImage/DSImage.jsx
@@ -7757,6 +7591,7 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
           source = this.reformatImageURL(baseSource, this.state.containerWidth, this.state.containerHeight);
           source2x = this.reformatImageURL(baseSource, this.state.containerWidth * 2, this.state.containerHeight * 2);
           img = external_React_default.a.createElement("img", {
+            alt: "",
             crossOrigin: "anonymous",
             onError: this.onOptimizedImageError,
             src: source,
@@ -7765,6 +7600,7 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
         }
       } else if (!this.state.nonOptimizedImageFailed) {
         img = external_React_default.a.createElement("img", {
+          alt: "",
           crossOrigin: "anonymous",
           onError: this.onNonOptimizedImageError,
           src: this.props.source
@@ -7810,7 +7646,7 @@ DSImage_DSImage.defaultProps = {
 var external_ReactIntl_ = __webpack_require__(4);
 
 // EXTERNAL MODULE: ./content-src/components/LinkMenu/LinkMenu.jsx
-var LinkMenu = __webpack_require__(31);
+var LinkMenu = __webpack_require__(29);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSLinkMenu/DSLinkMenu.jsx
 
@@ -7823,6 +7659,8 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
       activeCard: null,
       showContextMenu: false
     };
+    this.windowObj = this.props.windowObj || window; // Added to support unit tests
+
     this.onMenuButtonClick = this.onMenuButtonClick.bind(this);
     this.onMenuUpdate = this.onMenuUpdate.bind(this);
     this.onMenuShow = this.onMenuShow.bind(this);
@@ -7851,7 +7689,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
   onMenuShow() {
     const dsLinkMenuHostDiv = this.contextMenuButtonRef.current.parentElement;
 
-    if (window.scrollMaxX > 0) {
+    if (this.windowObj.scrollMaxX > 0) {
       dsLinkMenuHostDiv.parentElement.classList.add("last-item");
     }
 
@@ -7869,6 +7707,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
     const type = this.props.type || "DISCOVERY_STREAM";
     return external_React_default.a.createElement("div", null, external_React_default.a.createElement("button", {
       ref: this.contextMenuButtonRef,
+      "aria-haspopup": "true",
       className: "context-menu-button icon",
       title: this.props.intl.formatMessage({
         id: "context_menu_title"
@@ -7896,6 +7735,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
         url: this.props.url,
         guid: this.props.id,
         pocket_id: this.props.pocket_id,
+        shim: this.props.shim,
         bookmarkGuid: this.props.bookmarkGuid
       }
     }));
@@ -7904,7 +7744,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
 }
 const DSLinkMenu = Object(external_ReactIntl_["injectIntl"])(DSLinkMenu_DSLinkMenu);
 // EXTERNAL MODULE: ./content-src/components/DiscoveryStreamImpressionStats/ImpressionStats.jsx
-var ImpressionStats = __webpack_require__(34);
+var ImpressionStats = __webpack_require__(32);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/SafeAnchor/SafeAnchor.jsx
 
@@ -7989,7 +7829,6 @@ class SafeAnchor_SafeAnchor extends external_React_default.a.PureComponent {
 
 
 
-
 class DSCard_DSCard extends external_React_default.a.PureComponent {
   constructor(props) {
     super(props);
@@ -8008,7 +7847,10 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
         click: 0,
         tiles: [{
           id: this.props.id,
-          pos: this.props.pos
+          pos: this.props.pos,
+          ...(this.props.shim && this.props.shim.click ? {
+            shim: this.props.shim.click
+          } : {})
         }]
       }));
     }
@@ -8031,15 +7873,11 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
     })), external_React_default.a.createElement("div", {
       className: "meta"
     }, external_React_default.a.createElement("div", {
-      className: "info-wrap",
-      "data-total-lines": "7",
-      ref: clamp_total_lines["clampTotalLines"]
+      className: "info-wrap"
     }, external_React_default.a.createElement("p", {
-      className: "source clamp",
-      "data-clamp": "1"
+      className: "source clamp"
     }, this.props.source), external_React_default.a.createElement("header", {
-      className: "title clamp",
-      "data-clamp": "4"
+      className: "title clamp"
     }, this.props.title), this.props.excerpt && external_React_default.a.createElement("p", {
       className: "excerpt clamp"
     }, this.props.excerpt)), this.props.context && external_React_default.a.createElement("p", {
@@ -8048,7 +7886,10 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
       campaignId: this.props.campaignId,
       rows: [{
         id: this.props.id,
-        pos: this.props.pos
+        pos: this.props.pos,
+        ...(this.props.shim && this.props.shim.impression ? {
+          shim: this.props.shim.impression
+        } : {})
       }],
       dispatch: this.props.dispatch,
       source: this.props.type
@@ -8062,6 +7903,7 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
       source: this.props.source,
       type: this.props.type,
       pocket_id: this.props.pocket_id,
+      shim: this.props.shim,
       bookmarkGuid: this.props.bookmarkGuid
     }));
   }
@@ -8072,13 +7914,84 @@ const PlaceholderDSCard = props => external_React_default.a.createElement(DSCard
 });
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSEmptyState/DSEmptyState.jsx
 
+
 class DSEmptyState_DSEmptyState extends external_React_default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.onReset = this.onReset.bind(this);
+    this.state = {};
+  }
+
+  componentWillUnmount() {
+    if (this.timeout) {
+      clearTimeout(this.timeout);
+    }
+  }
+
+  onReset() {
+    if (this.props.dispatch && this.props.feed) {
+      const {
+        feed
+      } = this.props;
+      const {
+        url
+      } = feed;
+      this.props.dispatch({
+        type: Actions["actionTypes"].DISCOVERY_STREAM_FEED_UPDATE,
+        data: {
+          feed: { ...feed,
+            data: { ...feed.data,
+              status: "waiting"
+            }
+          },
+          url
+        }
+      });
+      this.setState({
+        waiting: true
+      });
+      this.timeout = setTimeout(() => {
+        this.timeout = null;
+        this.setState({
+          waiting: false
+        });
+      }, 300);
+      this.props.dispatch(Actions["actionCreators"].OnlyToMain({
+        type: Actions["actionTypes"].DISCOVERY_STREAM_RETRY_FEED,
+        data: {
+          feed
+        }
+      }));
+    }
+  }
+
+  renderButton() {
+    if (this.props.status === "waiting" || this.state.waiting) {
+      return external_React_default.a.createElement("button", {
+        className: "try-again-button waiting"
+      }, "Loading...");
+    }
+
+    return external_React_default.a.createElement("button", {
+      className: "try-again-button",
+      onClick: this.onReset
+    }, "Try Again");
+  }
+
+  renderState() {
+    if (this.props.status === "waiting" || this.props.status === "failed") {
+      return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", null, "Oops! We almost loaded this section, but not quite."), this.renderButton());
+    }
+
+    return external_React_default.a.createElement(external_React_default.a.Fragment, null, external_React_default.a.createElement("h2", null, "You are caught up!"), external_React_default.a.createElement("p", null, "Check back later for more stories."));
+  }
+
   render() {
     return external_React_default.a.createElement("div", {
       className: "section-empty-state"
     }, external_React_default.a.createElement("div", {
       className: "empty-state-message"
-    }, external_React_default.a.createElement("h2", null, "You are caught up!"), external_React_default.a.createElement("p", null, "Check back later for more stories.")));
+    }, this.renderState()));
   }
 
 }
@@ -8105,6 +8018,7 @@ class CardGrid_CardGrid extends external_React_default.a.PureComponent {
         excerpt: rec.excerpt,
         url: rec.url,
         id: rec.id,
+        shim: rec.shim,
         type: this.props.type,
         context: rec.context,
         dispatch: this.props.dispatch,
@@ -8142,7 +8056,11 @@ class CardGrid_CardGrid extends external_React_default.a.PureComponent {
       className: "ds-header"
     }, this.props.title), isEmpty ? external_React_default.a.createElement("div", {
       className: "ds-card-grid empty"
-    }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, null)) : this.renderCards());
+    }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, {
+      status: data.status,
+      dispatch: this.props.dispatch,
+      feed: this.props.feed
+    })) : this.renderCards());
   }
 
 }
@@ -8152,10 +8070,10 @@ CardGrid_CardGrid.defaultProps = {
 
 };
 // EXTERNAL MODULE: ./content-src/components/CollapsibleSection/CollapsibleSection.jsx
-var CollapsibleSection = __webpack_require__(35);
+var CollapsibleSection = __webpack_require__(33);
 
 // EXTERNAL MODULE: external "ReactRedux"
-var external_ReactRedux_ = __webpack_require__(26);
+var external_ReactRedux_ = __webpack_require__(25);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/DSMessage/DSMessage.jsx
 
@@ -8189,7 +8107,6 @@ class DSMessage_DSMessage extends external_React_default.a.PureComponent {
 
 
 
-
 /**
  * @note exported for testing only
  */
@@ -8214,7 +8131,10 @@ class List_ListItem extends external_React_default.a.PureComponent {
         click: 0,
         tiles: [{
           id: this.props.id,
-          pos: this.props.pos
+          pos: this.props.pos,
+          ...(this.props.shim && this.props.shim.click ? {
+            shim: this.props.shim.click
+          } : {})
         }]
       }));
     }
@@ -8230,15 +8150,12 @@ class List_ListItem extends external_React_default.a.PureComponent {
       url: this.props.url
     }, external_React_default.a.createElement("div", {
       className: "ds-list-item-text"
-    }, external_React_default.a.createElement("div", {
-      "data-total-lines": "4",
-      ref: clamp_total_lines["clampTotalLines"]
-    }, external_React_default.a.createElement("div", {
+    }, external_React_default.a.createElement("div", null, external_React_default.a.createElement("div", {
       className: "ds-list-item-title clamp"
     }, this.props.title), this.props.excerpt && external_React_default.a.createElement("div", {
       className: "ds-list-item-excerpt clamp"
     }, this.props.excerpt)), external_React_default.a.createElement("p", null, this.props.context && external_React_default.a.createElement("span", null, external_React_default.a.createElement("span", {
-      className: "ds-list-item-context"
+      className: "ds-list-item-context clamp"
     }, this.props.context), external_React_default.a.createElement("br", null)), external_React_default.a.createElement("span", {
       className: "ds-list-item-info clamp"
     }, this.props.domain))), external_React_default.a.createElement(DSImage_DSImage, {
@@ -8249,7 +8166,10 @@ class List_ListItem extends external_React_default.a.PureComponent {
       campaignId: this.props.campaignId,
       rows: [{
         id: this.props.id,
-        pos: this.props.pos
+        pos: this.props.pos,
+        ...(this.props.shim && this.props.shim.impression ? {
+          shim: this.props.shim.impression
+        } : {})
       }],
       dispatch: this.props.dispatch,
       source: this.props.type
@@ -8263,6 +8183,7 @@ class List_ListItem extends external_React_default.a.PureComponent {
       source: this.props.source,
       type: this.props.type,
       pocket_id: this.props.pocket_id,
+      shim: this.props.shim,
       bookmarkGuid: this.props.bookmarkGuid
     }));
   }
@@ -8291,6 +8212,7 @@ function _List(props) {
         domain: rec.domain,
         excerpt: rec.excerpt,
         id: rec.id,
+        shim: rec.shim,
         image_src: rec.image_src,
         raw_image_src: rec.raw_image_src,
         pos: rec.pos,
@@ -8309,19 +8231,25 @@ function _List(props) {
     }, recMarkup);
   };
 
-  const feed = props.data;
+  const {
+    data
+  } = props;
 
-  if (!feed || !feed.recommendations) {
+  if (!data || !data.recommendations) {
     return null;
   } // Handle the case where a user has dismissed all recommendations
 
 
-  const isEmpty = feed.recommendations.length === 0;
+  const isEmpty = data.recommendations.length === 0;
   return external_React_default.a.createElement("div", null, props.header && props.header.title ? external_React_default.a.createElement("div", {
     className: "ds-header"
   }, props.header.title) : null, isEmpty ? external_React_default.a.createElement("div", {
     className: "ds-list empty"
-  }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, null)) : renderList());
+  }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, {
+    status: data.status,
+    dispatch: props.dispatch,
+    feed: props.feed
+  })) : renderList());
 }
 _List.defaultProps = {
   recStartingPoint: 0,
@@ -8350,7 +8278,6 @@ const List = Object(external_ReactRedux_["connect"])(state => ({
 
 
 
-
 class Hero_Hero extends external_React_default.a.PureComponent {
   constructor(props) {
     super(props);
@@ -8369,7 +8296,10 @@ class Hero_Hero extends external_React_default.a.PureComponent {
         click: 0,
         tiles: [{
           id: this.heroRec.id,
-          pos: this.heroRec.pos
+          pos: this.heroRec.pos,
+          ...(this.heroRec.shim && this.heroRec.shim.click ? {
+            shim: this.heroRec.shim.click
+          } : {})
         }]
       }));
     }
@@ -8392,6 +8322,7 @@ class Hero_Hero extends external_React_default.a.PureComponent {
         title: rec.title,
         url: rec.url,
         id: rec.id,
+        shim: rec.shim,
         pos: rec.pos,
         type: this.props.type,
         dispatch: this.props.dispatch,
@@ -8423,24 +8354,23 @@ class Hero_Hero extends external_React_default.a.PureComponent {
       })), external_React_default.a.createElement("div", {
         className: "meta"
       }, external_React_default.a.createElement("div", {
-        className: "header-and-excerpt",
-        "data-total-lines": "7",
-        ref: clamp_total_lines["clampTotalLines"]
+        className: "header-and-excerpt"
       }, heroRec.context ? external_React_default.a.createElement("p", {
         className: "context"
       }, heroRec.context) : external_React_default.a.createElement("p", {
-        className: "source clamp",
-        "data-clamp": "1"
+        className: "source clamp"
       }, heroRec.domain), external_React_default.a.createElement("header", {
-        className: "clamp",
-        "data-clamp": "4"
+        className: "clamp"
       }, heroRec.title), external_React_default.a.createElement("p", {
         className: "excerpt clamp"
       }, heroRec.excerpt))), external_React_default.a.createElement(ImpressionStats["ImpressionStats"], {
         campaignId: heroRec.campaignId,
         rows: [{
           id: heroRec.id,
-          pos: heroRec.pos
+          pos: heroRec.pos,
+          ...(heroRec.shim && heroRec.shim.impression ? {
+            shim: heroRec.shim.impression
+          } : {})
         }],
         dispatch: this.props.dispatch,
         source: this.props.type
@@ -8454,6 +8384,7 @@ class Hero_Hero extends external_React_default.a.PureComponent {
         source: heroRec.domain,
         type: this.props.type,
         pocket_id: heroRec.pocket_id,
+        shim: heroRec.shim,
         bookmarkGuid: heroRec.bookmarkGuid
       }));
     }
@@ -8461,6 +8392,7 @@ class Hero_Hero extends external_React_default.a.PureComponent {
     let list = external_React_default.a.createElement(List, {
       recStartingPoint: 1,
       data: this.props.data,
+      feed: this.props.feed,
       hasImages: true,
       hasBorders: this.props.border === `border`,
       items: this.props.items - 1,
@@ -8488,7 +8420,11 @@ class Hero_Hero extends external_React_default.a.PureComponent {
       className: "ds-header"
     }, this.props.title), isEmpty ? external_React_default.a.createElement("div", {
       className: "ds-hero empty"
-    }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, null)) : this.renderHero());
+    }, external_React_default.a.createElement(DSEmptyState_DSEmptyState, {
+      status: data.status,
+      dispatch: this.props.dispatch,
+      feed: this.props.feed
+    })) : this.renderHero());
   }
 
 }
@@ -8498,6 +8434,34 @@ Hero_Hero.defaultProps = {
   items: 1 // Number of stories to display
 
 };
+// EXTERNAL MODULE: ./content-src/components/Sections/Sections.jsx
+var Sections = __webpack_require__(38);
+
+// CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/Highlights/Highlights.jsx
+function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
+
+
+
+
+class Highlights_Highlights extends external_React_default.a.PureComponent {
+  render() {
+    const section = this.props.Sections.find(s => s.id === "highlights");
+
+    if (!section || !section.enabled) {
+      return null;
+    }
+
+    return external_React_default.a.createElement("div", {
+      className: "ds-highlights sections-list"
+    }, external_React_default.a.createElement(Sections["SectionIntl"], _extends({}, section, {
+      isFixed: true
+    })));
+  }
+
+}
+const Highlights = Object(external_ReactRedux_["connect"])(state => ({
+  Sections: state.Sections
+}))(Highlights_Highlights);
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/HorizontalRule/HorizontalRule.jsx
 
 class HorizontalRule_HorizontalRule extends external_React_default.a.PureComponent {
@@ -8655,7 +8619,7 @@ const selectLayoutRender = (state, prefs, rickRollCache) => {
 
     if (feed && feed.data) {
       data = { ...feed.data,
-        recommendations: [...feed.data.recommendations]
+        recommendations: [...(feed.data.recommendations || [])]
       };
     }
 
@@ -8663,10 +8627,12 @@ const selectLayoutRender = (state, prefs, rickRollCache) => {
       data = { ...data,
         recommendations: data.recommendations.slice(component.properties.offset)
       };
-    } // Do we ever expect to possibly have a spoc.
+    } // Ensure we have recs available for this feed.
 
 
-    if (data && component.spocs && component.spocs.positions && component.spocs.positions.length) {
+    const hasRecs = data && data.recommendations && data.recommendations.length; // Do we ever expect to possibly have a spoc.
+
+    if (hasRecs && component.spocs && component.spocs.positions && component.spocs.positions.length) {
       // We expect a spoc, spocs are loaded, and the server returned spocs.
       if (spocs.loaded && spocs.data.spocs && spocs.data.spocs.length) {
         data = rollForSpocs(data, component.spocs);
@@ -8762,7 +8728,7 @@ const selectLayoutRender = (state, prefs, rickRollCache) => {
   };
 };
 // EXTERNAL MODULE: ./content-src/components/TopSites/TopSites.jsx
-var TopSites = __webpack_require__(39);
+var TopSites = __webpack_require__(45);
 
 // CONCATENATED MODULE: ./content-src/components/DiscoveryStreamComponents/TopSites/TopSites.jsx
 
@@ -8787,6 +8753,7 @@ const TopSites_TopSites_TopSites = Object(external_ReactRedux_["connect"])(state
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "isAllowedCSS", function() { return isAllowedCSS; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DiscoveryStreamBase", function() { return DiscoveryStreamBase_DiscoveryStreamBase; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DiscoveryStreamBase", function() { return DiscoveryStreamBase; });
+
 
 
 
@@ -8876,6 +8843,9 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
 
   renderComponent(component, embedWidth) {
     switch (component.type) {
+      case "Highlights":
+        return external_React_default.a.createElement(Highlights, null);
+
       case "TopSites":
         return external_React_default.a.createElement(TopSites_TopSites_TopSites, {
           header: component.header
@@ -8931,6 +8901,7 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
       case "List":
         return external_React_default.a.createElement(List, {
           data: component.data,
+          feed: component.feed,
           fullWidth: component.properties.full_width,
           hasBorders: component.properties.border === "border",
           hasImages: component.properties.has_images,
@@ -9043,7 +9014,12 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
       privacyNoticeURL: topStories.privacyNoticeURL,
       showPrefName: topStories.pref.feed,
       title: message.header.title
-    }, this.renderLayout(layoutRender)));
+    }, this.renderLayout(layoutRender)), this.renderLayout([{
+      width: 12,
+      components: [{
+        type: "Highlights"
+      }]
+    }]));
   }
 
   renderLayout(layoutRender) {
@@ -9075,18 +9051,815 @@ const DiscoveryStreamBase = Object(external_ReactRedux_["connect"])(state => ({
 }))(DiscoveryStreamBase_DiscoveryStreamBase);
 
 /***/ }),
-/* 54 */
+/* 52 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 
 // EXTERNAL MODULE: external "React"
-var external_React_ = __webpack_require__(11);
+var external_React_ = __webpack_require__(10);
+
+// EXTERNAL MODULE: external "PropTypes"
+var external_PropTypes_ = __webpack_require__(11);
+var external_PropTypes_default = /*#__PURE__*/__webpack_require__.n(external_PropTypes_);
+
+// CONCATENATED MODULE: ./node_modules/fluent-sequence/src/map_sync.js
+/*
+ * Synchronously map an identifier or an array of identifiers to the best
+ * `FluentBundle` instance(s).
+ *
+ * @param {Iterable} iterable
+ * @param {string|Array<string>} ids
+ * @returns {FluentBundle|Array<FluentBundle>}
+ */
+function mapBundleSync(iterable, ids) {
+  if (!Array.isArray(ids)) {
+    return getBundleForId(iterable, ids);
+  }
+
+  return ids.map(
+    id => getBundleForId(iterable, id)
+  );
+}
+
+/*
+ * Find the best `FluentBundle` with the translation for `id`.
+ */
+function getBundleForId(iterable, id) {
+  for (const bundle of iterable) {
+    if (bundle.hasMessage(id)) {
+      return bundle;
+    }
+  }
+
+  return null;
+}
+
+// CONCATENATED MODULE: ./node_modules/fluent-sequence/src/map_async.js
+/*
+ * Asynchronously map an identifier or an array of identifiers to the best
+ * `FluentBundle` instance(s).
+ *
+ * @param {AsyncIterable} iterable
+ * @param {string|Array<string>} ids
+ * @returns {Promise<FluentBundle|Array<FluentBundle>>}
+ */
+async function mapBundleAsync(iterable, ids) {
+  if (!Array.isArray(ids)) {
+    for await (const bundle of iterable) {
+      if (bundle.hasMessage(ids)) {
+        return bundle;
+      }
+    }
+  }
+
+  let remainingCount = ids.length;
+  const foundBundles = new Array(remainingCount).fill(null);
+
+  for await (const bundle of iterable) {
+    for (const [index, id] of ids.entries()) {
+      if (!foundBundles[index] && bundle.hasMessage(id)) {
+        foundBundles[index] = bundle;
+        remainingCount--;
+      }
+
+      // Return early when all ids have been mapped to contexts.
+      if (remainingCount === 0) {
+        return foundBundles;
+      }
+    }
+  }
+
+  return foundBundles;
+}
+
+// CONCATENATED MODULE: ./node_modules/fluent-sequence/src/index.js
+/*
+ * @module fluent-sequence
+ * @overview Manage ordered sequences of FluentBundles.
+ */
+
+
+
+
+// CONCATENATED MODULE: ./node_modules/cached-iterable/src/cached_iterable.mjs
+/*
+ * Base CachedIterable class.
+ */
+class CachedIterable extends Array {
+    /**
+     * Create a `CachedIterable` instance from an iterable or, if another
+     * instance of `CachedIterable` is passed, return it without any
+     * modifications.
+     *
+     * @param {Iterable} iterable
+     * @returns {CachedIterable}
+     */
+    static from(iterable) {
+        if (iterable instanceof this) {
+            return iterable;
+        }
+
+        return new this(iterable);
+    }
+}
+
+// CONCATENATED MODULE: ./node_modules/cached-iterable/src/cached_sync_iterable.mjs
+
+
+/*
+ * CachedSyncIterable caches the elements yielded by an iterable.
+ *
+ * It can be used to iterate over an iterable many times without depleting the
+ * iterable.
+ */
+class cached_sync_iterable_CachedSyncIterable extends CachedIterable {
+    /**
+     * Create an `CachedSyncIterable` instance.
+     *
+     * @param {Iterable} iterable
+     * @returns {CachedSyncIterable}
+     */
+    constructor(iterable) {
+        super();
+
+        if (Symbol.iterator in Object(iterable)) {
+            this.iterator = iterable[Symbol.iterator]();
+        } else {
+            throw new TypeError("Argument must implement the iteration protocol.");
+        }
+    }
+
+    [Symbol.iterator]() {
+        const cached = this;
+        let cur = 0;
+
+        return {
+            next() {
+                if (cached.length <= cur) {
+                    cached.push(cached.iterator.next());
+                }
+                return cached[cur++];
+            }
+        };
+    }
+
+    /**
+     * This method allows user to consume the next element from the iterator
+     * into the cache.
+     *
+     * @param {number} count - number of elements to consume
+     */
+    touchNext(count = 1) {
+        let idx = 0;
+        while (idx++ < count) {
+            const last = this[this.length - 1];
+            if (last && last.done) {
+                break;
+            }
+            this.push(this.iterator.next());
+        }
+        // Return the last cached {value, done} object to allow the calling
+        // code to decide if it needs to call touchNext again.
+        return this[this.length - 1];
+    }
+}
+
+// CONCATENATED MODULE: ./node_modules/cached-iterable/src/cached_async_iterable.mjs
+
+
+/*
+ * CachedAsyncIterable caches the elements yielded by an async iterable.
+ *
+ * It can be used to iterate over an iterable many times without depleting the
+ * iterable.
+ */
+class cached_async_iterable_CachedAsyncIterable extends CachedIterable {
+    /**
+     * Create an `CachedAsyncIterable` instance.
+     *
+     * @param {Iterable} iterable
+     * @returns {CachedAsyncIterable}
+     */
+    constructor(iterable) {
+        super();
+
+        if (Symbol.asyncIterator in Object(iterable)) {
+            this.iterator = iterable[Symbol.asyncIterator]();
+        } else if (Symbol.iterator in Object(iterable)) {
+            this.iterator = iterable[Symbol.iterator]();
+        } else {
+            throw new TypeError("Argument must implement the iteration protocol.");
+        }
+    }
+
+    /**
+     * Synchronous iterator over the cached elements.
+     *
+     * Return a generator object implementing the iterator protocol over the
+     * cached elements of the original (async or sync) iterable.
+     */
+    [Symbol.iterator]() {
+        const cached = this;
+        let cur = 0;
+
+        return {
+            next() {
+                if (cached.length === cur) {
+                    return {value: undefined, done: true};
+                }
+                return cached[cur++];
+            }
+        };
+    }
+
+    /**
+     * Asynchronous iterator caching the yielded elements.
+     *
+     * Elements yielded by the original iterable will be cached and available
+     * synchronously. Returns an async generator object implementing the
+     * iterator protocol over the elements of the original (async or sync)
+     * iterable.
+     */
+    [Symbol.asyncIterator]() {
+        const cached = this;
+        let cur = 0;
+
+        return {
+            async next() {
+                if (cached.length <= cur) {
+                    cached.push(await cached.iterator.next());
+                }
+                return cached[cur++];
+            }
+        };
+    }
+
+    /**
+     * This method allows user to consume the next element from the iterator
+     * into the cache.
+     *
+     * @param {number} count - number of elements to consume
+     */
+    async touchNext(count = 1) {
+        let idx = 0;
+        while (idx++ < count) {
+            const last = this[this.length - 1];
+            if (last && last.done) {
+                break;
+            }
+            this.push(await this.iterator.next());
+        }
+        // Return the last cached {value, done} object to allow the calling
+        // code to decide if it needs to call touchNext again.
+        return this[this.length - 1];
+    }
+}
+
+// CONCATENATED MODULE: ./node_modules/cached-iterable/src/index.mjs
+
+
+
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/localization.js
+
+
+/*
+ * `ReactLocalization` handles translation formatting and fallback.
+ *
+ * The current negotiated fallback chain of languages is stored in the
+ * `ReactLocalization` instance in form of an iterable of `FluentBundle`
+ * instances.  This iterable is used to find the best existing translation for
+ * a given identifier.
+ *
+ * `Localized` components must subscribe to the changes of the
+ * `ReactLocalization`'s fallback chain.  When the fallback chain changes (the
+ * `bundles` iterable is set anew), all subscribed compontent must relocalize.
+ *
+ * The `ReactLocalization` class instances are exposed to `Localized` elements
+ * via the `LocalizationProvider` component.
+ */
+
+class localization_ReactLocalization {
+  constructor(bundles) {
+    this.bundles = cached_sync_iterable_CachedSyncIterable.from(bundles);
+    this.subs = new Set();
+  }
+  /*
+   * Subscribe a `Localized` component to changes of `bundles`.
+   */
+
+
+  subscribe(comp) {
+    this.subs.add(comp);
+  }
+  /*
+   * Unsubscribe a `Localized` component from `bundles` changes.
+   */
+
+
+  unsubscribe(comp) {
+    this.subs.delete(comp);
+  }
+  /*
+   * Set a new `bundles` iterable and trigger the retranslation.
+   */
+
+
+  setBundles(bundles) {
+    this.bundles = cached_sync_iterable_CachedSyncIterable.from(bundles); // Update all subscribed Localized components.
+
+    this.subs.forEach(comp => comp.relocalize());
+  }
+
+  getBundle(id) {
+    return mapBundleSync(this.bundles, id);
+  }
+  /*
+   * Find a translation by `id` and format it to a string using `args`.
+   */
+
+
+  getString(id, args, fallback) {
+    const bundle = this.getBundle(id);
+
+    if (bundle === null) {
+      return fallback || id;
+    }
+
+    const msg = bundle.getMessage(id);
+    return bundle.format(msg, args);
+  }
+
+}
+function isReactLocalization(props, propName) {
+  const prop = props[propName];
+
+  if (prop instanceof localization_ReactLocalization) {
+    return null;
+  }
+
+  return new Error(`The ${propName} context field must be an instance of ReactLocalization.`);
+}
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/markup.js
+/* eslint-env browser */
+let cachedParseMarkup; // We use a function creator to make the reference to `document` lazy. At the
+// same time, it's eager enough to throw in <LocalizationProvider> as soon as
+// it's first mounted which reduces the risk of this error making it to the
+// runtime without developers noticing it in development.
+
+function createParseMarkup() {
+  if (typeof document === "undefined") {
+    // We can't use <template> to sanitize translations.
+    throw new Error("`document` is undefined. Without it, translations cannot " + "be safely sanitized. Consult the documentation at " + "https://github.com/projectfluent/fluent.js/wiki/React-Overlays.");
+  }
+
+  if (!cachedParseMarkup) {
+    const template = document.createElement("template");
+
+    cachedParseMarkup = function parseMarkup(str) {
+      template.innerHTML = str;
+      return Array.from(template.content.childNodes);
+    };
+  }
+
+  return cachedParseMarkup;
+}
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/provider.js
+
+
+
+
+/*
+ * The Provider component for the `ReactLocalization` class.
+ *
+ * Exposes a `ReactLocalization` instance to all descendants via React's
+ * context feature.  It makes translations available to all localizable
+ * elements in the descendant's render tree without the need to pass them
+ * explicitly.
+ *
+ *     <LocalizationProvider bundles={…}>
+ *         …
+ *     </LocalizationProvider>
+ *
+ * The `LocalizationProvider` component takes one prop: `bundles`.  It should
+ * be an iterable of `FluentBundle` instances in order of the user's
+ * preferred languages.  The `FluentBundle` instances will be used by
+ * `ReactLocalization` to format translations.  If a translation is missing in
+ * one instance, `ReactLocalization` will fall back to the next one.
+ */
+
+class provider_LocalizationProvider extends external_React_["Component"] {
+  constructor(props) {
+    super(props);
+    const {
+      bundles,
+      parseMarkup
+    } = props;
+
+    if (bundles === undefined) {
+      throw new Error("LocalizationProvider must receive the bundles prop.");
+    }
+
+    if (!bundles[Symbol.iterator]) {
+      throw new Error("The bundles prop must be an iterable.");
+    }
+
+    this.l10n = new localization_ReactLocalization(bundles);
+    this.parseMarkup = parseMarkup || createParseMarkup();
+  }
+
+  getChildContext() {
+    return {
+      l10n: this.l10n,
+      parseMarkup: this.parseMarkup
+    };
+  }
+
+  componentWillReceiveProps(next) {
+    const {
+      bundles
+    } = next;
+
+    if (bundles !== this.props.bundles) {
+      this.l10n.setBundles(bundles);
+    }
+  }
+
+  render() {
+    return external_React_["Children"].only(this.props.children);
+  }
+
+}
+provider_LocalizationProvider.childContextTypes = {
+  l10n: isReactLocalization,
+  parseMarkup: external_PropTypes_default.a.func
+};
+provider_LocalizationProvider.propTypes = {
+  children: external_PropTypes_default.a.element.isRequired,
+  bundles: isIterable,
+  parseMarkup: external_PropTypes_default.a.func
+};
+
+function isIterable(props, propName, componentName) {
+  const prop = props[propName];
+
+  if (Symbol.iterator in Object(prop)) {
+    return null;
+  }
+
+  return new Error(`The ${propName} prop supplied to ${componentName} must be an iterable.`);
+}
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/with_localization.js
+
+
+function withLocalization(Inner) {
+  class WithLocalization extends external_React_["Component"] {
+    componentDidMount() {
+      const {
+        l10n
+      } = this.context;
+
+      if (l10n) {
+        l10n.subscribe(this);
+      }
+    }
+
+    componentWillUnmount() {
+      const {
+        l10n
+      } = this.context;
+
+      if (l10n) {
+        l10n.unsubscribe(this);
+      }
+    }
+    /*
+     * Rerender this component in a new language.
+     */
+
+
+    relocalize() {
+      // When the `ReactLocalization`'s fallback chain changes, update the
+      // component.
+      this.forceUpdate();
+    }
+    /*
+     * Find a translation by `id` and format it to a string using `args`.
+     */
+
+
+    getString(id, args, fallback) {
+      const {
+        l10n
+      } = this.context;
+
+      if (!l10n) {
+        return fallback || id;
+      }
+
+      return l10n.getString(id, args, fallback);
+    }
+
+    render() {
+      return Object(external_React_["createElement"])(Inner, Object.assign( // getString needs to be re-bound on updates to trigger a re-render
+      {
+        getString: (...args) => this.getString(...args)
+      }, this.props));
+    }
+
+  }
+
+  WithLocalization.displayName = `WithLocalization(${displayName(Inner)})`;
+  WithLocalization.contextTypes = {
+    l10n: isReactLocalization
+  };
+  return WithLocalization;
+}
+
+function displayName(component) {
+  return component.displayName || component.name || "Component";
+}
+// CONCATENATED MODULE: ./node_modules/fluent-react/vendor/omittedCloseTags.js
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in this directory.
+ */
+// For HTML, certain tags should omit their close tag. We keep a whitelist for
+// those special-case tags.
+var omittedCloseTags = {
+  area: true,
+  base: true,
+  br: true,
+  col: true,
+  embed: true,
+  hr: true,
+  img: true,
+  input: true,
+  keygen: true,
+  link: true,
+  meta: true,
+  param: true,
+  source: true,
+  track: true,
+  wbr: true // NOTE: menuitem's close tag should be omitted, but that causes problems.
+
+};
+/* harmony default export */ var vendor_omittedCloseTags = (omittedCloseTags);
+// CONCATENATED MODULE: ./node_modules/fluent-react/vendor/voidElementTags.js
+/**
+ * Copyright (c) 2013-present, Facebook, Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in this directory.
+ */
+ // For HTML, certain tags cannot have children. This has the same purpose as
+// `omittedCloseTags` except that `menuitem` should still have its closing tag.
+
+var voidElementTags = {
+  menuitem: true,
+  ...vendor_omittedCloseTags
+};
+/* harmony default export */ var vendor_voidElementTags = (voidElementTags);
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/localized.js
+
+
+
+ // Match the opening angle bracket (<) in HTML tags, and HTML entities like
+// &amp;, &#0038;, &#x0026;.
+
+const reMarkup = /<|&#?\w+;/;
+/*
+ * Prepare props passed to `Localized` for formatting.
+ */
+
+function toArguments(props) {
+  const args = {};
+  const elems = {};
+
+  for (const [propname, propval] of Object.entries(props)) {
+    if (propname.startsWith("$")) {
+      const name = propname.substr(1);
+      args[name] = propval;
+    } else if (Object(external_React_["isValidElement"])(propval)) {
+      // We'll try to match localNames of elements found in the translation with
+      // names of elements passed as props. localNames are always lowercase.
+      const name = propname.toLowerCase();
+      elems[name] = propval;
+    }
+  }
+
+  return [args, elems];
+}
+/*
+ * The `Localized` class renders its child with translated props and children.
+ *
+ *     <Localized id="hello-world">
+ *         <p>{'Hello, world!'}</p>
+ *     </Localized>
+ *
+ * The `id` prop should be the unique identifier of the translation.  Any
+ * attributes found in the translation will be applied to the wrapped element.
+ *
+ * Arguments to the translation can be passed as `$`-prefixed props on
+ * `Localized`.
+ *
+ *     <Localized id="hello-world" $username={name}>
+ *         <p>{'Hello, { $username }!'}</p>
+ *     </Localized>
+ *
+ *  It's recommended that the contents of the wrapped component be a string
+ *  expression.  The string will be used as the ultimate fallback if no
+ *  translation is available.  It also makes it easy to grep for strings in the
+ *  source code.
+ */
+
+
+class localized_Localized extends external_React_["Component"] {
+  componentDidMount() {
+    const {
+      l10n
+    } = this.context;
+
+    if (l10n) {
+      l10n.subscribe(this);
+    }
+  }
+
+  componentWillUnmount() {
+    const {
+      l10n
+    } = this.context;
+
+    if (l10n) {
+      l10n.unsubscribe(this);
+    }
+  }
+  /*
+   * Rerender this component in a new language.
+   */
+
+
+  relocalize() {
+    // When the `ReactLocalization`'s fallback chain changes, update the
+    // component.
+    this.forceUpdate();
+  }
+
+  render() {
+    const {
+      l10n,
+      parseMarkup
+    } = this.context;
+    const {
+      id,
+      attrs,
+      children: elem
+    } = this.props; // Validate that the child element isn't an array
+
+    if (Array.isArray(elem)) {
+      throw new Error("<Localized/> expected to receive a single " + "React node child");
+    }
+
+    if (!l10n) {
+      // Use the wrapped component as fallback.
+      return elem;
+    }
+
+    const bundle = l10n.getBundle(id);
+
+    if (bundle === null) {
+      // Use the wrapped component as fallback.
+      return elem;
+    }
+
+    const msg = bundle.getMessage(id);
+    const [args, elems] = toArguments(this.props);
+    const messageValue = bundle.format(msg, args); // Check if the fallback is a valid element -- if not then it's not
+    // markup (e.g. nothing or a fallback string) so just use the
+    // formatted message value
+
+    if (!Object(external_React_["isValidElement"])(elem)) {
+      return messageValue;
+    } // The default is to forbid all message attributes. If the attrs prop exists
+    // on the Localized instance, only set message attributes which have been
+    // explicitly allowed by the developer.
+
+
+    if (attrs && msg.attrs) {
+      var localizedProps = {};
+
+      for (const [name, allowed] of Object.entries(attrs)) {
+        if (allowed && msg.attrs.hasOwnProperty(name)) {
+          localizedProps[name] = bundle.format(msg.attrs[name], args);
+        }
+      }
+    } // If the wrapped component is a known void element, explicitly dismiss the
+    // message value and do not pass it to cloneElement in order to avoid the
+    // "void element tags must neither have `children` nor use
+    // `dangerouslySetInnerHTML`" error.
+
+
+    if (elem.type in vendor_voidElementTags) {
+      return Object(external_React_["cloneElement"])(elem, localizedProps);
+    } // If the message has a null value, we're only interested in its attributes.
+    // Do not pass the null value to cloneElement as it would nuke all children
+    // of the wrapped component.
+
+
+    if (messageValue === null) {
+      return Object(external_React_["cloneElement"])(elem, localizedProps);
+    } // If the message value doesn't contain any markup nor any HTML entities,
+    // insert it as the only child of the wrapped component.
+
+
+    if (!reMarkup.test(messageValue)) {
+      return Object(external_React_["cloneElement"])(elem, localizedProps, messageValue);
+    } // If the message contains markup, parse it and try to match the children
+    // found in the translation with the props passed to this Localized.
+
+
+    const translationNodes = parseMarkup(messageValue);
+    const translatedChildren = translationNodes.map(childNode => {
+      if (childNode.nodeType === childNode.TEXT_NODE) {
+        return childNode.textContent;
+      } // If the child is not expected just take its textContent.
+
+
+      if (!elems.hasOwnProperty(childNode.localName)) {
+        return childNode.textContent;
+      }
+
+      const sourceChild = elems[childNode.localName]; // If the element passed as a prop to <Localized> is a known void element,
+      // explicitly dismiss any textContent which might have accidentally been
+      // defined in the translation to prevent the "void element tags must not
+      // have children" error.
+
+      if (sourceChild.type in vendor_voidElementTags) {
+        return sourceChild;
+      } // TODO Protect contents of elements wrapped in <Localized>
+      // https://github.com/projectfluent/fluent.js/issues/184
+      // TODO  Control localizable attributes on elements passed as props
+      // https://github.com/projectfluent/fluent.js/issues/185
+
+
+      return Object(external_React_["cloneElement"])(sourceChild, null, childNode.textContent);
+    });
+    return Object(external_React_["cloneElement"])(elem, localizedProps, ...translatedChildren);
+  }
+
+}
+localized_Localized.contextTypes = {
+  l10n: isReactLocalization,
+  parseMarkup: external_PropTypes_default.a.func
+};
+localized_Localized.propTypes = {
+  children: external_PropTypes_default.a.node
+};
+// CONCATENATED MODULE: ./node_modules/fluent-react/src/index.js
+/* concated harmony reexport LocalizationProvider */__webpack_require__.d(__webpack_exports__, "LocalizationProvider", function() { return provider_LocalizationProvider; });
+/* concated harmony reexport withLocalization */__webpack_require__.d(__webpack_exports__, "withLocalization", function() { return withLocalization; });
+/* concated harmony reexport Localized */__webpack_require__.d(__webpack_exports__, "Localized", function() { return localized_Localized; });
+/* concated harmony reexport ReactLocalization */__webpack_require__.d(__webpack_exports__, "ReactLocalization", function() { return localization_ReactLocalization; });
+/* concated harmony reexport isReactLocalization */__webpack_require__.d(__webpack_exports__, "isReactLocalization", function() { return isReactLocalization; });
+/*
+ * @module fluent-react
+ * @overview
+ *
+
+ * `fluent-react` provides React bindings for Fluent.  It takes advantage of
+ * React's Components system and the virtual DOM.  Translations are exposed to
+ * components via the provider pattern.
+ *
+ *     <LocalizationProvider bundles={…}>
+ *         <Localized id="hello-world">
+ *             <p>{'Hello, world!'}</p>
+ *         </Localized>
+ *     </LocalizationProvider>
+ *
+ * Consult the documentation of the `LocalizationProvider` and the `Localized`
+ * components for more information.
+ */
+
+
+
+
+
+/***/ }),
+/* 53 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+
+// EXTERNAL MODULE: external "React"
+var external_React_ = __webpack_require__(10);
 var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_);
 
 // EXTERNAL MODULE: ./content-src/asrouter/templates/EOYSnippet/EOYSnippet.schema.json
-var EOYSnippet_schema = __webpack_require__(20);
+var EOYSnippet_schema = __webpack_require__(19);
 
 // CONCATENATED MODULE: ./content-src/asrouter/components/Button/Button.jsx
 
@@ -9119,13 +9892,13 @@ const ConditionalWrapper = ({
   children
 }) => condition ? wrap(children) : children;
 // EXTERNAL MODULE: ./content-src/asrouter/components/RichText/RichText.jsx
-var RichText = __webpack_require__(18);
+var RichText = __webpack_require__(17);
 
 // EXTERNAL MODULE: ./content-src/asrouter/template-utils.js
-var template_utils = __webpack_require__(19);
+var template_utils = __webpack_require__(18);
 
 // EXTERNAL MODULE: ./content-src/asrouter/templates/SimpleSnippet/SimpleSnippet.schema.json
-var SimpleSnippet_schema = __webpack_require__(21);
+var SimpleSnippet_schema = __webpack_require__(20);
 
 // CONCATENATED MODULE: ./content-src/asrouter/components/SnippetBase/SnippetBase.jsx
 
@@ -9243,7 +10016,7 @@ function _extends() { _extends = Object.assign || function (target) { for (var i
 
 
 
-const DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png"; // Alt text if available; in the future this should come from the server. See bug 1551711
+const DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png"; // Alt text placeholder in case the prop from the server isn't available
 
 const ICON_ALT_TEXT = "";
 class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent {
@@ -9416,11 +10189,11 @@ class SimpleSnippet_SimpleSnippet extends external_React_default.a.PureComponent
     }, external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(props.content.icon) || DEFAULT_ICON_PATH,
       className: "icon icon-light-theme",
-      alt: ICON_ALT_TEXT
+      alt: props.content.icon_alt_text || ICON_ALT_TEXT
     }), external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(props.content.icon_dark_theme || props.content.icon) || DEFAULT_ICON_PATH,
       className: "icon icon-dark-theme",
-      alt: ICON_ALT_TEXT
+      alt: props.content.icon_alt_text || ICON_ALT_TEXT
     }), external_React_default.a.createElement("div", null, this.renderTitle(), " ", external_React_default.a.createElement("p", {
       className: "body"
     }, this.renderText()), this.props.extraContent), external_React_default.a.createElement("div", null, this.renderButton())));
@@ -9573,7 +10346,7 @@ const EOYSnippet = props => {
   }));
 };
 // EXTERNAL MODULE: ./content-src/asrouter/templates/FXASignupSnippet/FXASignupSnippet.schema.json
-var FXASignupSnippet_schema = __webpack_require__(22);
+var FXASignupSnippet_schema = __webpack_require__(21);
 
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SubmitFormSnippet/SubmitFormSnippet.jsx
 function SubmitFormSnippet_extends() { SubmitFormSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return SubmitFormSnippet_extends.apply(this, arguments); }
@@ -9583,7 +10356,7 @@ function SubmitFormSnippet_extends() { SubmitFormSnippet_extends = Object.assign
 
 
 
- // Alt text if available; in the future this should come from the server. See bug 1551711
+ // Alt text placeholder in case the prop from the server isn't available
 
 const SubmitFormSnippet_ICON_ALT_TEXT = "";
 class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureComponent {
@@ -9674,8 +10447,8 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
         id: "NEWTAB_FOOTER_BAR_CONTENT"
       });
     } else {
-      console.error("There was a problem submitting the form", json || "[No JSON response]"); // eslint-disable-line no-console
-
+      // eslint-disable-next-line no-console
+      console.error("There was a problem submitting the form", json || "[No JSON response]");
       this.setState({
         signupSuccess: false,
         signupSubmitted: true
@@ -9829,11 +10602,11 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
     }, external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(content.scene2_icon),
       className: "icon-light-theme",
-      alt: SubmitFormSnippet_ICON_ALT_TEXT
+      alt: content.scene2_icon_alt_text || SubmitFormSnippet_ICON_ALT_TEXT
     }), external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(content.scene2_icon_dark_theme || content.scene2_icon),
       className: "icon-dark-theme",
-      alt: SubmitFormSnippet_ICON_ALT_TEXT
+      alt: content.scene2_icon_alt_text || SubmitFormSnippet_ICON_ALT_TEXT
     })) : null, external_React_default.a.createElement("div", {
       className: "message"
     }, external_React_default.a.createElement("p", null, content.scene2_title && external_React_default.a.createElement("h3", {
@@ -9915,7 +10688,7 @@ const FXASignupSnippet = props => {
   }));
 };
 // EXTERNAL MODULE: ./content-src/asrouter/templates/NewsletterSnippet/NewsletterSnippet.schema.json
-var NewsletterSnippet_schema = __webpack_require__(23);
+var NewsletterSnippet_schema = __webpack_require__(22);
 
 // CONCATENATED MODULE: ./content-src/asrouter/templates/NewsletterSnippet/NewsletterSnippet.jsx
 function NewsletterSnippet_extends() { NewsletterSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return NewsletterSnippet_extends.apply(this, arguments); }
@@ -9988,7 +10761,7 @@ function isEmailOrPhoneNumber(val, content) {
   return "";
 }
 // EXTERNAL MODULE: ./content-src/asrouter/templates/SendToDeviceSnippet/SendToDeviceSnippet.schema.json
-var SendToDeviceSnippet_schema = __webpack_require__(24);
+var SendToDeviceSnippet_schema = __webpack_require__(23);
 
 // CONCATENATED MODULE: ./content-src/asrouter/templates/SendToDeviceSnippet/SendToDeviceSnippet.jsx
 function SendToDeviceSnippet_extends() { SendToDeviceSnippet_extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return SendToDeviceSnippet_extends.apply(this, arguments); }
@@ -10063,7 +10836,7 @@ function SimpleBelowSearchSnippet_extends() { SimpleBelowSearchSnippet_extends =
 
 
 
-const SimpleBelowSearchSnippet_DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png"; // Alt text if available; in the future this should come from the server. See bug 1551711
+const SimpleBelowSearchSnippet_DEFAULT_ICON_PATH = "chrome://branding/content/icon64.png"; // Alt text placeholder in case the prop from the server isn't available
 
 const SimpleBelowSearchSnippet_ICON_ALT_TEXT = "";
 class SimpleBelowSearchSnippet_SimpleBelowSearchSnippet extends external_React_default.a.PureComponent {
@@ -10096,11 +10869,11 @@ class SimpleBelowSearchSnippet_SimpleBelowSearchSnippet extends external_React_d
     }), external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(props.content.icon) || SimpleBelowSearchSnippet_DEFAULT_ICON_PATH,
       className: "icon icon-light-theme",
-      alt: SimpleBelowSearchSnippet_ICON_ALT_TEXT
+      alt: props.content.icon_alt_text || SimpleBelowSearchSnippet_ICON_ALT_TEXT
     }), external_React_default.a.createElement("img", {
       src: Object(template_utils["safeURI"])(props.content.icon_dark_theme || props.content.icon) || SimpleBelowSearchSnippet_DEFAULT_ICON_PATH,
       className: "icon icon-dark-theme",
-      alt: SimpleBelowSearchSnippet_ICON_ALT_TEXT
+      alt: props.content.icon_alt_text || SimpleBelowSearchSnippet_ICON_ALT_TEXT
     }), external_React_default.a.createElement("div", null, external_React_default.a.createElement("p", {
       className: "body"
     }, this.renderText()), this.props.extraContent));
@@ -10126,987 +10899,12 @@ const SnippetsTemplates = {
 };
 
 /***/ }),
-/* 55 */
+/* 54 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 
-// CONCATENATED MODULE: ./node_modules/fluent/src/parser.js
-/*  eslint no-magic-numbers: [0]  */
-const MAX_PLACEABLES = 100;
-const entryIdentifierRe = /-?[a-zA-Z][a-zA-Z0-9_-]*/y;
-const identifierRe = /[a-zA-Z][a-zA-Z0-9_-]*/y;
-const functionIdentifierRe = /^[A-Z][A-Z_?-]*$/;
-/**
- * The `Parser` class is responsible for parsing FTL resources.
- *
- * It's only public method is `getResource(source)` which takes an FTL string
- * and returns a two element Array with an Object of entries generated from the
- * source as the first element and an array of SyntaxError objects as the
- * second.
- *
- * This parser is optimized for runtime performance.
- *
- * There is an equivalent of this parser in syntax/parser which is
- * generating full AST which is useful for FTL tools.
- */
-
-class RuntimeParser {
-  /**
-   * Parse FTL code into entries formattable by the MessageContext.
-   *
-   * Given a string of FTL syntax, return a map of entries that can be passed
-   * to MessageContext.format and a list of errors encountered during parsing.
-   *
-   * @param {String} string
-   * @returns {Array<Object, Array>}
-   */
-  getResource(string) {
-    this._source = string;
-    this._index = 0;
-    this._length = string.length;
-    this.entries = {};
-    const errors = [];
-    this.skipWS();
-
-    while (this._index < this._length) {
-      try {
-        this.getEntry();
-      } catch (e) {
-        if (e instanceof SyntaxError) {
-          errors.push(e);
-          this.skipToNextEntryStart();
-        } else {
-          throw e;
-        }
-      }
-
-      this.skipWS();
-    }
-
-    return [this.entries, errors];
-  }
-  /**
-   * Parse the source string from the current index as an FTL entry
-   * and add it to object's entries property.
-   *
-   * @private
-   */
-
-
-  getEntry() {
-    // The index here should either be at the beginning of the file
-    // or right after new line.
-    if (this._index !== 0 && this._source[this._index - 1] !== "\n") {
-      throw this.error(`Expected an entry to start
-        at the beginning of the file or on a new line.`);
-    }
-
-    const ch = this._source[this._index]; // We don't care about comments or sections at runtime
-
-    if (ch === "/" || ch === "#" && [" ", "#", "\n"].includes(this._source[this._index + 1])) {
-      this.skipComment();
-      return;
-    }
-
-    if (ch === "[") {
-      this.skipSection();
-      return;
-    }
-
-    this.getMessage();
-  }
-  /**
-   * Skip the section entry from the current index.
-   *
-   * @private
-   */
-
-
-  skipSection() {
-    this._index += 1;
-
-    if (this._source[this._index] !== "[") {
-      throw this.error('Expected "[[" to open a section');
-    }
-
-    this._index += 1;
-    this.skipInlineWS();
-    this.getVariantName();
-    this.skipInlineWS();
-
-    if (this._source[this._index] !== "]" || this._source[this._index + 1] !== "]") {
-      throw this.error('Expected "]]" to close a section');
-    }
-
-    this._index += 2;
-  }
-  /**
-   * Parse the source string from the current index as an FTL message
-   * and add it to the entries property on the Parser.
-   *
-   * @private
-   */
-
-
-  getMessage() {
-    const id = this.getEntryIdentifier();
-    this.skipInlineWS();
-
-    if (this._source[this._index] === "=") {
-      this._index++;
-    }
-
-    this.skipInlineWS();
-    const val = this.getPattern();
-
-    if (id.startsWith("-") && val === null) {
-      throw this.error("Expected term to have a value");
-    }
-
-    let attrs = null;
-
-    if (this._source[this._index] === " ") {
-      const lineStart = this._index;
-      this.skipInlineWS();
-
-      if (this._source[this._index] === ".") {
-        this._index = lineStart;
-        attrs = this.getAttributes();
-      }
-    }
-
-    if (attrs === null && typeof val === "string") {
-      this.entries[id] = val;
-    } else {
-      if (val === null && attrs === null) {
-        throw this.error("Expected message to have a value or attributes");
-      }
-
-      this.entries[id] = {};
-
-      if (val !== null) {
-        this.entries[id].val = val;
-      }
-
-      if (attrs !== null) {
-        this.entries[id].attrs = attrs;
-      }
-    }
-  }
-  /**
-   * Skip whitespace.
-   *
-   * @private
-   */
-
-
-  skipWS() {
-    let ch = this._source[this._index];
-
-    while (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") {
-      ch = this._source[++this._index];
-    }
-  }
-  /**
-   * Skip inline whitespace (space and \t).
-   *
-   * @private
-   */
-
-
-  skipInlineWS() {
-    let ch = this._source[this._index];
-
-    while (ch === " " || ch === "\t") {
-      ch = this._source[++this._index];
-    }
-  }
-  /**
-   * Skip blank lines.
-   *
-   * @private
-   */
-
-
-  skipBlankLines() {
-    while (true) {
-      const ptr = this._index;
-      this.skipInlineWS();
-
-      if (this._source[this._index] === "\n") {
-        this._index += 1;
-      } else {
-        this._index = ptr;
-        break;
-      }
-    }
-  }
-  /**
-   * Get identifier using the provided regex.
-   *
-   * By default this will get identifiers of public messages, attributes and
-   * external arguments (without the $).
-   *
-   * @returns {String}
-   * @private
-   */
-
-
-  getIdentifier(re = identifierRe) {
-    re.lastIndex = this._index;
-    const result = re.exec(this._source);
-
-    if (result === null) {
-      this._index += 1;
-      throw this.error(`Expected an identifier [${re.toString()}]`);
-    }
-
-    this._index = re.lastIndex;
-    return result[0];
-  }
-  /**
-   * Get identifier of a Message or a Term (staring with a dash).
-   *
-   * @returns {String}
-   * @private
-   */
-
-
-  getEntryIdentifier() {
-    return this.getIdentifier(entryIdentifierRe);
-  }
-  /**
-   * Get Variant name.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getVariantName() {
-    let name = "";
-    const start = this._index;
-
-    let cc = this._source.charCodeAt(this._index);
-
-    if (cc >= 97 && cc <= 122 || // a-z
-    cc >= 65 && cc <= 90 || // A-Z
-    cc === 95 || cc === 32) {
-      // _ <space>
-      cc = this._source.charCodeAt(++this._index);
-    } else {
-      throw this.error("Expected a keyword (starting with [a-zA-Z_])");
-    }
-
-    while (cc >= 97 && cc <= 122 || // a-z
-    cc >= 65 && cc <= 90 || // A-Z
-    cc >= 48 && cc <= 57 || // 0-9
-    cc === 95 || cc === 45 || cc === 32) {
-      // _- <space>
-      cc = this._source.charCodeAt(++this._index);
-    } // If we encountered the end of name, we want to test if the last
-    // collected character is a space.
-    // If it is, we will backtrack to the last non-space character because
-    // the keyword cannot end with a space character.
-
-
-    while (this._source.charCodeAt(this._index - 1) === 32) {
-      this._index--;
-    }
-
-    name += this._source.slice(start, this._index);
-    return {
-      type: "varname",
-      name
-    };
-  }
-  /**
-   * Get simple string argument enclosed in `"`.
-   *
-   * @returns {String}
-   * @private
-   */
-
-
-  getString() {
-    const start = this._index + 1;
-
-    while (++this._index < this._length) {
-      const ch = this._source[this._index];
-
-      if (ch === '"') {
-        break;
-      }
-
-      if (ch === "\n") {
-        throw this.error("Unterminated string expression");
-      }
-    }
-
-    return this._source.substring(start, this._index++);
-  }
-  /**
-   * Parses a Message pattern.
-   * Message Pattern may be a simple string or an array of strings
-   * and placeable expressions.
-   *
-   * @returns {String|Array}
-   * @private
-   */
-
-
-  getPattern() {
-    // We're going to first try to see if the pattern is simple.
-    // If it is we can just look for the end of the line and read the string.
-    //
-    // Then, if either the line contains a placeable opening `{` or the
-    // next line starts an indentation, we switch to complex pattern.
-    const start = this._index;
-
-    let eol = this._source.indexOf("\n", this._index);
-
-    if (eol === -1) {
-      eol = this._length;
-    }
-
-    const firstLineContent = start !== eol ? this._source.slice(start, eol) : null;
-
-    if (firstLineContent && firstLineContent.includes("{")) {
-      return this.getComplexPattern();
-    }
-
-    this._index = eol + 1;
-    this.skipBlankLines();
-
-    if (this._source[this._index] !== " ") {
-      // No indentation means we're done with this message. Callers should check
-      // if the return value here is null. It may be OK for messages, but not OK
-      // for terms, attributes and variants.
-      return firstLineContent;
-    }
-
-    const lineStart = this._index;
-    this.skipInlineWS();
-
-    if (this._source[this._index] === ".") {
-      // The pattern is followed by an attribute. Rewind _index to the first
-      // column of the current line as expected by getAttributes.
-      this._index = lineStart;
-      return firstLineContent;
-    }
-
-    if (firstLineContent) {
-      // It's a multiline pattern which started on the same line as the
-      // identifier. Reparse the whole pattern to make sure we get all of it.
-      this._index = start;
-    }
-
-    return this.getComplexPattern();
-  }
-  /**
-   * Parses a complex Message pattern.
-   * This function is called by getPattern when the message is multiline,
-   * or contains escape chars or placeables.
-   * It does full parsing of complex patterns.
-   *
-   * @returns {Array}
-   * @private
-   */
-
-  /* eslint-disable complexity */
-
-
-  getComplexPattern() {
-    let buffer = "";
-    const content = [];
-    let placeables = 0;
-    let ch = this._source[this._index];
-
-    while (this._index < this._length) {
-      // This block handles multi-line strings combining strings separated
-      // by new line.
-      if (ch === "\n") {
-        this._index++; // We want to capture the start and end pointers
-        // around blank lines and add them to the buffer
-        // but only if the blank lines are in the middle
-        // of the string.
-
-        const blankLinesStart = this._index;
-        this.skipBlankLines();
-        const blankLinesEnd = this._index;
-
-        if (this._source[this._index] !== " ") {
-          break;
-        }
-
-        this.skipInlineWS();
-
-        if (this._source[this._index] === "}" || this._source[this._index] === "[" || this._source[this._index] === "*" || this._source[this._index] === ".") {
-          this._index = blankLinesEnd;
-          break;
-        }
-
-        buffer += this._source.substring(blankLinesStart, blankLinesEnd);
-
-        if (buffer.length || content.length) {
-          buffer += "\n";
-        }
-
-        ch = this._source[this._index];
-        continue;
-      } else if (ch === "\\") {
-        const ch2 = this._source[this._index + 1];
-
-        if (ch2 === '"' || ch2 === "{" || ch2 === "\\") {
-          ch = ch2;
-          this._index++;
-        }
-      } else if (ch === "{") {
-        // Push the buffer to content array right before placeable
-        if (buffer.length) {
-          content.push(buffer);
-        }
-
-        if (placeables > MAX_PLACEABLES - 1) {
-          throw this.error(`Too many placeables, maximum allowed is ${MAX_PLACEABLES}`);
-        }
-
-        buffer = "";
-        content.push(this.getPlaceable());
-        this._index++;
-        ch = this._source[this._index];
-        placeables++;
-        continue;
-      }
-
-      if (ch) {
-        buffer += ch;
-      }
-
-      this._index++;
-      ch = this._source[this._index];
-    }
-
-    if (content.length === 0) {
-      return buffer.length ? buffer : null;
-    }
-
-    if (buffer.length) {
-      content.push(buffer);
-    }
-
-    return content;
-  }
-  /* eslint-enable complexity */
-
-  /**
-   * Parses a single placeable in a Message pattern and returns its
-   * expression.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getPlaceable() {
-    const start = ++this._index;
-    this.skipWS();
-
-    if (this._source[this._index] === "*" || this._source[this._index] === "[" && this._source[this._index + 1] !== "]") {
-      const variants = this.getVariants();
-      return {
-        type: "sel",
-        exp: null,
-        vars: variants[0],
-        def: variants[1]
-      };
-    } // Rewind the index and only support in-line white-space now.
-
-
-    this._index = start;
-    this.skipInlineWS();
-    const selector = this.getSelectorExpression();
-    this.skipWS();
-    const ch = this._source[this._index];
-
-    if (ch === "}") {
-      if (selector.type === "attr" && selector.id.name.startsWith("-")) {
-        throw this.error("Attributes of private messages cannot be interpolated.");
-      }
-
-      return selector;
-    }
-
-    if (ch !== "-" || this._source[this._index + 1] !== ">") {
-      throw this.error('Expected "}" or "->"');
-    }
-
-    if (selector.type === "ref") {
-      throw this.error("Message references cannot be used as selectors.");
-    }
-
-    if (selector.type === "var") {
-      throw this.error("Variants cannot be used as selectors.");
-    }
-
-    if (selector.type === "attr" && !selector.id.name.startsWith("-")) {
-      throw this.error("Attributes of public messages cannot be used as selectors.");
-    }
-
-    this._index += 2; // ->
-
-    this.skipInlineWS();
-
-    if (this._source[this._index] !== "\n") {
-      throw this.error("Variants should be listed in a new line");
-    }
-
-    this.skipWS();
-    const variants = this.getVariants();
-
-    if (variants[0].length === 0) {
-      throw this.error("Expected members for the select expression");
-    }
-
-    return {
-      type: "sel",
-      exp: selector,
-      vars: variants[0],
-      def: variants[1]
-    };
-  }
-  /**
-   * Parses a selector expression.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getSelectorExpression() {
-    const literal = this.getLiteral();
-
-    if (literal.type !== "ref") {
-      return literal;
-    }
-
-    if (this._source[this._index] === ".") {
-      this._index++;
-      const name = this.getIdentifier();
-      this._index++;
-      return {
-        type: "attr",
-        id: literal,
-        name
-      };
-    }
-
-    if (this._source[this._index] === "[") {
-      this._index++;
-      const key = this.getVariantKey();
-      this._index++;
-      return {
-        type: "var",
-        id: literal,
-        key
-      };
-    }
-
-    if (this._source[this._index] === "(") {
-      this._index++;
-      const args = this.getCallArgs();
-
-      if (!functionIdentifierRe.test(literal.name)) {
-        throw this.error("Function names must be all upper-case");
-      }
-
-      this._index++;
-      literal.type = "fun";
-      return {
-        type: "call",
-        fun: literal,
-        args
-      };
-    }
-
-    return literal;
-  }
-  /**
-   * Parses call arguments for a CallExpression.
-   *
-   * @returns {Array}
-   * @private
-   */
-
-
-  getCallArgs() {
-    const args = [];
-
-    while (this._index < this._length) {
-      this.skipInlineWS();
-
-      if (this._source[this._index] === ")") {
-        return args;
-      }
-
-      const exp = this.getSelectorExpression(); // MessageReference in this place may be an entity reference, like:
-      // `call(foo)`, or, if it's followed by `:` it will be a key-value pair.
-
-      if (exp.type !== "ref") {
-        args.push(exp);
-      } else {
-        this.skipInlineWS();
-
-        if (this._source[this._index] === ":") {
-          this._index++;
-          this.skipInlineWS();
-          const val = this.getSelectorExpression(); // If the expression returned as a value of the argument
-          // is not a quote delimited string or number, throw.
-          //
-          // We don't have to check here if the pattern is quote delimited
-          // because that's the only type of string allowed in expressions.
-
-          if (typeof val === "string" || Array.isArray(val) || val.type === "num") {
-            args.push({
-              type: "narg",
-              name: exp.name,
-              val
-            });
-          } else {
-            this._index = this._source.lastIndexOf(":", this._index) + 1;
-            throw this.error("Expected string in quotes, number.");
-          }
-        } else {
-          args.push(exp);
-        }
-      }
-
-      this.skipInlineWS();
-
-      if (this._source[this._index] === ")") {
-        break;
-      } else if (this._source[this._index] === ",") {
-        this._index++;
-      } else {
-        throw this.error('Expected "," or ")"');
-      }
-    }
-
-    return args;
-  }
-  /**
-   * Parses an FTL Number.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getNumber() {
-    let num = "";
-
-    let cc = this._source.charCodeAt(this._index); // The number literal may start with negative sign `-`.
-
-
-    if (cc === 45) {
-      num += "-";
-      cc = this._source.charCodeAt(++this._index);
-    } // next, we expect at least one digit
-
-
-    if (cc < 48 || cc > 57) {
-      throw this.error(`Unknown literal "${num}"`);
-    } // followed by potentially more digits
-
-
-    while (cc >= 48 && cc <= 57) {
-      num += this._source[this._index++];
-      cc = this._source.charCodeAt(this._index);
-    } // followed by an optional decimal separator `.`
-
-
-    if (cc === 46) {
-      num += this._source[this._index++];
-      cc = this._source.charCodeAt(this._index); // followed by at least one digit
-
-      if (cc < 48 || cc > 57) {
-        throw this.error(`Unknown literal "${num}"`);
-      } // and optionally more digits
-
-
-      while (cc >= 48 && cc <= 57) {
-        num += this._source[this._index++];
-        cc = this._source.charCodeAt(this._index);
-      }
-    }
-
-    return {
-      type: "num",
-      val: num
-    };
-  }
-  /**
-   * Parses a list of Message attributes.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getAttributes() {
-    const attrs = {};
-
-    while (this._index < this._length) {
-      if (this._source[this._index] !== " ") {
-        break;
-      }
-
-      this.skipInlineWS();
-
-      if (this._source[this._index] !== ".") {
-        break;
-      }
-
-      this._index++;
-      const key = this.getIdentifier();
-      this.skipInlineWS();
-
-      if (this._source[this._index] !== "=") {
-        throw this.error('Expected "="');
-      }
-
-      this._index++;
-      this.skipInlineWS();
-      const val = this.getPattern();
-
-      if (val === null) {
-        throw this.error("Expected attribute to have a value");
-      }
-
-      if (typeof val === "string") {
-        attrs[key] = val;
-      } else {
-        attrs[key] = {
-          val
-        };
-      }
-
-      this.skipBlankLines();
-    }
-
-    return attrs;
-  }
-  /**
-   * Parses a list of Selector variants.
-   *
-   * @returns {Array}
-   * @private
-   */
-
-
-  getVariants() {
-    const variants = [];
-    let index = 0;
-    let defaultIndex;
-
-    while (this._index < this._length) {
-      const ch = this._source[this._index];
-
-      if ((ch !== "[" || this._source[this._index + 1] === "[") && ch !== "*") {
-        break;
-      }
-
-      if (ch === "*") {
-        this._index++;
-        defaultIndex = index;
-      }
-
-      if (this._source[this._index] !== "[") {
-        throw this.error('Expected "["');
-      }
-
-      this._index++;
-      const key = this.getVariantKey();
-      this.skipInlineWS();
-      const val = this.getPattern();
-
-      if (val === null) {
-        throw this.error("Expected variant to have a value");
-      }
-
-      variants[index++] = {
-        key,
-        val
-      };
-      this.skipWS();
-    }
-
-    return [variants, defaultIndex];
-  }
-  /**
-   * Parses a Variant key.
-   *
-   * @returns {String}
-   * @private
-   */
-
-
-  getVariantKey() {
-    // VariantKey may be a Keyword or Number
-    const cc = this._source.charCodeAt(this._index);
-
-    let literal;
-
-    if (cc >= 48 && cc <= 57 || cc === 45) {
-      literal = this.getNumber();
-    } else {
-      literal = this.getVariantName();
-    }
-
-    if (this._source[this._index] !== "]") {
-      throw this.error('Expected "]"');
-    }
-
-    this._index++;
-    return literal;
-  }
-  /**
-   * Parses an FTL literal.
-   *
-   * @returns {Object}
-   * @private
-   */
-
-
-  getLiteral() {
-    const cc0 = this._source.charCodeAt(this._index);
-
-    if (cc0 === 36) {
-      // $
-      this._index++;
-      return {
-        type: "ext",
-        name: this.getIdentifier()
-      };
-    }
-
-    const cc1 = cc0 === 45 // -
-    // Peek at the next character after the dash.
-    ? this._source.charCodeAt(this._index + 1) // Or keep using the character at the current index.
-    : cc0;
-
-    if (cc1 >= 97 && cc1 <= 122 || // a-z
-    cc1 >= 65 && cc1 <= 90) {
-      // A-Z
-      return {
-        type: "ref",
-        name: this.getEntryIdentifier()
-      };
-    }
-
-    if (cc1 >= 48 && cc1 <= 57) {
-      // 0-9
-      return this.getNumber();
-    }
-
-    if (cc0 === 34) {
-      // "
-      return this.getString();
-    }
-
-    throw this.error("Expected literal");
-  }
-  /**
-   * Skips an FTL comment.
-   *
-   * @private
-   */
-
-
-  skipComment() {
-    // At runtime, we don't care about comments so we just have
-    // to parse them properly and skip their content.
-    let eol = this._source.indexOf("\n", this._index);
-
-    while (eol !== -1 && (this._source[eol + 1] === "/" && this._source[eol + 2] === "/" || this._source[eol + 1] === "#" && [" ", "#"].includes(this._source[eol + 2]))) {
-      this._index = eol + 3;
-      eol = this._source.indexOf("\n", this._index);
-
-      if (eol === -1) {
-        break;
-      }
-    }
-
-    if (eol === -1) {
-      this._index = this._length;
-    } else {
-      this._index = eol + 1;
-    }
-  }
-  /**
-   * Creates a new SyntaxError object with a given message.
-   *
-   * @param {String} message
-   * @returns {Object}
-   * @private
-   */
-
-
-  error(message) {
-    return new SyntaxError(message);
-  }
-  /**
-   * Skips to the beginning of a next entry after the current position.
-   * This is used to mark the boundary of junk entry in case of error,
-   * and recover from the returned position.
-   *
-   * @private
-   */
-
-
-  skipToNextEntryStart() {
-    let start = this._index;
-
-    while (true) {
-      if (start === 0 || this._source[start - 1] === "\n") {
-        const cc = this._source.charCodeAt(start);
-
-        if (cc >= 97 && cc <= 122 || // a-z
-        cc >= 65 && cc <= 90 || // A-Z
-        cc === 47 || cc === 91) {
-          // /[
-          this._index = start;
-          return;
-        }
-      }
-
-      start = this._source.indexOf("\n", start);
-
-      if (start === -1) {
-        this._index = this._length;
-        return;
-      }
-
-      start++;
-    }
-  }
-
-}
-/**
- * Parses an FTL string using RuntimeParser and returns the generated
- * object with entries and a list of errors.
- *
- * @param {String} string
- * @returns {Array<Object, Array>}
- */
-
-
-function parse(string) {
-  const parser = new RuntimeParser();
-  return parser.getResource(string);
-}
 // CONCATENATED MODULE: ./node_modules/fluent/src/types.js
 /* global Intl */
 
@@ -11142,11 +10940,11 @@ class FluentType {
   /**
    * Format this instance of `FluentType` to a string.
    *
-   * Formatted values are suitable for use outside of the `MessageContext`.
-   * This method can use `Intl` formatters memoized by the `MessageContext`
+   * Formatted values are suitable for use outside of the `FluentBundle`.
+   * This method can use `Intl` formatters memoized by the `FluentBundle`
    * instance passed as an argument.
    *
-   * @param   {MessageContext} [ctx]
+   * @param   {FluentBundle} [bundle]
    * @returns {string}
    */
 
@@ -11167,31 +10965,15 @@ class FluentNumber extends FluentType {
     super(parseFloat(value), opts);
   }
 
-  toString(ctx) {
+  toString(bundle) {
     try {
-      const nf = ctx._memoizeIntlObject(Intl.NumberFormat, this.opts);
+      const nf = bundle._memoizeIntlObject(Intl.NumberFormat, this.opts);
 
       return nf.format(this.value);
     } catch (e) {
       // XXX Report the error.
       return this.value;
     }
-  }
-  /**
-   * Compare the object with another instance of a FluentType.
-   *
-   * @param   {MessageContext} ctx
-   * @param   {FluentType}     other
-   * @returns {bool}
-   */
-
-
-  match(ctx, other) {
-    if (other instanceof FluentNumber) {
-      return this.value === other.value;
-    }
-
-    return false;
   }
 
 }
@@ -11200,43 +10982,15 @@ class FluentDateTime extends FluentType {
     super(new Date(value), opts);
   }
 
-  toString(ctx) {
+  toString(bundle) {
     try {
-      const dtf = ctx._memoizeIntlObject(Intl.DateTimeFormat, this.opts);
+      const dtf = bundle._memoizeIntlObject(Intl.DateTimeFormat, this.opts);
 
       return dtf.format(this.value);
     } catch (e) {
       // XXX Report the error.
       return this.value;
     }
-  }
-
-}
-class FluentSymbol extends FluentType {
-  toString() {
-    return this.value;
-  }
-  /**
-   * Compare the object with another instance of a FluentType.
-   *
-   * @param   {MessageContext} ctx
-   * @param   {FluentType}     other
-   * @returns {bool}
-   */
-
-
-  match(ctx, other) {
-    if (other instanceof FluentSymbol) {
-      return this.value === other.value;
-    } else if (typeof other === "string") {
-      return this.value === other;
-    } else if (other instanceof FluentNumber) {
-      const pr = ctx._memoizeIntlObject(Intl.PluralRules, other.opts);
-
-      return this.value === pr.select(other.value);
-    }
-
-    return false;
   }
 
 }
@@ -11273,45 +11027,33 @@ function values(opts) {
   return unwrapped;
 }
 // CONCATENATED MODULE: ./node_modules/fluent/src/resolver.js
+/* global Intl */
+
 /**
  * @overview
  *
  * The role of the Fluent resolver is to format a translation object to an
  * instance of `FluentType` or an array of instances.
  *
- * Translations can contain references to other messages or external arguments,
+ * Translations can contain references to other messages or variables,
  * conditional logic in form of select expressions, traits which describe their
  * grammatical features, and can use Fluent builtins which make use of the
  * `Intl` formatters to format numbers, dates, lists and more into the
- * context's language.  See the documentation of the Fluent syntax for more
+ * bundle's language. See the documentation of the Fluent syntax for more
  * information.
  *
  * In case of errors the resolver will try to salvage as much of the
  * translation as possible.  In rare situations where the resolver didn't know
  * how to recover from an error it will return an instance of `FluentNone`.
  *
- * `MessageReference`, `VariantExpression`, `AttributeExpression` and
- * `SelectExpression` resolve to raw Runtime Entries objects and the result of
- * the resolution needs to be passed into `Type` to get their real value.
- * This is useful for composing expressions.  Consider:
- *
- *     brand-name[nominative]
- *
- * which is a `VariantExpression` with properties `id: MessageReference` and
- * `key: Keyword`.  If `MessageReference` was resolved eagerly, it would
- * instantly resolve to the value of the `brand-name` message.  Instead, we
- * want to get the message object and look for its `nominative` variant.
- *
- * All other expressions (except for `FunctionReference` which is only used in
- * `CallExpression`) resolve to an instance of `FluentType`.  The caller should
+ * All expressions resolve to an instance of `FluentType`. The caller should
  * use the `toString` method to convert the instance to a native value.
  *
- *
- * All functions in this file pass around a special object called `env`.
+ * All functions in this file pass around a special object called `scope`.
  * This object stores a set of elements used by all resolve functions:
  *
- *  * {MessageContext} ctx
- *      context for which the given resolution is happening
+ *  * {FluentBundle} bundle
+ *      bundle for which the given resolution is happening
  *  * {Object} args
  *      list of developer provided arguments that can be used
  *  * {Array} errors
@@ -11326,325 +11068,129 @@ function values(opts) {
 const MAX_PLACEABLE_LENGTH = 2500; // Unicode bidi isolation characters.
 
 const FSI = "\u2068";
-const PDI = "\u2069";
-/**
- * Helper for choosing the default value from a set of members.
- *
- * Used in SelectExpressions and Type.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} members
- *    Hash map of variants from which the default value is to be selected.
- * @param   {Number} def
- *    The index of the default variant.
- * @returns {FluentType}
- * @private
- */
+const PDI = "\u2069"; // Helper: match a variant key to the given selector.
 
-function DefaultMember(env, members, def) {
-  if (members[def]) {
-    return members[def];
+function resolver_match(bundle, selector, key) {
+  if (key === selector) {
+    // Both are strings.
+    return true;
+  } // XXX Consider comparing options too, e.g. minimumFractionDigits.
+
+
+  if (key instanceof FluentNumber && selector instanceof FluentNumber && key.value === selector.value) {
+    return true;
   }
 
-  const {
-    errors
-  } = env;
-  errors.push(new RangeError("No default"));
+  if (selector instanceof FluentNumber && typeof key === "string") {
+    let category = bundle._memoizeIntlObject(Intl.PluralRules, selector.opts).select(selector.value);
+
+    if (key === category) {
+      return true;
+    }
+  }
+
+  return false;
+} // Helper: resolve the default variant from a list of variants.
+
+
+function getDefault(scope, variants, star) {
+  if (variants[star]) {
+    return Type(scope, variants[star]);
+  }
+
+  scope.errors.push(new RangeError("No default"));
   return new FluentNone();
-}
-/**
- * Resolve a reference to another message.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} id
- *    The identifier of the message to be resolved.
- * @param   {String} id.name
- *    The name of the identifier.
- * @returns {FluentType}
- * @private
- */
+} // Helper: resolve arguments to a call expression.
 
 
-function MessageReference(env, {
-  name
-}) {
-  const {
-    ctx,
-    errors
-  } = env;
-  const message = name.startsWith("-") ? ctx._terms.get(name) : ctx._messages.get(name);
+function getArguments(scope, args) {
+  const positional = [];
+  const named = {};
 
-  if (!message) {
-    const err = name.startsWith("-") ? new ReferenceError(`Unknown term: ${name}`) : new ReferenceError(`Unknown message: ${name}`);
-    errors.push(err);
-    return new FluentNone(name);
-  }
-
-  return message;
-}
-/**
- * Resolve a variant expression to the variant object.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {Object} expr.id
- *    An Identifier of a message for which the variant is resolved.
- * @param   {Object} expr.id.name
- *    Name a message for which the variant is resolved.
- * @param   {Object} expr.key
- *    Variant key to be resolved.
- * @returns {FluentType}
- * @private
- */
-
-
-function VariantExpression(env, {
-  id,
-  key
-}) {
-  const message = MessageReference(env, id);
-
-  if (message instanceof FluentNone) {
-    return message;
-  }
-
-  const {
-    ctx,
-    errors
-  } = env;
-  const keyword = Type(env, key);
-
-  function isVariantList(node) {
-    return Array.isArray(node) && node[0].type === "sel" && node[0].exp === null;
-  }
-
-  if (isVariantList(message.val)) {
-    // Match the specified key against keys of each variant, in order.
-    for (const variant of message.val[0].vars) {
-      const variantKey = Type(env, variant.key);
-
-      if (keyword.match(ctx, variantKey)) {
-        return variant;
-      }
+  for (const arg of args) {
+    if (arg.type === "narg") {
+      named[arg.name] = Type(scope, arg.value);
+    } else {
+      positional.push(Type(scope, arg));
     }
   }
 
-  errors.push(new ReferenceError(`Unknown variant: ${keyword.toString(ctx)}`));
-  return Type(env, message);
-}
-/**
- * Resolve an attribute expression to the attribute object.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {String} expr.id
- *    An ID of a message for which the attribute is resolved.
- * @param   {String} expr.name
- *    Name of the attribute to be resolved.
- * @returns {FluentType}
- * @private
- */
+  return [positional, named];
+} // Resolve an expression to a Fluent type.
 
 
-function AttributeExpression(env, {
-  id,
-  name
-}) {
-  const message = MessageReference(env, id);
-
-  if (message instanceof FluentNone) {
-    return message;
-  }
-
-  if (message.attrs) {
-    // Match the specified name against keys of each attribute.
-    for (const attrName in message.attrs) {
-      if (name === attrName) {
-        return message.attrs[name];
-      }
-    }
-  }
-
-  const {
-    errors
-  } = env;
-  errors.push(new ReferenceError(`Unknown attribute: ${name}`));
-  return Type(env, message);
-}
-/**
- * Resolve a select expression to the member object.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {String} expr.exp
- *    Selector expression
- * @param   {Array} expr.vars
- *    List of variants for the select expression.
- * @param   {Number} expr.def
- *    Index of the default variant.
- * @returns {FluentType}
- * @private
- */
+function Type(scope, expr) {
+  // A fast-path for strings which are the most common case. Since they
+  // natively have the `toString` method they can be used as if they were
+  // a FluentType instance without incurring the cost of creating one.
+  if (typeof expr === "string") {
+    return scope.bundle._transform(expr);
+  } // A fast-path for `FluentNone` which doesn't require any additional logic.
 
 
-function SelectExpression(env, {
-  exp,
-  vars,
-  def
-}) {
-  if (exp === null) {
-    return DefaultMember(env, vars, def);
-  }
-
-  const selector = Type(env, exp);
-
-  if (selector instanceof FluentNone) {
-    return DefaultMember(env, vars, def);
-  } // Match the selector against keys of each variant, in order.
-
-
-  for (const variant of vars) {
-    const key = Type(env, variant.key);
-    const keyCanMatch = key instanceof FluentNumber || key instanceof FluentSymbol;
-
-    if (!keyCanMatch) {
-      continue;
-    }
-
-    const {
-      ctx
-    } = env;
-
-    if (key.match(ctx, selector)) {
-      return variant;
-    }
-  }
-
-  return DefaultMember(env, vars, def);
-}
-/**
- * Resolve expression to a Fluent type.
- *
- * JavaScript strings are a special case.  Since they natively have the
- * `toString` method they can be used as if they were a Fluent type without
- * paying the cost of creating a instance of one.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression object to be resolved into a Fluent type.
- * @returns {FluentType}
- * @private
- */
-
-
-function Type(env, expr) {
-  // A fast-path for strings which are the most common case, and for
-  // `FluentNone` which doesn't require any additional logic.
-  if (typeof expr === "string" || expr instanceof FluentNone) {
+  if (expr instanceof FluentNone) {
     return expr;
   } // The Runtime AST (Entries) encodes patterns (complex strings with
   // placeables) as Arrays.
 
 
   if (Array.isArray(expr)) {
-    return Pattern(env, expr);
+    return Pattern(scope, expr);
   }
 
   switch (expr.type) {
-    case "varname":
-      return new FluentSymbol(expr.name);
+    case "str":
+      return expr.value;
 
     case "num":
-      return new FluentNumber(expr.val);
-
-    case "ext":
-      return ExternalArgument(env, expr);
-
-    case "fun":
-      return FunctionReference(env, expr);
-
-    case "call":
-      return CallExpression(env, expr);
-
-    case "ref":
-      {
-        const message = MessageReference(env, expr);
-        return Type(env, message);
-      }
-
-    case "attr":
-      {
-        const attr = AttributeExpression(env, expr);
-        return Type(env, attr);
-      }
+      return new FluentNumber(expr.value, {
+        minimumFractionDigits: expr.precision
+      });
 
     case "var":
-      {
-        const variant = VariantExpression(env, expr);
-        return Type(env, variant);
-      }
+      return VariableReference(scope, expr);
 
-    case "sel":
-      {
-        const member = SelectExpression(env, expr);
-        return Type(env, member);
-      }
+    case "mesg":
+      return MessageReference(scope, expr);
+
+    case "term":
+      return TermReference(scope, expr);
+
+    case "func":
+      return FunctionReference(scope, expr);
+
+    case "select":
+      return SelectExpression(scope, expr);
 
     case undefined:
       {
         // If it's a node with a value, resolve the value.
-        if (expr.val !== null && expr.val !== undefined) {
-          return Type(env, expr.val);
+        if (expr.value !== null && expr.value !== undefined) {
+          return Type(scope, expr.value);
         }
 
-        const {
-          errors
-        } = env;
-        errors.push(new RangeError("No value"));
+        scope.errors.push(new RangeError("No value"));
         return new FluentNone();
       }
 
     default:
       return new FluentNone();
   }
-}
-/**
- * Resolve a reference to an external argument.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {String} expr.name
- *    Name of an argument to be returned.
- * @returns {FluentType}
- * @private
- */
+} // Resolve a reference to a variable.
 
 
-function ExternalArgument(env, {
+function VariableReference(scope, {
   name
 }) {
-  const {
-    args,
-    errors
-  } = env;
+  if (!scope.args || !scope.args.hasOwnProperty(name)) {
+    if (scope.insideTermReference === false) {
+      scope.errors.push(new ReferenceError(`Unknown variable: ${name}`));
+    }
 
-  if (!args || !args.hasOwnProperty(name)) {
-    errors.push(new ReferenceError(`Unknown external: ${name}`));
-    return new FluentNone(name);
+    return new FluentNone(`$${name}`);
   }
 
-  const arg = args[name]; // Return early if the argument already is an instance of FluentType.
+  const arg = scope.args[name]; // Return early if the argument already is an instance of FluentType.
 
   if (arg instanceof FluentType) {
     return arg;
@@ -11664,138 +11210,156 @@ function ExternalArgument(env, {
       }
 
     default:
-      errors.push(new TypeError(`Unsupported external type: ${name}, ${typeof arg}`));
-      return new FluentNone(name);
+      scope.errors.push(new TypeError(`Unsupported variable type: ${name}, ${typeof arg}`));
+      return new FluentNone(`$${name}`);
   }
-}
-/**
- * Resolve a reference to a function.
- *
- * @param   {Object}  env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {String} expr.name
- *    Name of the function to be returned.
- * @returns {Function}
- * @private
- */
+} // Resolve a reference to another message.
 
 
-function FunctionReference(env, {
-  name
+function MessageReference(scope, {
+  name,
+  attr
 }) {
-  // Some functions are built-in.  Others may be provided by the runtime via
-  // the `MessageContext` constructor.
-  const {
-    ctx: {
-      _functions
-    },
-    errors
-  } = env;
-  const func = _functions[name] || builtins[name];
+  const message = scope.bundle._messages.get(name);
+
+  if (!message) {
+    const err = new ReferenceError(`Unknown message: ${name}`);
+    scope.errors.push(err);
+    return new FluentNone(name);
+  }
+
+  if (attr) {
+    const attribute = message.attrs && message.attrs[attr];
+
+    if (attribute) {
+      return Type(scope, attribute);
+    }
+
+    scope.errors.push(new ReferenceError(`Unknown attribute: ${attr}`));
+    return Type(scope, message);
+  }
+
+  return Type(scope, message);
+} // Resolve a call to a Term with key-value arguments.
+
+
+function TermReference(scope, {
+  name,
+  attr,
+  args
+}) {
+  const id = `-${name}`;
+
+  const term = scope.bundle._terms.get(id);
+
+  if (!term) {
+    const err = new ReferenceError(`Unknown term: ${id}`);
+    scope.errors.push(err);
+    return new FluentNone(id);
+  } // Every TermReference has its own args.
+
+
+  const [, keyargs] = getArguments(scope, args);
+  const local = { ...scope,
+    args: keyargs,
+    insideTermReference: true
+  };
+
+  if (attr) {
+    const attribute = term.attrs && term.attrs[attr];
+
+    if (attribute) {
+      return Type(local, attribute);
+    }
+
+    scope.errors.push(new ReferenceError(`Unknown attribute: ${attr}`));
+    return Type(local, term);
+  }
+
+  return Type(local, term);
+} // Resolve a call to a Function with positional and key-value arguments.
+
+
+function FunctionReference(scope, {
+  name,
+  args
+}) {
+  // Some functions are built-in. Others may be provided by the runtime via
+  // the `FluentBundle` constructor.
+  const func = scope.bundle._functions[name] || builtins[name];
 
   if (!func) {
-    errors.push(new ReferenceError(`Unknown function: ${name}()`));
+    scope.errors.push(new ReferenceError(`Unknown function: ${name}()`));
     return new FluentNone(`${name}()`);
   }
 
   if (typeof func !== "function") {
-    errors.push(new TypeError(`Function ${name}() is not callable`));
+    scope.errors.push(new TypeError(`Function ${name}() is not callable`));
     return new FluentNone(`${name}()`);
   }
 
-  return func;
-}
-/**
- * Resolve a call to a Function with positional and key-value arguments.
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Object} expr
- *    An expression to be resolved.
- * @param   {Object} expr.fun
- *    FTL Function object.
- * @param   {Array} expr.args
- *    FTL Function argument list.
- * @returns {FluentType}
- * @private
- */
-
-
-function CallExpression(env, {
-  fun,
-  args
-}) {
-  const callee = FunctionReference(env, fun);
-
-  if (callee instanceof FluentNone) {
-    return callee;
-  }
-
-  const posargs = [];
-  const keyargs = {};
-
-  for (const arg of args) {
-    if (arg.type === "narg") {
-      keyargs[arg.name] = Type(env, arg.val);
-    } else {
-      posargs.push(Type(env, arg));
-    }
-  }
-
   try {
-    return callee(posargs, keyargs);
+    return func(...getArguments(scope, args));
   } catch (e) {
     // XXX Report errors.
     return new FluentNone();
   }
-}
-/**
- * Resolve a pattern (a complex string with placeables).
- *
- * @param   {Object} env
- *    Resolver environment object.
- * @param   {Array} ptn
- *    Array of pattern elements.
- * @returns {Array}
- * @private
- */
+} // Resolve a select expression to the member object.
 
 
-function Pattern(env, ptn) {
-  const {
-    ctx,
-    dirty,
-    errors
-  } = env;
+function SelectExpression(scope, {
+  selector,
+  variants,
+  star
+}) {
+  let sel = Type(scope, selector);
 
-  if (dirty.has(ptn)) {
-    errors.push(new RangeError("Cyclic reference"));
+  if (sel instanceof FluentNone) {
+    const variant = getDefault(scope, variants, star);
+    return Type(scope, variant);
+  } // Match the selector against keys of each variant, in order.
+
+
+  for (const variant of variants) {
+    const key = Type(scope, variant.key);
+
+    if (resolver_match(scope.bundle, sel, key)) {
+      return Type(scope, variant);
+    }
+  }
+
+  const variant = getDefault(scope, variants, star);
+  return Type(scope, variant);
+} // Resolve a pattern (a complex string with placeables).
+
+
+function Pattern(scope, ptn) {
+  if (scope.dirty.has(ptn)) {
+    scope.errors.push(new RangeError("Cyclic reference"));
     return new FluentNone();
   } // Tag the pattern as dirty for the purpose of the current resolution.
 
 
-  dirty.add(ptn);
+  scope.dirty.add(ptn);
   const result = []; // Wrap interpolations with Directional Isolate Formatting characters
   // only when the pattern has more than one element.
 
-  const useIsolating = ctx._useIsolating && ptn.length > 1;
+  const useIsolating = scope.bundle._useIsolating && ptn.length > 1;
 
   for (const elem of ptn) {
     if (typeof elem === "string") {
-      result.push(elem);
+      result.push(scope.bundle._transform(elem));
       continue;
     }
 
-    const part = Type(env, elem).toString(ctx);
+    const part = Type(scope, elem).toString(scope.bundle);
 
     if (useIsolating) {
       result.push(FSI);
     }
 
     if (part.length > MAX_PLACEABLE_LENGTH) {
-      errors.push(new RangeError("Too many characters in placeable " + `(${part.length}, max allowed is ${MAX_PLACEABLE_LENGTH})`));
+      scope.errors.push(new RangeError("Too many characters in placeable " + `(${part.length}, max allowed is ${MAX_PLACEABLE_LENGTH})`));
       result.push(part.slice(MAX_PLACEABLE_LENGTH));
     } else {
       result.push(part);
@@ -11806,14 +11370,14 @@ function Pattern(env, ptn) {
     }
   }
 
-  dirty.delete(ptn);
+  scope.dirty.delete(ptn);
   return result.join("");
 }
 /**
  * Format a translation into a string.
  *
- * @param   {MessageContext} ctx
- *    A MessageContext instance which will be used to resolve the
+ * @param   {FluentBundle} bundle
+ *    A FluentBundle instance which will be used to resolve the
  *    contextual information of the message.
  * @param   {Object}         args
  *    List of arguments provided by the developer which can be accessed
@@ -11826,46 +11390,614 @@ function Pattern(env, ptn) {
  */
 
 
-function resolve(ctx, args, message, errors = []) {
-  const env = {
-    ctx,
+function resolve(bundle, args, message, errors = []) {
+  const scope = {
+    bundle,
     args,
     errors,
-    dirty: new WeakSet()
+    dirty: new WeakSet(),
+    // TermReferences are resolved in a new scope.
+    insideTermReference: false
   };
-  return Type(env, message).toString(ctx);
+  return Type(scope, message).toString(bundle);
 }
-// CONCATENATED MODULE: ./node_modules/fluent/src/context.js
+// CONCATENATED MODULE: ./node_modules/fluent/src/error.js
+class FluentError extends Error {}
+// CONCATENATED MODULE: ./node_modules/fluent/src/resource.js
+ // This regex is used to iterate through the beginnings of messages and terms.
+// With the /m flag, the ^ matches at the beginning of every line.
+
+const RE_MESSAGE_START = /^(-?[a-zA-Z][\w-]*) *= */mg; // Both Attributes and Variants are parsed in while loops. These regexes are
+// used to break out of them.
+
+const RE_ATTRIBUTE_START = /\.([a-zA-Z][\w-]*) *= */y;
+const RE_VARIANT_START = /\*?\[/y;
+const RE_NUMBER_LITERAL = /(-?[0-9]+(?:\.([0-9]+))?)/y;
+const RE_IDENTIFIER = /([a-zA-Z][\w-]*)/y;
+const RE_REFERENCE = /([$-])?([a-zA-Z][\w-]*)(?:\.([a-zA-Z][\w-]*))?/y;
+const RE_FUNCTION_NAME = /^[A-Z][A-Z0-9_-]*$/; // A "run" is a sequence of text or string literal characters which don't
+// require any special handling. For TextElements such special characters are: {
+// (starts a placeable), and line breaks which require additional logic to check
+// if the next line is indented. For StringLiterals they are: \ (starts an
+// escape sequence), " (ends the literal), and line breaks which are not allowed
+// in StringLiterals. Note that string runs may be empty; text runs may not.
+
+const RE_TEXT_RUN = /([^{}\n\r]+)/y;
+const RE_STRING_RUN = /([^\\"\n\r]*)/y; // Escape sequences.
+
+const RE_STRING_ESCAPE = /\\([\\"])/y;
+const RE_UNICODE_ESCAPE = /\\u([a-fA-F0-9]{4})|\\U([a-fA-F0-9]{6})/y; // Used for trimming TextElements and indents.
+
+const RE_LEADING_NEWLINES = /^\n+/;
+const RE_TRAILING_SPACES = / +$/; // Used in makeIndent to strip spaces from blank lines and normalize CRLF to LF.
+
+const RE_BLANK_LINES = / *\r?\n/g; // Used in makeIndent to measure the indentation.
+
+const RE_INDENT = /( *)$/; // Common tokens.
+
+const TOKEN_BRACE_OPEN = /{\s*/y;
+const TOKEN_BRACE_CLOSE = /\s*}/y;
+const TOKEN_BRACKET_OPEN = /\[\s*/y;
+const TOKEN_BRACKET_CLOSE = /\s*] */y;
+const TOKEN_PAREN_OPEN = /\s*\(\s*/y;
+const TOKEN_ARROW = /\s*->\s*/y;
+const TOKEN_COLON = /\s*:\s*/y; // Note the optional comma. As a deviation from the Fluent EBNF, the parser
+// doesn't enforce commas between call arguments.
+
+const TOKEN_COMMA = /\s*,?\s*/y;
+const TOKEN_BLANK = /\s+/y; // Maximum number of placeables in a single Pattern to protect against Quadratic
+// Blowup attacks. See https://msdn.microsoft.com/en-us/magazine/ee335713.aspx.
+
+const MAX_PLACEABLES = 100;
+/**
+ * Fluent Resource is a structure storing a map of parsed localization entries.
+ */
+
+class resource_FluentResource extends Map {
+  /**
+   * Create a new FluentResource from Fluent code.
+   */
+  static fromString(source) {
+    RE_MESSAGE_START.lastIndex = 0;
+    let resource = new this();
+    let cursor = 0; // Iterate over the beginnings of messages and terms to efficiently skip
+    // comments and recover from errors.
+
+    while (true) {
+      let next = RE_MESSAGE_START.exec(source);
+
+      if (next === null) {
+        break;
+      }
+
+      cursor = RE_MESSAGE_START.lastIndex;
+
+      try {
+        resource.set(next[1], parseMessage());
+      } catch (err) {
+        if (err instanceof FluentError) {
+          // Don't report any Fluent syntax errors. Skip directly to the
+          // beginning of the next message or term.
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    return resource; // The parser implementation is inlined below for performance reasons.
+    // The parser focuses on minimizing the number of false negatives at the
+    // expense of increasing the risk of false positives. In other words, it
+    // aims at parsing valid Fluent messages with a success rate of 100%, but it
+    // may also parse a few invalid messages which the reference parser would
+    // reject. The parser doesn't perform any validation and may produce entries
+    // which wouldn't make sense in the real world. For best results users are
+    // advised to validate translations with the fluent-syntax parser
+    // pre-runtime.
+    // The parser makes an extensive use of sticky regexes which can be anchored
+    // to any offset of the source string without slicing it. Errors are thrown
+    // to bail out of parsing of ill-formed messages.
+
+    function test(re) {
+      re.lastIndex = cursor;
+      return re.test(source);
+    } // Advance the cursor by the char if it matches. May be used as a predicate
+    // (was the match found?) or, if errorClass is passed, as an assertion.
+
+
+    function consumeChar(char, errorClass) {
+      if (source[cursor] === char) {
+        cursor++;
+        return true;
+      }
+
+      if (errorClass) {
+        throw new errorClass(`Expected ${char}`);
+      }
+
+      return false;
+    } // Advance the cursor by the token if it matches. May be used as a predicate
+    // (was the match found?) or, if errorClass is passed, as an assertion.
+
+
+    function consumeToken(re, errorClass) {
+      if (test(re)) {
+        cursor = re.lastIndex;
+        return true;
+      }
+
+      if (errorClass) {
+        throw new errorClass(`Expected ${re.toString()}`);
+      }
+
+      return false;
+    } // Execute a regex, advance the cursor, and return all capture groups.
+
+
+    function match(re) {
+      re.lastIndex = cursor;
+      let result = re.exec(source);
+
+      if (result === null) {
+        throw new FluentError(`Expected ${re.toString()}`);
+      }
+
+      cursor = re.lastIndex;
+      return result;
+    } // Execute a regex, advance the cursor, and return the capture group.
+
+
+    function match1(re) {
+      return match(re)[1];
+    }
+
+    function parseMessage() {
+      let value = parsePattern();
+      let attrs = parseAttributes();
+
+      if (attrs === null) {
+        if (value === null) {
+          throw new FluentError("Expected message value or attributes");
+        }
+
+        return value;
+      }
+
+      return {
+        value,
+        attrs
+      };
+    }
+
+    function parseAttributes() {
+      let attrs = {};
+
+      while (test(RE_ATTRIBUTE_START)) {
+        let name = match1(RE_ATTRIBUTE_START);
+        let value = parsePattern();
+
+        if (value === null) {
+          throw new FluentError("Expected attribute value");
+        }
+
+        attrs[name] = value;
+      }
+
+      return Object.keys(attrs).length > 0 ? attrs : null;
+    }
+
+    function parsePattern() {
+      // First try to parse any simple text on the same line as the id.
+      if (test(RE_TEXT_RUN)) {
+        var first = match1(RE_TEXT_RUN);
+      } // If there's a placeable on the first line, parse a complex pattern.
+
+
+      if (source[cursor] === "{" || source[cursor] === "}") {
+        // Re-use the text parsed above, if possible.
+        return parsePatternElements(first ? [first] : [], Infinity);
+      } // RE_TEXT_VALUE stops at newlines. Only continue parsing the pattern if
+      // what comes after the newline is indented.
+
+
+      let indent = parseIndent();
+
+      if (indent) {
+        if (first) {
+          // If there's text on the first line, the blank block is part of the
+          // translation content in its entirety.
+          return parsePatternElements([first, indent], indent.length);
+        } // Otherwise, we're dealing with a block pattern, i.e. a pattern which
+        // starts on a new line. Discrad the leading newlines but keep the
+        // inline indent; it will be used by the dedentation logic.
+
+
+        indent.value = trim(indent.value, RE_LEADING_NEWLINES);
+        return parsePatternElements([indent], indent.length);
+      }
+
+      if (first) {
+        // It was just a simple inline text after all.
+        return trim(first, RE_TRAILING_SPACES);
+      }
+
+      return null;
+    } // Parse a complex pattern as an array of elements.
+
+
+    function parsePatternElements(elements = [], commonIndent) {
+      let placeableCount = 0;
+
+      while (true) {
+        if (test(RE_TEXT_RUN)) {
+          elements.push(match1(RE_TEXT_RUN));
+          continue;
+        }
+
+        if (source[cursor] === "{") {
+          if (++placeableCount > MAX_PLACEABLES) {
+            throw new FluentError("Too many placeables");
+          }
+
+          elements.push(parsePlaceable());
+          continue;
+        }
+
+        if (source[cursor] === "}") {
+          throw new FluentError("Unbalanced closing brace");
+        }
+
+        let indent = parseIndent();
+
+        if (indent) {
+          elements.push(indent);
+          commonIndent = Math.min(commonIndent, indent.length);
+          continue;
+        }
+
+        break;
+      }
+
+      let lastIndex = elements.length - 1; // Trim the trailing spaces in the last element if it's a TextElement.
+
+      if (typeof elements[lastIndex] === "string") {
+        elements[lastIndex] = trim(elements[lastIndex], RE_TRAILING_SPACES);
+      }
+
+      let baked = [];
+
+      for (let element of elements) {
+        if (element.type === "indent") {
+          // Dedent indented lines by the maximum common indent.
+          element = element.value.slice(0, element.value.length - commonIndent);
+        } else if (element.type === "str") {
+          // Optimize StringLiterals into their value.
+          element = element.value;
+        }
+
+        if (element) {
+          baked.push(element);
+        }
+      }
+
+      return baked;
+    }
+
+    function parsePlaceable() {
+      consumeToken(TOKEN_BRACE_OPEN, FluentError);
+      let selector = parseInlineExpression();
+
+      if (consumeToken(TOKEN_BRACE_CLOSE)) {
+        return selector;
+      }
+
+      if (consumeToken(TOKEN_ARROW)) {
+        let variants = parseVariants();
+        consumeToken(TOKEN_BRACE_CLOSE, FluentError);
+        return {
+          type: "select",
+          selector,
+          ...variants
+        };
+      }
+
+      throw new FluentError("Unclosed placeable");
+    }
+
+    function parseInlineExpression() {
+      if (source[cursor] === "{") {
+        // It's a nested placeable.
+        return parsePlaceable();
+      }
+
+      if (test(RE_REFERENCE)) {
+        let [, sigil, name, attr = null] = match(RE_REFERENCE);
+
+        if (sigil === "$") {
+          return {
+            type: "var",
+            name
+          };
+        }
+
+        if (consumeToken(TOKEN_PAREN_OPEN)) {
+          let args = parseArguments();
+
+          if (sigil === "-") {
+            // A parameterized term: -term(...).
+            return {
+              type: "term",
+              name,
+              attr,
+              args
+            };
+          }
+
+          if (RE_FUNCTION_NAME.test(name)) {
+            return {
+              type: "func",
+              name,
+              args
+            };
+          }
+
+          throw new FluentError("Function names must be all upper-case");
+        }
+
+        if (sigil === "-") {
+          // A non-parameterized term: -term.
+          return {
+            type: "term",
+            name,
+            attr,
+            args: []
+          };
+        }
+
+        return {
+          type: "mesg",
+          name,
+          attr
+        };
+      }
+
+      return parseLiteral();
+    }
+
+    function parseArguments() {
+      let args = [];
+
+      while (true) {
+        switch (source[cursor]) {
+          case ")":
+            // End of the argument list.
+            cursor++;
+            return args;
+
+          case undefined:
+            // EOF
+            throw new FluentError("Unclosed argument list");
+        }
+
+        args.push(parseArgument()); // Commas between arguments are treated as whitespace.
+
+        consumeToken(TOKEN_COMMA);
+      }
+    }
+
+    function parseArgument() {
+      let expr = parseInlineExpression();
+
+      if (expr.type !== "mesg") {
+        return expr;
+      }
+
+      if (consumeToken(TOKEN_COLON)) {
+        // The reference is the beginning of a named argument.
+        return {
+          type: "narg",
+          name: expr.name,
+          value: parseLiteral()
+        };
+      } // It's a regular message reference.
+
+
+      return expr;
+    }
+
+    function parseVariants() {
+      let variants = [];
+      let count = 0;
+      let star;
+
+      while (test(RE_VARIANT_START)) {
+        if (consumeChar("*")) {
+          star = count;
+        }
+
+        let key = parseVariantKey();
+        let value = parsePattern();
+
+        if (value === null) {
+          throw new FluentError("Expected variant value");
+        }
+
+        variants[count++] = {
+          key,
+          value
+        };
+      }
+
+      if (count === 0) {
+        return null;
+      }
+
+      if (star === undefined) {
+        throw new FluentError("Expected default variant");
+      }
+
+      return {
+        variants,
+        star
+      };
+    }
+
+    function parseVariantKey() {
+      consumeToken(TOKEN_BRACKET_OPEN, FluentError);
+      let key = test(RE_NUMBER_LITERAL) ? parseNumberLiteral() : match1(RE_IDENTIFIER);
+      consumeToken(TOKEN_BRACKET_CLOSE, FluentError);
+      return key;
+    }
+
+    function parseLiteral() {
+      if (test(RE_NUMBER_LITERAL)) {
+        return parseNumberLiteral();
+      }
+
+      if (source[cursor] === "\"") {
+        return parseStringLiteral();
+      }
+
+      throw new FluentError("Invalid expression");
+    }
+
+    function parseNumberLiteral() {
+      let [, value, fraction = ""] = match(RE_NUMBER_LITERAL);
+      let precision = fraction.length;
+      return {
+        type: "num",
+        value: parseFloat(value),
+        precision
+      };
+    }
+
+    function parseStringLiteral() {
+      consumeChar("\"", FluentError);
+      let value = "";
+
+      while (true) {
+        value += match1(RE_STRING_RUN);
+
+        if (source[cursor] === "\\") {
+          value += parseEscapeSequence();
+          continue;
+        }
+
+        if (consumeChar("\"")) {
+          return {
+            type: "str",
+            value
+          };
+        } // We've reached an EOL of EOF.
+
+
+        throw new FluentError("Unclosed string literal");
+      }
+    } // Unescape known escape sequences.
+
+
+    function parseEscapeSequence() {
+      if (test(RE_STRING_ESCAPE)) {
+        return match1(RE_STRING_ESCAPE);
+      }
+
+      if (test(RE_UNICODE_ESCAPE)) {
+        let [, codepoint4, codepoint6] = match(RE_UNICODE_ESCAPE);
+        let codepoint = parseInt(codepoint4 || codepoint6, 16);
+        return codepoint <= 0xD7FF || 0xE000 <= codepoint // It's a Unicode scalar value.
+        ? String.fromCodePoint(codepoint) // Lonely surrogates can cause trouble when the parsing result is
+        // saved using UTF-8. Use U+FFFD REPLACEMENT CHARACTER instead.
+        : "�";
+      }
+
+      throw new FluentError("Unknown escape sequence");
+    } // Parse blank space. Return it if it looks like indent before a pattern
+    // line. Skip it othwerwise.
+
+
+    function parseIndent() {
+      let start = cursor;
+      consumeToken(TOKEN_BLANK); // Check the first non-blank character after the indent.
+
+      switch (source[cursor]) {
+        case ".":
+        case "[":
+        case "*":
+        case "}":
+        case undefined:
+          // EOF
+          // A special character. End the Pattern.
+          return false;
+
+        case "{":
+          // Placeables don't require indentation (in EBNF: block-placeable).
+          // Continue the Pattern.
+          return makeIndent(source.slice(start, cursor));
+      } // If the first character on the line is not one of the special characters
+      // listed above, it's a regular text character. Check if there's at least
+      // one space of indent before it.
+
+
+      if (source[cursor - 1] === " ") {
+        // It's an indented text character (in EBNF: indented-char). Continue
+        // the Pattern.
+        return makeIndent(source.slice(start, cursor));
+      } // A not-indented text character is likely the identifier of the next
+      // message. End the Pattern.
+
+
+      return false;
+    } // Trim blanks in text according to the given regex.
+
+
+    function trim(text, re) {
+      return text.replace(re, "");
+    } // Normalize a blank block and extract the indent details.
+
+
+    function makeIndent(blank) {
+      let value = blank.replace(RE_BLANK_LINES, "\n");
+      let length = RE_INDENT.exec(blank)[1].length;
+      return {
+        type: "indent",
+        value,
+        length
+      };
+    }
+  }
+
+}
+// CONCATENATED MODULE: ./node_modules/fluent/src/bundle.js
 
 
 /**
- * Message contexts are single-language stores of translations.  They are
+ * Message bundles are single-language stores of translations.  They are
  * responsible for parsing translation resources in the Fluent syntax and can
  * format translation units (entities) to strings.
  *
- * Always use `MessageContext.format` to retrieve translation units from
- * a context.  Translations can contain references to other entities or
- * external arguments, conditional logic in form of select expressions, traits
- * which describe their grammatical features, and can use Fluent builtins which
- * make use of the `Intl` formatters to format numbers, dates, lists and more
- * into the context's language.  See the documentation of the Fluent syntax for
- * more information.
+ * Always use `FluentBundle.format` to retrieve translation units from a
+ * bundle. Translations can contain references to other entities or variables,
+ * conditional logic in form of select expressions, traits which describe their
+ * grammatical features, and can use Fluent builtins which make use of the
+ * `Intl` formatters to format numbers, dates, lists and more into the
+ * bundle's language. See the documentation of the Fluent syntax for more
+ * information.
  */
 
-class context_MessageContext {
+class bundle_FluentBundle {
   /**
-   * Create an instance of `MessageContext`.
+   * Create an instance of `FluentBundle`.
    *
    * The `locales` argument is used to instantiate `Intl` formatters used by
-   * translations.  The `options` object can be used to configure the context.
+   * translations.  The `options` object can be used to configure the bundle.
    *
    * Examples:
    *
-   *     const ctx = new MessageContext(locales);
+   *     const bundle = new FluentBundle(locales);
    *
-   *     const ctx = new MessageContext(locales, { useIsolating: false });
+   *     const bundle = new FluentBundle(locales, { useIsolating: false });
    *
-   *     const ctx = new MessageContext(locales, {
+   *     const bundle = new FluentBundle(locales, {
    *       useIsolating: true,
    *       functions: {
    *         NODE_ENV: () => process.env.NODE_ENV
@@ -11879,20 +12011,25 @@ class context_MessageContext {
    *
    *   - `useIsolating` - boolean specifying whether to use Unicode isolation
    *                    marks (FSI, PDI) for bidi interpolations.
+   *                    Default: true
    *
-   * @param   {string|Array<string>} locales - Locale or locales of the context
+   *   - `transform` - a function used to transform string parts of patterns.
+   *
+   * @param   {string|Array<string>} locales - Locale or locales of the bundle
    * @param   {Object} [options]
-   * @returns {MessageContext}
+   * @returns {FluentBundle}
    */
   constructor(locales, {
     functions = {},
-    useIsolating = true
+    useIsolating = true,
+    transform = v => v
   } = {}) {
     this.locales = Array.isArray(locales) ? locales : [locales];
     this._terms = new Map();
     this._messages = new Map();
     this._functions = functions;
     this._useIsolating = useIsolating;
+    this._transform = transform;
     this._intls = new WeakMap();
   }
   /*
@@ -11906,7 +12043,7 @@ class context_MessageContext {
     return this._messages[Symbol.iterator]();
   }
   /*
-   * Check if a message is present in the context.
+   * Check if a message is present in the bundle.
    *
    * @param {string} id - The identifier of the message to check.
    * @returns {bool}
@@ -11920,7 +12057,7 @@ class context_MessageContext {
    * Return the internal representation of a message.
    *
    * The internal representation should only be used as an argument to
-   * `MessageContext.format`.
+   * `FluentBundle.format`.
    *
    * @param {string} id - The identifier of the message to check.
    * @returns {Any}
@@ -11931,45 +12068,99 @@ class context_MessageContext {
     return this._messages.get(id);
   }
   /**
-   * Add a translation resource to the context.
+   * Add a translation resource to the bundle.
    *
    * The translation resource must use the Fluent syntax.  It will be parsed by
-   * the context and each translation unit (message) will be available in the
-   * context by its identifier.
+   * the bundle and each translation unit (message) will be available in the
+   * bundle by its identifier.
    *
-   *     ctx.addMessages('foo = Foo');
-   *     ctx.getMessage('foo');
+   *     bundle.addMessages('foo = Foo');
+   *     bundle.getMessage('foo');
    *
    *     // Returns a raw representation of the 'foo' message.
+   *
+   *     bundle.addMessages('bar = Bar');
+   *     bundle.addMessages('bar = Newbar', { allowOverrides: true });
+   *     bundle.getMessage('bar');
+   *
+   *     // Returns a raw representation of the 'bar' message: Newbar.
    *
    * Parsed entities should be formatted with the `format` method in case they
    * contain logic (references, select expressions etc.).
    *
+   * Available options:
+   *
+   *   - `allowOverrides` - boolean specifying whether it's allowed to override
+   *                      an existing message or term with a new value.
+   *                      Default: false
+   *
    * @param   {string} source - Text resource with translations.
+   * @param   {Object} [options]
    * @returns {Array<Error>}
    */
 
 
-  addMessages(source) {
-    const [entries, errors] = parse(source);
+  addMessages(source, options) {
+    const res = resource_FluentResource.fromString(source);
+    return this.addResource(res, options);
+  }
+  /**
+   * Add a translation resource to the bundle.
+   *
+   * The translation resource must be an instance of FluentResource,
+   * e.g. parsed by `FluentResource.fromString`.
+   *
+   *     let res = FluentResource.fromString("foo = Foo");
+   *     bundle.addResource(res);
+   *     bundle.getMessage('foo');
+   *
+   *     // Returns a raw representation of the 'foo' message.
+   *
+   *     let res = FluentResource.fromString("bar = Bar");
+   *     bundle.addResource(res);
+   *     res = FluentResource.fromString("bar = Newbar");
+   *     bundle.addResource(res, { allowOverrides: true });
+   *     bundle.getMessage('bar');
+   *
+   *     // Returns a raw representation of the 'bar' message: Newbar.
+   *
+   * Parsed entities should be formatted with the `format` method in case they
+   * contain logic (references, select expressions etc.).
+   *
+   * Available options:
+   *
+   *   - `allowOverrides` - boolean specifying whether it's allowed to override
+   *                      an existing message or term with a new value.
+   *                      Default: false
+   *
+   * @param   {FluentResource} res - FluentResource object.
+   * @param   {Object} [options]
+   * @returns {Array<Error>}
+   */
 
-    for (const id in entries) {
+
+  addResource(res, {
+    allowOverrides = false
+  } = {}) {
+    const errors = [];
+
+    for (const [id, value] of res) {
       if (id.startsWith("-")) {
         // Identifiers starting with a dash (-) define terms. Terms are private
-        // and cannot be retrieved from MessageContext.
-        if (this._terms.has(id)) {
+        // and cannot be retrieved from FluentBundle.
+        if (allowOverrides === false && this._terms.has(id)) {
           errors.push(`Attempt to override an existing term: "${id}"`);
           continue;
         }
 
-        this._terms.set(id, entries[id]);
+        this._terms.set(id, value);
       } else {
-        if (this._messages.has(id)) {
+        if (allowOverrides === false && this._messages.has(id)) {
           errors.push(`Attempt to override an existing message: "${id}"`);
           continue;
         }
 
-        this._messages.set(id, entries[id]);
+        this._messages.set(id, value);
       }
     }
 
@@ -11978,9 +12169,9 @@ class context_MessageContext {
   /**
    * Format a message to a string or null.
    *
-   * Format a raw `message` from the context into a string (or a null if it has
-   * a null value).  `args` will be used to resolve references to external
-   * arguments inside of the translation.
+   * Format a raw `message` from the bundle into a string (or a null if it has
+   * a null value).  `args` will be used to resolve references to variables
+   * passed as arguments to the translation.
    *
    * In case of errors `format` will try to salvage as much of the translation
    * as possible and will still return a string.  For performance reasons, the
@@ -11988,17 +12179,17 @@ class context_MessageContext {
    * `errors` array passed as the third argument.
    *
    *     const errors = [];
-   *     ctx.addMessages('hello = Hello, { $name }!');
-   *     const hello = ctx.getMessage('hello');
-   *     ctx.format(hello, { name: 'Jane' }, errors);
+   *     bundle.addMessages('hello = Hello, { $name }!');
+   *     const hello = bundle.getMessage('hello');
+   *     bundle.format(hello, { name: 'Jane' }, errors);
    *
    *     // Returns 'Hello, Jane!' and `errors` is empty.
    *
-   *     ctx.format(hello, undefined, errors);
+   *     bundle.format(hello, undefined, errors);
    *
    *     // Returns 'Hello, name!' and `errors` is now:
    *
-   *     [<ReferenceError: Unknown external: name>]
+   *     [<ReferenceError: Unknown variable: name>]
    *
    * @param   {Object | string}    message
    * @param   {Object | undefined} args
@@ -12010,17 +12201,17 @@ class context_MessageContext {
   format(message, args, errors) {
     // optimize entities which are simple strings with no attributes
     if (typeof message === "string") {
-      return message;
-    } // optimize simple-string entities with attributes
-
-
-    if (typeof message.val === "string") {
-      return message.val;
+      return this._transform(message);
     } // optimize entities with null values
 
 
-    if (message.val === undefined) {
+    if (message === null || message.value === null) {
       return null;
+    } // optimize simple-string entities with attributes
+
+
+    if (typeof message.value === "string") {
+      return this._transform(message.value);
     }
 
     return resolve(this, args, message, errors);
@@ -12039,243 +12230,6 @@ class context_MessageContext {
     return cache[id];
   }
 
-}
-// CONCATENATED MODULE: ./node_modules/fluent/src/cached_iterable.js
-/*
- * CachedIterable caches the elements yielded by an iterable.
- *
- * It can be used to iterate over an iterable many times without depleting the
- * iterable.
- */
-class CachedIterable {
-  /**
-   * Create an `CachedIterable` instance.
-   *
-   * @param {Iterable} iterable
-   * @returns {CachedIterable}
-   */
-  constructor(iterable) {
-    if (Symbol.asyncIterator in Object(iterable)) {
-      this.iterator = iterable[Symbol.asyncIterator]();
-    } else if (Symbol.iterator in Object(iterable)) {
-      this.iterator = iterable[Symbol.iterator]();
-    } else {
-      throw new TypeError("Argument must implement the iteration protocol.");
-    }
-
-    this.seen = [];
-  }
-
-  [Symbol.iterator]() {
-    const {
-      seen,
-      iterator
-    } = this;
-    let cur = 0;
-    return {
-      next() {
-        if (seen.length <= cur) {
-          seen.push(iterator.next());
-        }
-
-        return seen[cur++];
-      }
-
-    };
-  }
-
-  [Symbol.asyncIterator]() {
-    const {
-      seen,
-      iterator
-    } = this;
-    let cur = 0;
-    return {
-      async next() {
-        if (seen.length <= cur) {
-          seen.push((await iterator.next()));
-        }
-
-        return seen[cur++];
-      }
-
-    };
-  }
-  /**
-   * This method allows user to consume the next element from the iterator
-   * into the cache.
-   */
-
-
-  touchNext() {
-    const {
-      seen,
-      iterator
-    } = this;
-
-    if (seen.length === 0 || seen[seen.length - 1].done === false) {
-      seen.push(iterator.next());
-    }
-  }
-
-}
-// CONCATENATED MODULE: ./node_modules/fluent/src/fallback.js
-function _asyncIterator(iterable) { var method; if (typeof Symbol !== "undefined") { if (Symbol.asyncIterator) { method = iterable[Symbol.asyncIterator]; if (method != null) return method.call(iterable); } if (Symbol.iterator) { method = iterable[Symbol.iterator]; if (method != null) return method.call(iterable); } } throw new TypeError("Object is not async iterable"); }
-
-/*
- * @overview
- *
- * Functions for managing ordered sequences of MessageContexts.
- *
- * An ordered iterable of MessageContext instances can represent the current
- * negotiated fallback chain of languages.  This iterable can be used to find
- * the best existing translation for a given identifier.
- *
- * The mapContext* methods can be used to find the first MessageContext in the
- * given iterable which contains the translation with the given identifier.  If
- * the iterable is ordered according to the result of a language negotiation
- * the returned MessageContext contains the best available translation.
- *
- * A simple function which formats translations based on the identifier might
- * be implemented as follows:
- *
- *     formatString(id, args) {
- *         const ctx = mapContextSync(contexts, id);
- *
- *         if (ctx === null) {
- *             return id;
- *         }
- *
- *         const msg = ctx.getMessage(id);
- *         return ctx.format(msg, args);
- *     }
- *
- * In order to pass an iterator to mapContext*, wrap it in CachedIterable.
- * This allows multiple calls to mapContext* without advancing and eventually
- * depleting the iterator.
- *
- *     function *generateMessages() {
- *         // Some lazy logic for yielding MessageContexts.
- *         yield *[ctx1, ctx2];
- *     }
- *
- *     const contexts = new CachedIterable(generateMessages());
- *     const ctx = mapContextSync(contexts, id);
- *
- */
-
-/*
- * Synchronously map an identifier or an array of identifiers to the best
- * `MessageContext` instance(s).
- *
- * @param {Iterable} iterable
- * @param {string|Array<string>} ids
- * @returns {MessageContext|Array<MessageContext>}
- */
-function mapContextSync(iterable, ids) {
-  if (!Array.isArray(ids)) {
-    return getContextForId(iterable, ids);
-  }
-
-  return ids.map(id => getContextForId(iterable, id));
-}
-/*
- * Find the best `MessageContext` with the translation for `id`.
- */
-
-function getContextForId(iterable, id) {
-  for (const context of iterable) {
-    if (context.hasMessage(id)) {
-      return context;
-    }
-  }
-
-  return null;
-}
-/*
- * Asynchronously map an identifier or an array of identifiers to the best
- * `MessageContext` instance(s).
- *
- * @param {AsyncIterable} iterable
- * @param {string|Array<string>} ids
- * @returns {Promise<MessageContext|Array<MessageContext>>}
- */
-
-
-async function mapContextAsync(iterable, ids) {
-  if (!Array.isArray(ids)) {
-    var _iteratorNormalCompletion = true;
-    var _didIteratorError = false;
-
-    var _iteratorError;
-
-    try {
-      for (var _iterator = _asyncIterator(iterable), _step, _value; _step = await _iterator.next(), _iteratorNormalCompletion = _step.done, _value = await _step.value, !_iteratorNormalCompletion; _iteratorNormalCompletion = true) {
-        const context = _value;
-
-        if (context.hasMessage(ids)) {
-          return context;
-        }
-      }
-    } catch (err) {
-      _didIteratorError = true;
-      _iteratorError = err;
-    } finally {
-      try {
-        if (!_iteratorNormalCompletion && _iterator.return != null) {
-          await _iterator.return();
-        }
-      } finally {
-        if (_didIteratorError) {
-          throw _iteratorError;
-        }
-      }
-    }
-  }
-
-  let remainingCount = ids.length;
-  const foundContexts = new Array(remainingCount).fill(null);
-  var _iteratorNormalCompletion2 = true;
-  var _didIteratorError2 = false;
-
-  var _iteratorError2;
-
-  try {
-    for (var _iterator2 = _asyncIterator(iterable), _step2, _value2; _step2 = await _iterator2.next(), _iteratorNormalCompletion2 = _step2.done, _value2 = await _step2.value, !_iteratorNormalCompletion2; _iteratorNormalCompletion2 = true) {
-      const context = _value2;
-
-      // XXX Switch to const [index, id] of id.entries() when we move to Babel 7.
-      // See https://github.com/babel/babel/issues/5880.
-      for (let index = 0; index < ids.length; index++) {
-        const id = ids[index];
-
-        if (!foundContexts[index] && context.hasMessage(id)) {
-          foundContexts[index] = context;
-          remainingCount--;
-        } // Return early when all ids have been mapped to contexts.
-
-
-        if (remainingCount === 0) {
-          return foundContexts;
-        }
-      }
-    }
-  } catch (err) {
-    _didIteratorError2 = true;
-    _iteratorError2 = err;
-  } finally {
-    try {
-      if (!_iteratorNormalCompletion2 && _iterator2.return != null) {
-        await _iterator2.return();
-      }
-    } finally {
-      if (_didIteratorError2) {
-        throw _iteratorError2;
-      }
-    }
-  }
-
-  return foundContexts;
 }
 // CONCATENATED MODULE: ./node_modules/fluent/src/util.js
 function nonBlank(line) {
@@ -12304,15 +12258,6 @@ function ftl(strings) {
   return lines.map(line => line.replace(indent, "")).join("\n");
 }
 // CONCATENATED MODULE: ./node_modules/fluent/src/index.js
-/* concated harmony reexport _parse */__webpack_require__.d(__webpack_exports__, "_parse", function() { return parse; });
-/* concated harmony reexport MessageContext */__webpack_require__.d(__webpack_exports__, "MessageContext", function() { return context_MessageContext; });
-/* concated harmony reexport MessageArgument */__webpack_require__.d(__webpack_exports__, "MessageArgument", function() { return FluentType; });
-/* concated harmony reexport MessageNumberArgument */__webpack_require__.d(__webpack_exports__, "MessageNumberArgument", function() { return FluentNumber; });
-/* concated harmony reexport MessageDateTimeArgument */__webpack_require__.d(__webpack_exports__, "MessageDateTimeArgument", function() { return FluentDateTime; });
-/* concated harmony reexport CachedIterable */__webpack_require__.d(__webpack_exports__, "CachedIterable", function() { return CachedIterable; });
-/* concated harmony reexport mapContextSync */__webpack_require__.d(__webpack_exports__, "mapContextSync", function() { return mapContextSync; });
-/* concated harmony reexport mapContextAsync */__webpack_require__.d(__webpack_exports__, "mapContextAsync", function() { return mapContextAsync; });
-/* concated harmony reexport ftl */__webpack_require__.d(__webpack_exports__, "ftl", function() { return ftl; });
 /*
  * @module fluent
  * @overview
@@ -12326,992 +12271,52 @@ function ftl(strings) {
 
 
 
+// CONCATENATED MODULE: ./content-src/asrouter/rich-text-strings.js
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "RICH_TEXT_KEYS", function() { return RICH_TEXT_KEYS; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "generateBundles", function() { return generateBundles; });
 
-
-/***/ }),
-/* 56 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-
-// EXTERNAL MODULE: external "React"
-var external_React_ = __webpack_require__(11);
-
-// EXTERNAL MODULE: external "PropTypes"
-var external_PropTypes_ = __webpack_require__(12);
-var external_PropTypes_default = /*#__PURE__*/__webpack_require__.n(external_PropTypes_);
-
-// EXTERNAL MODULE: ./node_modules/fluent/src/index.js + 8 modules
-var src = __webpack_require__(55);
-
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/localization.js
-
-/*
- * `ReactLocalization` handles translation formatting and fallback.
- *
- * The current negotiated fallback chain of languages is stored in the
- * `ReactLocalization` instance in form of an iterable of `MessageContext`
- * instances.  This iterable is used to find the best existing translation for
- * a given identifier.
- *
- * `Localized` components must subscribe to the changes of the
- * `ReactLocalization`'s fallback chain.  When the fallback chain changes (the
- * `messages` iterable is set anew), all subscribed compontent must relocalize.
- *
- * The `ReactLocalization` class instances are exposed to `Localized` elements
- * via the `LocalizationProvider` component.
- */
-
-class localization_ReactLocalization {
-  constructor(messages) {
-    this.contexts = new src["CachedIterable"](messages);
-    this.subs = new Set();
-  }
-  /*
-   * Subscribe a `Localized` component to changes of `messages`.
-   */
-
-
-  subscribe(comp) {
-    this.subs.add(comp);
-  }
-  /*
-   * Unsubscribe a `Localized` component from `messages` changes.
-   */
-
-
-  unsubscribe(comp) {
-    this.subs.delete(comp);
-  }
-  /*
-   * Set a new `messages` iterable and trigger the retranslation.
-   */
-
-
-  setMessages(messages) {
-    this.contexts = new src["CachedIterable"](messages); // Update all subscribed Localized components.
-
-    this.subs.forEach(comp => comp.relocalize());
-  }
-
-  getMessageContext(id) {
-    return Object(src["mapContextSync"])(this.contexts, id);
-  }
-
-  formatCompound(mcx, msg, args) {
-    const value = mcx.format(msg, args);
-
-    if (msg.attrs) {
-      var attrs = {};
-
-      for (const name of Object.keys(msg.attrs)) {
-        attrs[name] = mcx.format(msg.attrs[name], args);
-      }
-    }
-
-    return {
-      value,
-      attrs
-    };
-  }
-  /*
-   * Find a translation by `id` and format it to a string using `args`.
-   */
-
-
-  getString(id, args, fallback) {
-    const mcx = this.getMessageContext(id);
-
-    if (mcx === null) {
-      return fallback || id;
-    }
-
-    const msg = mcx.getMessage(id);
-    return mcx.format(msg, args);
-  }
-
-}
-function isReactLocalization(props, propName) {
-  const prop = props[propName];
-
-  if (prop instanceof localization_ReactLocalization) {
-    return null;
-  }
-
-  return new Error(`The ${propName} context field must be an instance of ReactLocalization.`);
-}
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/provider.js
-
-
-
-/*
- * The Provider component for the `ReactLocalization` class.
- *
- * Exposes a `ReactLocalization` instance to all descendants via React's
- * context feature.  It makes translations available to all localizable
- * elements in the descendant's render tree without the need to pass them
- * explicitly.
- *
- *     <LocalizationProvider messages={…}>
- *         …
- *     </LocalizationProvider>
- *
- * The `LocalizationProvider` component takes one prop: `messages`.  It should
- * be an iterable of `MessageContext` instances in order of the user's
- * preferred languages.  The `MessageContext` instances will be used by
- * `ReactLocalization` to format translations.  If a translation is missing in
- * one instance, `ReactLocalization` will fall back to the next one.
- */
-
-class provider_LocalizationProvider extends external_React_["Component"] {
-  constructor(props) {
-    super(props);
-    const {
-      messages
-    } = props;
-
-    if (messages === undefined) {
-      throw new Error("LocalizationProvider must receive the messages prop.");
-    }
-
-    if (!messages[Symbol.iterator]) {
-      throw new Error("The messages prop must be an iterable.");
-    }
-
-    this.l10n = new localization_ReactLocalization(messages);
-  }
-
-  getChildContext() {
-    return {
-      l10n: this.l10n
-    };
-  }
-
-  componentWillReceiveProps(next) {
-    const {
-      messages
-    } = next;
-
-    if (messages !== this.props.messages) {
-      this.l10n.setMessages(messages);
-    }
-  }
-
-  render() {
-    return external_React_["Children"].only(this.props.children);
-  }
-
-}
-provider_LocalizationProvider.childContextTypes = {
-  l10n: isReactLocalization
-};
-provider_LocalizationProvider.propTypes = {
-  children: external_PropTypes_default.a.element.isRequired,
-  messages: isIterable
-};
-
-function isIterable(props, propName, componentName) {
-  const prop = props[propName];
-
-  if (Symbol.iterator in Object(prop)) {
-    return null;
-  }
-
-  return new Error(`The ${propName} prop supplied to ${componentName} must be an iterable.`);
-}
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/with_localization.js
-
-
-function withLocalization(Inner) {
-  class WithLocalization extends external_React_["Component"] {
-    componentDidMount() {
-      const {
-        l10n
-      } = this.context;
-
-      if (l10n) {
-        l10n.subscribe(this);
-      }
-    }
-
-    componentWillUnmount() {
-      const {
-        l10n
-      } = this.context;
-
-      if (l10n) {
-        l10n.unsubscribe(this);
-      }
-    }
-    /*
-     * Rerender this component in a new language.
-     */
-
-
-    relocalize() {
-      // When the `ReactLocalization`'s fallback chain changes, update the
-      // component.
-      this.forceUpdate();
-    }
-    /*
-     * Find a translation by `id` and format it to a string using `args`.
-     */
-
-
-    getString(id, args, fallback) {
-      const {
-        l10n
-      } = this.context;
-
-      if (!l10n) {
-        return fallback || id;
-      }
-
-      return l10n.getString(id, args, fallback);
-    }
-
-    render() {
-      return Object(external_React_["createElement"])(Inner, Object.assign( // getString needs to be re-bound on updates to trigger a re-render
-      {
-        getString: (...args) => this.getString(...args)
-      }, this.props));
-    }
-
-  }
-
-  WithLocalization.displayName = `WithLocalization(${displayName(Inner)})`;
-  WithLocalization.contextTypes = {
-    l10n: isReactLocalization
-  };
-  return WithLocalization;
-}
-
-function displayName(component) {
-  return component.displayName || component.name || "Component";
-}
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/markup.js
-/* eslint-env browser */
-const TEMPLATE = document.createElement("template");
-function parseMarkup(str) {
-  TEMPLATE.innerHTML = str;
-  return TEMPLATE.content;
-}
-// CONCATENATED MODULE: ./node_modules/fluent-react/vendor/omittedCloseTags.js
 /**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in this directory.
+ * Properties that allow rich text MUST be added to this list.
+ *   key: the localization_id that should be used
+ *   value: a property or array of properties on the message.content object
  */
-// For HTML, certain tags should omit their close tag. We keep a whitelist for
-// those special-case tags.
-var omittedCloseTags = {
-  area: true,
-  base: true,
-  br: true,
-  col: true,
-  embed: true,
-  hr: true,
-  img: true,
-  input: true,
-  keygen: true,
-  link: true,
-  meta: true,
-  param: true,
-  source: true,
-  track: true,
-  wbr: true // NOTE: menuitem's close tag should be omitted, but that causes problems.
 
+const RICH_TEXT_CONFIG = {
+  "text": ["text", "scene1_text"],
+  "success_text": "success_text",
+  "error_text": "error_text",
+  "scene2_text": "scene2_text",
+  "amo_html": "amo_html",
+  "privacy_html": "scene2_privacy_html",
+  "disclaimer_html": "scene2_disclaimer_html"
 };
-/* harmony default export */ var vendor_omittedCloseTags = (omittedCloseTags);
-// CONCATENATED MODULE: ./node_modules/fluent-react/vendor/voidElementTags.js
+const RICH_TEXT_KEYS = Object.keys(RICH_TEXT_CONFIG);
 /**
- * Copyright (c) 2013-present, Facebook, Inc.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in this directory.
- */
- // For HTML, certain tags cannot have children. This has the same purpose as
-// `omittedCloseTags` except that `menuitem` should still have its closing tag.
-
-var voidElementTags = {
-  menuitem: true,
-  ...vendor_omittedCloseTags
-};
-/* harmony default export */ var vendor_voidElementTags = (voidElementTags);
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/localized.js
-
-
-
-
- // Match the opening angle bracket (<) in HTML tags, and HTML entities like
-// &amp;, &#0038;, &#x0026;.
-
-const reMarkup = /<|&#?\w+;/;
-/*
- * Prepare props passed to `Localized` for formatting.
+ * Generates an array of messages suitable for fluent's localization provider
+ * including all needed strings for rich text.
+ * @param {object} content A .content object from an ASR message (i.e. message.content)
+ * @returns {FluentBundle[]} A array containing the fluent message context
  */
 
-function toArguments(props) {
-  const args = {};
-  const elems = {};
+function generateBundles(content) {
+  const bundle = new bundle_FluentBundle("en-US");
+  RICH_TEXT_KEYS.forEach(key => {
+    const attrs = RICH_TEXT_CONFIG[key];
+    const attrsToTry = Array.isArray(attrs) ? [...attrs] : [attrs];
+    let string = "";
 
-  for (const [propname, propval] of Object.entries(props)) {
-    if (propname.startsWith("$")) {
-      const name = propname.substr(1);
-      args[name] = propval;
-    } else if (Object(external_React_["isValidElement"])(propval)) {
-      // We'll try to match localNames of elements found in the translation with
-      // names of elements passed as props. localNames are always lowercase.
-      const name = propname.toLowerCase();
-      elems[name] = propval;
+    while (!string && attrsToTry.length) {
+      const attr = attrsToTry.pop();
+      string = content[attr];
     }
-  }
 
-  return [args, elems];
+    bundle.addMessages(`${key} = ${string}`);
+  });
+  return [bundle];
 }
-/*
- * The `Localized` class renders its child with translated props and children.
- *
- *     <Localized id="hello-world">
- *         <p>{'Hello, world!'}</p>
- *     </Localized>
- *
- * The `id` prop should be the unique identifier of the translation.  Any
- * attributes found in the translation will be applied to the wrapped element.
- *
- * Arguments to the translation can be passed as `$`-prefixed props on
- * `Localized`.
- *
- *     <Localized id="hello-world" $username={name}>
- *         <p>{'Hello, { $username }!'}</p>
- *     </Localized>
- *
- *  It's recommended that the contents of the wrapped component be a string
- *  expression.  The string will be used as the ultimate fallback if no
- *  translation is available.  It also makes it easy to grep for strings in the
- *  source code.
- */
-
-
-class localized_Localized extends external_React_["Component"] {
-  componentDidMount() {
-    const {
-      l10n
-    } = this.context;
-
-    if (l10n) {
-      l10n.subscribe(this);
-    }
-  }
-
-  componentWillUnmount() {
-    const {
-      l10n
-    } = this.context;
-
-    if (l10n) {
-      l10n.unsubscribe(this);
-    }
-  }
-  /*
-   * Rerender this component in a new language.
-   */
-
-
-  relocalize() {
-    // When the `ReactLocalization`'s fallback chain changes, update the
-    // component.
-    this.forceUpdate();
-  }
-
-  render() {
-    const {
-      l10n
-    } = this.context;
-    const {
-      id,
-      attrs,
-      children
-    } = this.props;
-    const elem = external_React_["Children"].only(children);
-
-    if (!l10n) {
-      // Use the wrapped component as fallback.
-      return elem;
-    }
-
-    const mcx = l10n.getMessageContext(id);
-
-    if (mcx === null) {
-      // Use the wrapped component as fallback.
-      return elem;
-    }
-
-    const msg = mcx.getMessage(id);
-    const [args, elems] = toArguments(this.props);
-    const {
-      value: messageValue,
-      attrs: messageAttrs
-    } = l10n.formatCompound(mcx, msg, args); // The default is to forbid all message attributes. If the attrs prop exists
-    // on the Localized instance, only set message attributes which have been
-    // explicitly allowed by the developer.
-
-    if (attrs && messageAttrs) {
-      var localizedProps = {};
-
-      for (const [name, value] of Object.entries(messageAttrs)) {
-        if (attrs[name]) {
-          localizedProps[name] = value;
-        }
-      }
-    } // If the wrapped component is a known void element, explicitly dismiss the
-    // message value and do not pass it to cloneElement in order to avoid the
-    // "void element tags must neither have `children` nor use
-    // `dangerouslySetInnerHTML`" error.
-
-
-    if (elem.type in vendor_voidElementTags) {
-      return Object(external_React_["cloneElement"])(elem, localizedProps);
-    } // If the message has a null value, we're only interested in its attributes.
-    // Do not pass the null value to cloneElement as it would nuke all children
-    // of the wrapped component.
-
-
-    if (messageValue === null) {
-      return Object(external_React_["cloneElement"])(elem, localizedProps);
-    } // If the message value doesn't contain any markup nor any HTML entities,
-    // insert it as the only child of the wrapped component.
-
-
-    if (!reMarkup.test(messageValue)) {
-      return Object(external_React_["cloneElement"])(elem, localizedProps, messageValue);
-    } // If the message contains markup, parse it and try to match the children
-    // found in the translation with the props passed to this Localized.
-
-
-    const translationNodes = Array.from(parseMarkup(messageValue).childNodes);
-    const translatedChildren = translationNodes.map(childNode => {
-      if (childNode.nodeType === childNode.TEXT_NODE) {
-        return childNode.textContent;
-      } // If the child is not expected just take its textContent.
-
-
-      if (!elems.hasOwnProperty(childNode.localName)) {
-        return childNode.textContent;
-      }
-
-      const sourceChild = elems[childNode.localName]; // If the element passed as a prop to <Localized> is a known void element,
-      // explicitly dismiss any textContent which might have accidentally been
-      // defined in the translation to prevent the "void element tags must not
-      // have children" error.
-
-      if (sourceChild.type in vendor_voidElementTags) {
-        return sourceChild;
-      } // TODO Protect contents of elements wrapped in <Localized>
-      // https://github.com/projectfluent/fluent.js/issues/184
-      // TODO  Control localizable attributes on elements passed as props
-      // https://github.com/projectfluent/fluent.js/issues/185
-
-
-      return Object(external_React_["cloneElement"])(sourceChild, null, childNode.textContent);
-    });
-    return Object(external_React_["cloneElement"])(elem, localizedProps, ...translatedChildren);
-  }
-
-}
-localized_Localized.contextTypes = {
-  l10n: isReactLocalization
-};
-localized_Localized.propTypes = {
-  children: external_PropTypes_default.a.element.isRequired
-};
-// CONCATENATED MODULE: ./node_modules/fluent-react/src/index.js
-/* concated harmony reexport LocalizationProvider */__webpack_require__.d(__webpack_exports__, "LocalizationProvider", function() { return provider_LocalizationProvider; });
-/* concated harmony reexport withLocalization */__webpack_require__.d(__webpack_exports__, "withLocalization", function() { return withLocalization; });
-/* concated harmony reexport Localized */__webpack_require__.d(__webpack_exports__, "Localized", function() { return localized_Localized; });
-/* concated harmony reexport ReactLocalization */__webpack_require__.d(__webpack_exports__, "ReactLocalization", function() { return localization_ReactLocalization; });
-/* concated harmony reexport isReactLocalization */__webpack_require__.d(__webpack_exports__, "isReactLocalization", function() { return isReactLocalization; });
-/*
- * @module fluent-react
- * @overview
- *
-
- * `fluent-react` provides React bindings for Fluent.  It takes advantage of
- * React's Components system and the virtual DOM.  Translations are exposed to
- * components via the provider pattern.
- *
- *     <LocalizationProvider messages={…}>
- *         <Localized id="hello-world">
- *             <p>{'Hello, world!'}</p>
- *         </Localized>
- *     </LocalizationProvider>
- *
- * Consult the documentation of the `LocalizationProvider` and the `Localized`
- * components for more information.
- */
-
-
-
-
 
 /***/ }),
-/* 57 */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-
-// EXTERNAL MODULE: ./common/Actions.jsm
-var Actions = __webpack_require__(2);
-
-// EXTERNAL MODULE: external "React"
-var external_React_ = __webpack_require__(11);
-var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_);
-
-// CONCATENATED MODULE: ./content-src/components/A11yLinkButton/A11yLinkButton.jsx
-function _extends() { _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; return _extends.apply(this, arguments); }
-
-
-function A11yLinkButton(props) {
-  // function for merging classes, if necessary
-  let className = "a11y-link-button";
-
-  if (props.className) {
-    className += ` ${props.className}`;
-  }
-
-  return external_React_default.a.createElement("button", _extends({
-    type: "button"
-  }, props, {
-    className: className
-  }), props.children);
-}
-// EXTERNAL MODULE: external "ReactIntl"
-var external_ReactIntl_ = __webpack_require__(4);
-
-// EXTERNAL MODULE: ./content-src/components/TopSites/TopSitesConstants.js
-var TopSitesConstants = __webpack_require__(40);
-
-// CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteFormInput.jsx
-
-
-class TopSiteFormInput_TopSiteFormInput extends external_React_default.a.PureComponent {
-  constructor(props) {
-    super(props);
-    this.state = {
-      validationError: this.props.validationError
-    };
-    this.onChange = this.onChange.bind(this);
-    this.onMount = this.onMount.bind(this);
-    this.onClearIconPress = this.onClearIconPress.bind(this);
-  }
-
-  componentWillReceiveProps(nextProps) {
-    if (nextProps.shouldFocus && !this.props.shouldFocus) {
-      this.input.focus();
-    }
-
-    if (nextProps.validationError && !this.props.validationError) {
-      this.setState({
-        validationError: true
-      });
-    } // If the component is in an error state but the value was cleared by the parent
-
-
-    if (this.state.validationError && !nextProps.value) {
-      this.setState({
-        validationError: false
-      });
-    }
-  }
-
-  onClearIconPress(event) {
-    // If there is input in the URL or custom image URL fields,
-    // and we hit 'enter' while tabbed over the clear icon,
-    // we should execute the function to clear the field.
-    if (event.key === "Enter") {
-      this.props.onClear();
-    }
-  }
-
-  onChange(ev) {
-    if (this.state.validationError) {
-      this.setState({
-        validationError: false
-      });
-    }
-
-    this.props.onChange(ev);
-  }
-
-  onMount(input) {
-    this.input = input;
-  }
-
-  renderLoadingOrCloseButton() {
-    const showClearButton = this.props.value && this.props.onClear;
-
-    if (this.props.loading) {
-      return external_React_default.a.createElement("div", {
-        className: "loading-container"
-      }, external_React_default.a.createElement("div", {
-        className: "loading-animation"
-      }));
-    } else if (showClearButton) {
-      return external_React_default.a.createElement("button", {
-        type: "button",
-        className: "icon icon-clear-input icon-button-style",
-        onClick: this.props.onClear,
-        onKeyPress: this.onClearIconPress
-      });
-    }
-
-    return null;
-  }
-
-  render() {
-    const {
-      typeUrl
-    } = this.props;
-    const {
-      validationError
-    } = this.state;
-    return external_React_default.a.createElement("label", null, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: this.props.titleId
-    }), external_React_default.a.createElement("div", {
-      className: `field ${typeUrl ? "url" : ""}${validationError ? " invalid" : ""}`
-    }, external_React_default.a.createElement("input", {
-      type: "text",
-      value: this.props.value,
-      ref: this.onMount,
-      onChange: this.onChange,
-      placeholder: this.props.intl.formatMessage({
-        id: this.props.placeholderId
-      }) // Set focus on error if the url field is valid or when the input is first rendered and is empty
-      // eslint-disable-next-line jsx-a11y/no-autofocus
-      ,
-      autoFocus: this.props.shouldFocus,
-      disabled: this.props.loading
-    }), this.renderLoadingOrCloseButton(), validationError && external_React_default.a.createElement("aside", {
-      className: "error-tooltip"
-    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: this.props.errorMessageId
-    }))));
-  }
-
-}
-TopSiteFormInput_TopSiteFormInput.defaultProps = {
-  showClearButton: false,
-  value: "",
-  validationError: false
-};
-// EXTERNAL MODULE: ./content-src/components/TopSites/TopSite.jsx
-var TopSite = __webpack_require__(44);
-
-// CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteForm.jsx
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSiteForm", function() { return TopSiteForm_TopSiteForm; });
-
-
-
-
-
-
-
-class TopSiteForm_TopSiteForm extends external_React_default.a.PureComponent {
-  constructor(props) {
-    super(props);
-    const {
-      site
-    } = props;
-    this.state = {
-      label: site ? site.label || site.hostname : "",
-      url: site ? site.url : "",
-      validationError: false,
-      customScreenshotUrl: site ? site.customScreenshotURL : "",
-      showCustomScreenshotForm: site ? site.customScreenshotURL : false
-    };
-    this.onClearScreenshotInput = this.onClearScreenshotInput.bind(this);
-    this.onLabelChange = this.onLabelChange.bind(this);
-    this.onUrlChange = this.onUrlChange.bind(this);
-    this.onCancelButtonClick = this.onCancelButtonClick.bind(this);
-    this.onClearUrlClick = this.onClearUrlClick.bind(this);
-    this.onDoneButtonClick = this.onDoneButtonClick.bind(this);
-    this.onCustomScreenshotUrlChange = this.onCustomScreenshotUrlChange.bind(this);
-    this.onPreviewButtonClick = this.onPreviewButtonClick.bind(this);
-    this.onEnableScreenshotUrlForm = this.onEnableScreenshotUrlForm.bind(this);
-    this.validateUrl = this.validateUrl.bind(this);
-  }
-
-  onLabelChange(event) {
-    this.setState({
-      "label": event.target.value
-    });
-  }
-
-  onUrlChange(event) {
-    this.setState({
-      url: event.target.value,
-      validationError: false
-    });
-  }
-
-  onClearUrlClick() {
-    this.setState({
-      url: "",
-      validationError: false
-    });
-  }
-
-  onEnableScreenshotUrlForm() {
-    this.setState({
-      showCustomScreenshotForm: true
-    });
-  }
-
-  _updateCustomScreenshotInput(customScreenshotUrl) {
-    this.setState({
-      customScreenshotUrl,
-      validationError: false
-    });
-    this.props.dispatch({
-      type: Actions["actionTypes"].PREVIEW_REQUEST_CANCEL
-    });
-  }
-
-  onCustomScreenshotUrlChange(event) {
-    this._updateCustomScreenshotInput(event.target.value);
-  }
-
-  onClearScreenshotInput() {
-    this._updateCustomScreenshotInput("");
-  }
-
-  onCancelButtonClick(ev) {
-    ev.preventDefault();
-    this.props.onClose();
-  }
-
-  onDoneButtonClick(ev) {
-    ev.preventDefault();
-
-    if (this.validateForm()) {
-      const site = {
-        url: this.cleanUrl(this.state.url)
-      };
-      const {
-        index
-      } = this.props;
-
-      if (this.state.label !== "") {
-        site.label = this.state.label;
-      }
-
-      if (this.state.customScreenshotUrl) {
-        site.customScreenshotURL = this.cleanUrl(this.state.customScreenshotUrl);
-      } else if (this.props.site && this.props.site.customScreenshotURL) {
-        // Used to flag that previously cached screenshot should be removed
-        site.customScreenshotURL = null;
-      }
-
-      this.props.dispatch(Actions["actionCreators"].AlsoToMain({
-        type: Actions["actionTypes"].TOP_SITES_PIN,
-        data: {
-          site,
-          index
-        }
-      }));
-      this.props.dispatch(Actions["actionCreators"].UserEvent({
-        source: TopSitesConstants["TOP_SITES_SOURCE"],
-        event: "TOP_SITES_EDIT",
-        action_position: index
-      }));
-      this.props.onClose();
-    }
-  }
-
-  onPreviewButtonClick(event) {
-    event.preventDefault();
-
-    if (this.validateForm()) {
-      this.props.dispatch(Actions["actionCreators"].AlsoToMain({
-        type: Actions["actionTypes"].PREVIEW_REQUEST,
-        data: {
-          url: this.cleanUrl(this.state.customScreenshotUrl)
-        }
-      }));
-      this.props.dispatch(Actions["actionCreators"].UserEvent({
-        source: TopSitesConstants["TOP_SITES_SOURCE"],
-        event: "PREVIEW_REQUEST"
-      }));
-    }
-  }
-
-  cleanUrl(url) {
-    // If we are missing a protocol, prepend http://
-    if (!url.startsWith("http:") && !url.startsWith("https:")) {
-      return `http://${url}`;
-    }
-
-    return url;
-  }
-
-  _tryParseUrl(url) {
-    try {
-      return new URL(url);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  validateUrl(url) {
-    const validProtocols = ["http:", "https:"];
-
-    const urlObj = this._tryParseUrl(url) || this._tryParseUrl(this.cleanUrl(url));
-
-    return urlObj && validProtocols.includes(urlObj.protocol);
-  }
-
-  validateCustomScreenshotUrl() {
-    const {
-      customScreenshotUrl
-    } = this.state;
-    return !customScreenshotUrl || this.validateUrl(customScreenshotUrl);
-  }
-
-  validateForm() {
-    const validate = this.validateUrl(this.state.url) && this.validateCustomScreenshotUrl();
-
-    if (!validate) {
-      this.setState({
-        validationError: true
-      });
-    }
-
-    return validate;
-  }
-
-  _renderCustomScreenshotInput() {
-    const {
-      customScreenshotUrl
-    } = this.state;
-    const requestFailed = this.props.previewResponse === "";
-    const validationError = this.state.validationError && !this.validateCustomScreenshotUrl() || requestFailed; // Set focus on error if the url field is valid or when the input is first rendered and is empty
-
-    const shouldFocus = validationError && this.validateUrl(this.state.url) || !customScreenshotUrl;
-    const isLoading = this.props.previewResponse === null && customScreenshotUrl && this.props.previewUrl === this.cleanUrl(customScreenshotUrl);
-
-    if (!this.state.showCustomScreenshotForm) {
-      return external_React_default.a.createElement(A11yLinkButton, {
-        onClick: this.onEnableScreenshotUrlForm,
-        className: "enable-custom-image-input"
-      }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-        id: "topsites_form_use_image_link"
-      }));
-    }
-
-    return external_React_default.a.createElement("div", {
-      className: "custom-image-input-container"
-    }, external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
-      errorMessageId: requestFailed ? "topsites_form_image_validation" : "topsites_form_url_validation",
-      loading: isLoading,
-      onChange: this.onCustomScreenshotUrlChange,
-      onClear: this.onClearScreenshotInput,
-      shouldFocus: shouldFocus,
-      typeUrl: true,
-      value: customScreenshotUrl,
-      validationError: validationError,
-      titleId: "topsites_form_image_url_label",
-      placeholderId: "topsites_form_url_placeholder",
-      intl: this.props.intl
-    }));
-  }
-
-  render() {
-    const {
-      customScreenshotUrl
-    } = this.state;
-    const requestFailed = this.props.previewResponse === ""; // For UI purposes, editing without an existing link is "add"
-
-    const showAsAdd = !this.props.site;
-    const previous = this.props.site && this.props.site.customScreenshotURL || "";
-    const changed = customScreenshotUrl && this.cleanUrl(customScreenshotUrl) !== previous; // Preview mode if changes were made to the custom screenshot URL and no preview was received yet
-    // or the request failed
-
-    const previewMode = changed && !this.props.previewResponse;
-    const previewLink = Object.assign({}, this.props.site);
-
-    if (this.props.previewResponse) {
-      previewLink.screenshot = this.props.previewResponse;
-      previewLink.customScreenshotURL = this.props.previewUrl;
-    } // Handles the form submit so an enter press performs the correct action
-
-
-    const onSubmit = previewMode ? this.onPreviewButtonClick : this.onDoneButtonClick;
-    return external_React_default.a.createElement("form", {
-      className: "topsite-form",
-      onSubmit: onSubmit
-    }, external_React_default.a.createElement("div", {
-      className: "form-input-container"
-    }, external_React_default.a.createElement("h3", {
-      className: "section-title"
-    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: showAsAdd ? "topsites_form_add_header" : "topsites_form_edit_header"
-    })), external_React_default.a.createElement("div", {
-      className: "fields-and-preview"
-    }, external_React_default.a.createElement("div", {
-      className: "form-wrapper"
-    }, external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
-      onChange: this.onLabelChange,
-      value: this.state.label,
-      titleId: "topsites_form_title_label",
-      placeholderId: "topsites_form_title_placeholder",
-      intl: this.props.intl
-    }), external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
-      onChange: this.onUrlChange,
-      shouldFocus: this.state.validationError && !this.validateUrl(this.state.url),
-      value: this.state.url,
-      onClear: this.onClearUrlClick,
-      validationError: this.state.validationError && !this.validateUrl(this.state.url),
-      titleId: "topsites_form_url_label",
-      typeUrl: true,
-      placeholderId: "topsites_form_url_placeholder",
-      errorMessageId: "topsites_form_url_validation",
-      intl: this.props.intl
-    }), this._renderCustomScreenshotInput()), external_React_default.a.createElement(TopSite["TopSiteLink"], {
-      link: previewLink,
-      defaultStyle: requestFailed,
-      title: this.state.label
-    }))), external_React_default.a.createElement("section", {
-      className: "actions"
-    }, external_React_default.a.createElement("button", {
-      className: "cancel",
-      type: "button",
-      onClick: this.onCancelButtonClick
-    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: "topsites_form_cancel_button"
-    })), previewMode ? external_React_default.a.createElement("button", {
-      className: "done preview",
-      type: "submit"
-    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: "topsites_form_preview_button"
-    })) : external_React_default.a.createElement("button", {
-      className: "done",
-      type: "submit"
-    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
-      id: showAsAdd ? "topsites_form_add_button" : "topsites_form_save_button"
-    }))));
-  }
-
-}
-TopSiteForm_TopSiteForm.defaultProps = {
-  site: null,
-  index: -1
-};
-
-/***/ }),
-/* 58 */
+/* 55 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -14159,7 +13164,7 @@ var reducers = {
 };
 
 /***/ }),
-/* 59 */
+/* 56 */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
@@ -14199,20 +13204,20 @@ const cardContextTypes = {
   }
 };
 // EXTERNAL MODULE: external "ReactRedux"
-var external_ReactRedux_ = __webpack_require__(26);
+var external_ReactRedux_ = __webpack_require__(25);
 
 // EXTERNAL MODULE: ./content-src/lib/link-menu-options.js
-var link_menu_options = __webpack_require__(33);
+var link_menu_options = __webpack_require__(31);
 
 // EXTERNAL MODULE: ./content-src/components/LinkMenu/LinkMenu.jsx
-var LinkMenu = __webpack_require__(31);
+var LinkMenu = __webpack_require__(29);
 
 // EXTERNAL MODULE: external "React"
-var external_React_ = __webpack_require__(11);
+var external_React_ = __webpack_require__(10);
 var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_);
 
 // EXTERNAL MODULE: ./content-src/lib/screenshot-utils.js
-var screenshot_utils = __webpack_require__(45);
+var screenshot_utils = __webpack_require__(39);
 
 // CONCATENATED MODULE: ./content-src/components/Card/Card.jsx
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_Card", function() { return Card_Card; });
@@ -14505,8 +13510,10 @@ class Card_Card extends external_React_default.a.PureComponent {
     }, link.description)), external_React_default.a.createElement("div", {
       className: "card-context"
     }, icon && !link.context && external_React_default.a.createElement("span", {
+      "aria-haspopup": "true",
       className: `card-context-icon icon icon-${icon}`
     }), link.icon && link.context && external_React_default.a.createElement("span", {
+      "aria-haspopup": "true",
       className: "card-context-icon icon",
       style: {
         backgroundImage: `url('${link.icon}')`
@@ -14519,12 +13526,14 @@ class Card_Card extends external_React_default.a.PureComponent {
     })), link.context && external_React_default.a.createElement("div", {
       className: "card-context-label"
     }, link.context))))), !props.placeholder && external_React_default.a.createElement("button", {
+      "aria-haspopup": "true",
       className: "context-menu-button icon",
       title: this.props.intl.formatMessage({
         id: "context_menu_title"
       }),
       onClick: this.onMenuButtonClick
     }, external_React_default.a.createElement("span", {
+      "aria-haspopup": "true",
       className: "sr-only"
     }, `Open context menu for ${link.title}`)), isContextMenuOpen && external_React_default.a.createElement(LinkMenu["LinkMenu"], {
       dispatch: dispatch,
@@ -14549,6 +13558,445 @@ const PlaceholderCard = props => external_React_default.a.createElement(Card, {
   placeholder: true,
   className: props.className
 });
+
+/***/ }),
+/* 57 */
+/***/ (function(module, __webpack_exports__, __webpack_require__) {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+
+// EXTERNAL MODULE: ./common/Actions.jsm
+var Actions = __webpack_require__(2);
+
+// EXTERNAL MODULE: ./content-src/components/A11yLinkButton/A11yLinkButton.jsx
+var A11yLinkButton = __webpack_require__(35);
+
+// EXTERNAL MODULE: external "ReactIntl"
+var external_ReactIntl_ = __webpack_require__(4);
+
+// EXTERNAL MODULE: external "React"
+var external_React_ = __webpack_require__(10);
+var external_React_default = /*#__PURE__*/__webpack_require__.n(external_React_);
+
+// EXTERNAL MODULE: ./content-src/components/TopSites/TopSitesConstants.js
+var TopSitesConstants = __webpack_require__(46);
+
+// CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteFormInput.jsx
+
+
+class TopSiteFormInput_TopSiteFormInput extends external_React_default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.state = {
+      validationError: this.props.validationError
+    };
+    this.onChange = this.onChange.bind(this);
+    this.onMount = this.onMount.bind(this);
+    this.onClearIconPress = this.onClearIconPress.bind(this);
+  }
+
+  componentWillReceiveProps(nextProps) {
+    if (nextProps.shouldFocus && !this.props.shouldFocus) {
+      this.input.focus();
+    }
+
+    if (nextProps.validationError && !this.props.validationError) {
+      this.setState({
+        validationError: true
+      });
+    } // If the component is in an error state but the value was cleared by the parent
+
+
+    if (this.state.validationError && !nextProps.value) {
+      this.setState({
+        validationError: false
+      });
+    }
+  }
+
+  onClearIconPress(event) {
+    // If there is input in the URL or custom image URL fields,
+    // and we hit 'enter' while tabbed over the clear icon,
+    // we should execute the function to clear the field.
+    if (event.key === "Enter") {
+      this.props.onClear();
+    }
+  }
+
+  onChange(ev) {
+    if (this.state.validationError) {
+      this.setState({
+        validationError: false
+      });
+    }
+
+    this.props.onChange(ev);
+  }
+
+  onMount(input) {
+    this.input = input;
+  }
+
+  renderLoadingOrCloseButton() {
+    const showClearButton = this.props.value && this.props.onClear;
+
+    if (this.props.loading) {
+      return external_React_default.a.createElement("div", {
+        className: "loading-container"
+      }, external_React_default.a.createElement("div", {
+        className: "loading-animation"
+      }));
+    } else if (showClearButton) {
+      return external_React_default.a.createElement("button", {
+        type: "button",
+        className: "icon icon-clear-input icon-button-style",
+        onClick: this.props.onClear,
+        onKeyPress: this.onClearIconPress
+      });
+    }
+
+    return null;
+  }
+
+  render() {
+    const {
+      typeUrl
+    } = this.props;
+    const {
+      validationError
+    } = this.state;
+    return external_React_default.a.createElement("label", null, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: this.props.titleId
+    }), external_React_default.a.createElement("div", {
+      className: `field ${typeUrl ? "url" : ""}${validationError ? " invalid" : ""}`
+    }, external_React_default.a.createElement("input", {
+      type: "text",
+      value: this.props.value,
+      ref: this.onMount,
+      onChange: this.onChange,
+      placeholder: this.props.intl.formatMessage({
+        id: this.props.placeholderId
+      }) // Set focus on error if the url field is valid or when the input is first rendered and is empty
+      // eslint-disable-next-line jsx-a11y/no-autofocus
+      ,
+      autoFocus: this.props.shouldFocus,
+      disabled: this.props.loading
+    }), this.renderLoadingOrCloseButton(), validationError && external_React_default.a.createElement("aside", {
+      className: "error-tooltip"
+    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: this.props.errorMessageId
+    }))));
+  }
+
+}
+TopSiteFormInput_TopSiteFormInput.defaultProps = {
+  showClearButton: false,
+  value: "",
+  validationError: false
+};
+// EXTERNAL MODULE: ./content-src/components/TopSites/TopSite.jsx
+var TopSite = __webpack_require__(48);
+
+// CONCATENATED MODULE: ./content-src/components/TopSites/TopSiteForm.jsx
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "TopSiteForm", function() { return TopSiteForm_TopSiteForm; });
+
+
+
+
+
+
+
+class TopSiteForm_TopSiteForm extends external_React_default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    const {
+      site
+    } = props;
+    this.state = {
+      label: site ? site.label || site.hostname : "",
+      url: site ? site.url : "",
+      validationError: false,
+      customScreenshotUrl: site ? site.customScreenshotURL : "",
+      showCustomScreenshotForm: site ? site.customScreenshotURL : false
+    };
+    this.onClearScreenshotInput = this.onClearScreenshotInput.bind(this);
+    this.onLabelChange = this.onLabelChange.bind(this);
+    this.onUrlChange = this.onUrlChange.bind(this);
+    this.onCancelButtonClick = this.onCancelButtonClick.bind(this);
+    this.onClearUrlClick = this.onClearUrlClick.bind(this);
+    this.onDoneButtonClick = this.onDoneButtonClick.bind(this);
+    this.onCustomScreenshotUrlChange = this.onCustomScreenshotUrlChange.bind(this);
+    this.onPreviewButtonClick = this.onPreviewButtonClick.bind(this);
+    this.onEnableScreenshotUrlForm = this.onEnableScreenshotUrlForm.bind(this);
+    this.validateUrl = this.validateUrl.bind(this);
+  }
+
+  onLabelChange(event) {
+    this.setState({
+      "label": event.target.value
+    });
+  }
+
+  onUrlChange(event) {
+    this.setState({
+      url: event.target.value,
+      validationError: false
+    });
+  }
+
+  onClearUrlClick() {
+    this.setState({
+      url: "",
+      validationError: false
+    });
+  }
+
+  onEnableScreenshotUrlForm() {
+    this.setState({
+      showCustomScreenshotForm: true
+    });
+  }
+
+  _updateCustomScreenshotInput(customScreenshotUrl) {
+    this.setState({
+      customScreenshotUrl,
+      validationError: false
+    });
+    this.props.dispatch({
+      type: Actions["actionTypes"].PREVIEW_REQUEST_CANCEL
+    });
+  }
+
+  onCustomScreenshotUrlChange(event) {
+    this._updateCustomScreenshotInput(event.target.value);
+  }
+
+  onClearScreenshotInput() {
+    this._updateCustomScreenshotInput("");
+  }
+
+  onCancelButtonClick(ev) {
+    ev.preventDefault();
+    this.props.onClose();
+  }
+
+  onDoneButtonClick(ev) {
+    ev.preventDefault();
+
+    if (this.validateForm()) {
+      const site = {
+        url: this.cleanUrl(this.state.url)
+      };
+      const {
+        index
+      } = this.props;
+
+      if (this.state.label !== "") {
+        site.label = this.state.label;
+      }
+
+      if (this.state.customScreenshotUrl) {
+        site.customScreenshotURL = this.cleanUrl(this.state.customScreenshotUrl);
+      } else if (this.props.site && this.props.site.customScreenshotURL) {
+        // Used to flag that previously cached screenshot should be removed
+        site.customScreenshotURL = null;
+      }
+
+      this.props.dispatch(Actions["actionCreators"].AlsoToMain({
+        type: Actions["actionTypes"].TOP_SITES_PIN,
+        data: {
+          site,
+          index
+        }
+      }));
+      this.props.dispatch(Actions["actionCreators"].UserEvent({
+        source: TopSitesConstants["TOP_SITES_SOURCE"],
+        event: "TOP_SITES_EDIT",
+        action_position: index
+      }));
+      this.props.onClose();
+    }
+  }
+
+  onPreviewButtonClick(event) {
+    event.preventDefault();
+
+    if (this.validateForm()) {
+      this.props.dispatch(Actions["actionCreators"].AlsoToMain({
+        type: Actions["actionTypes"].PREVIEW_REQUEST,
+        data: {
+          url: this.cleanUrl(this.state.customScreenshotUrl)
+        }
+      }));
+      this.props.dispatch(Actions["actionCreators"].UserEvent({
+        source: TopSitesConstants["TOP_SITES_SOURCE"],
+        event: "PREVIEW_REQUEST"
+      }));
+    }
+  }
+
+  cleanUrl(url) {
+    // If we are missing a protocol, prepend http://
+    if (!url.startsWith("http:") && !url.startsWith("https:")) {
+      return `http://${url}`;
+    }
+
+    return url;
+  }
+
+  _tryParseUrl(url) {
+    try {
+      return new URL(url);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  validateUrl(url) {
+    const validProtocols = ["http:", "https:"];
+
+    const urlObj = this._tryParseUrl(url) || this._tryParseUrl(this.cleanUrl(url));
+
+    return urlObj && validProtocols.includes(urlObj.protocol);
+  }
+
+  validateCustomScreenshotUrl() {
+    const {
+      customScreenshotUrl
+    } = this.state;
+    return !customScreenshotUrl || this.validateUrl(customScreenshotUrl);
+  }
+
+  validateForm() {
+    const validate = this.validateUrl(this.state.url) && this.validateCustomScreenshotUrl();
+
+    if (!validate) {
+      this.setState({
+        validationError: true
+      });
+    }
+
+    return validate;
+  }
+
+  _renderCustomScreenshotInput() {
+    const {
+      customScreenshotUrl
+    } = this.state;
+    const requestFailed = this.props.previewResponse === "";
+    const validationError = this.state.validationError && !this.validateCustomScreenshotUrl() || requestFailed; // Set focus on error if the url field is valid or when the input is first rendered and is empty
+
+    const shouldFocus = validationError && this.validateUrl(this.state.url) || !customScreenshotUrl;
+    const isLoading = this.props.previewResponse === null && customScreenshotUrl && this.props.previewUrl === this.cleanUrl(customScreenshotUrl);
+
+    if (!this.state.showCustomScreenshotForm) {
+      return external_React_default.a.createElement(A11yLinkButton["A11yLinkButton"], {
+        onClick: this.onEnableScreenshotUrlForm,
+        className: "enable-custom-image-input"
+      }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+        id: "topsites_form_use_image_link"
+      }));
+    }
+
+    return external_React_default.a.createElement("div", {
+      className: "custom-image-input-container"
+    }, external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
+      errorMessageId: requestFailed ? "topsites_form_image_validation" : "topsites_form_url_validation",
+      loading: isLoading,
+      onChange: this.onCustomScreenshotUrlChange,
+      onClear: this.onClearScreenshotInput,
+      shouldFocus: shouldFocus,
+      typeUrl: true,
+      value: customScreenshotUrl,
+      validationError: validationError,
+      titleId: "topsites_form_image_url_label",
+      placeholderId: "topsites_form_url_placeholder",
+      intl: this.props.intl
+    }));
+  }
+
+  render() {
+    const {
+      customScreenshotUrl
+    } = this.state;
+    const requestFailed = this.props.previewResponse === ""; // For UI purposes, editing without an existing link is "add"
+
+    const showAsAdd = !this.props.site;
+    const previous = this.props.site && this.props.site.customScreenshotURL || "";
+    const changed = customScreenshotUrl && this.cleanUrl(customScreenshotUrl) !== previous; // Preview mode if changes were made to the custom screenshot URL and no preview was received yet
+    // or the request failed
+
+    const previewMode = changed && !this.props.previewResponse;
+    const previewLink = Object.assign({}, this.props.site);
+
+    if (this.props.previewResponse) {
+      previewLink.screenshot = this.props.previewResponse;
+      previewLink.customScreenshotURL = this.props.previewUrl;
+    } // Handles the form submit so an enter press performs the correct action
+
+
+    const onSubmit = previewMode ? this.onPreviewButtonClick : this.onDoneButtonClick;
+    return external_React_default.a.createElement("form", {
+      className: "topsite-form",
+      onSubmit: onSubmit
+    }, external_React_default.a.createElement("div", {
+      className: "form-input-container"
+    }, external_React_default.a.createElement("h3", {
+      className: "section-title"
+    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: showAsAdd ? "topsites_form_add_header" : "topsites_form_edit_header"
+    })), external_React_default.a.createElement("div", {
+      className: "fields-and-preview"
+    }, external_React_default.a.createElement("div", {
+      className: "form-wrapper"
+    }, external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
+      onChange: this.onLabelChange,
+      value: this.state.label,
+      titleId: "topsites_form_title_label",
+      placeholderId: "topsites_form_title_placeholder",
+      intl: this.props.intl
+    }), external_React_default.a.createElement(TopSiteFormInput_TopSiteFormInput, {
+      onChange: this.onUrlChange,
+      shouldFocus: this.state.validationError && !this.validateUrl(this.state.url),
+      value: this.state.url,
+      onClear: this.onClearUrlClick,
+      validationError: this.state.validationError && !this.validateUrl(this.state.url),
+      titleId: "topsites_form_url_label",
+      typeUrl: true,
+      placeholderId: "topsites_form_url_placeholder",
+      errorMessageId: "topsites_form_url_validation",
+      intl: this.props.intl
+    }), this._renderCustomScreenshotInput()), external_React_default.a.createElement(TopSite["TopSiteLink"], {
+      link: previewLink,
+      defaultStyle: requestFailed,
+      title: this.state.label
+    }))), external_React_default.a.createElement("section", {
+      className: "actions"
+    }, external_React_default.a.createElement("button", {
+      className: "cancel",
+      type: "button",
+      onClick: this.onCancelButtonClick
+    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: "topsites_form_cancel_button"
+    })), previewMode ? external_React_default.a.createElement("button", {
+      className: "done preview",
+      type: "submit"
+    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: "topsites_form_preview_button"
+    })) : external_React_default.a.createElement("button", {
+      className: "done",
+      type: "submit"
+    }, external_React_default.a.createElement(external_ReactIntl_["FormattedMessage"], {
+      id: showAsAdd ? "topsites_form_add_button" : "topsites_form_save_button"
+    }))));
+  }
+
+}
+TopSiteForm_TopSiteForm.defaultProps = {
+  site: null,
+  index: -1
+};
 
 /***/ })
 /******/ ]);

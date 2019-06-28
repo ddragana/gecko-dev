@@ -36,12 +36,12 @@ not-for-build-platforms:
     - win64-aarch64-devedition-nightly/opt
     - linux64-asan-reporter-nightly/opt
     - win64-asan-reporter-nightly/opt
+    - android-geckoview-fat-aar-nightly/opt
 
 job-template:
     shipping-phase: promote
     attributes:
         artifact_map:
-            by-project:
-                mozilla-release: taskcluster/taskgraph/manifests/fennec_candidates.yml
-                mozilla-beta: taskcluster/taskgraph/manifests/fennec_candidates.yml
+            by-release-type:
+                beta|release.*|esr.*: taskcluster/taskgraph/manifests/fennec_candidates.yml
                 default: taskcluster/taskgraph/manifests/fennec_nightly.yml

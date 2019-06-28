@@ -30,6 +30,7 @@ DevToolsModules(
     'RequestListColumnTime.js',
     'RequestListColumnTransferredSize.js',
     'RequestListColumnType.js',
+    'RequestListColumnUrl.js',
     'RequestListColumnWaterfall.js',
     'RequestListContent.js',
     'RequestListEmptyNotice.js',
@@ -37,6 +38,7 @@ DevToolsModules(
     'RequestListItem.js',
     'ResponsePanel.js',
     'SecurityPanel.js',
+    'SecurityState.js',
     'SourceEditor.js',
     'StackTracePanel.js',
     'StatisticsPanel.js',
@@ -45,4 +47,5 @@ DevToolsModules(
     'TabboxPanel.js',
     'TimingsPanel.js',
     'Toolbar.js',
+    'WebSocketsPanel.js',
 )

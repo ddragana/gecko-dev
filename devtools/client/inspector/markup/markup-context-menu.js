@@ -8,6 +8,7 @@
 
 const Services = require("Services");
 const promise = require("promise");
+const { PSEUDO_CLASSES } = require("devtools/shared/css/constants");
 const { LocalizationHelper } = require("devtools/shared/l10n");
 
 loader.lazyRequireGetter(this, "Menu", "devtools/client/framework/menu");
@@ -67,9 +68,11 @@ class MarkupContextMenu {
    * This method is here for the benefit of copying links.
    */
   _copyAttributeLink(link) {
-    this.inspector.resolveRelativeURL(link, this.selection.nodeFront).then(url => {
-      clipboardHelper.copyString(url);
-    }, console.error);
+    this.inspector.inspector
+      .resolveRelativeURL(link, this.selection.nodeFront)
+      .then(url => {
+        clipboardHelper.copyString(url);
+      }, console.error);
   }
 
   /**
@@ -212,7 +215,7 @@ class MarkupContextMenu {
    * in the inspector contextual-menu.
    */
   _onCopyLink() {
-    this.copyAttributeLink(this.contextMenuTarget.dataset.link);
+    this._copyAttributeLink(this.contextMenuTarget.dataset.link);
   }
 
   /**
@@ -583,6 +586,31 @@ class MarkupContextMenu {
     return pasteSubmenu;
   }
 
+  _getPseudoClassSubmenu(isSelectionElement) {
+    const menu = new Menu();
+
+    // Set the pseudo classes
+    for (const name of PSEUDO_CLASSES) {
+      const menuitem = new MenuItem({
+        id: "node-menu-pseudo-" + name.substr(1),
+        label: name.substr(1),
+        type: "checkbox",
+        click: () => this.inspector.togglePseudoClass(name),
+      });
+
+      if (isSelectionElement) {
+        const checked = this.selection.nodeFront.hasPseudoClassLock(name);
+        menuitem.checked = checked;
+      } else {
+        menuitem.disabled = true;
+      }
+
+      menu.append(menuitem);
+    }
+
+    return menu;
+  }
+
   _openMenu({ target, screenX = 0, screenY = 0 } = {}) {
     if (this.selection.isSlotted()) {
       // Slotted elements should not show any context menu.
@@ -645,24 +673,52 @@ class MarkupContextMenu {
       type: "separator",
     }));
 
-    // Set the pseudo classes
-    for (const name of ["hover", "active", "focus", "focus-within"]) {
-      const menuitem = new MenuItem({
-        id: "node-menu-pseudo-" + name,
-        label: name,
-        type: "checkbox",
-        click: () => this.inspector.togglePseudoClass(":" + name),
-      });
+    menu.append(new MenuItem({
+      id: "node-menu-useinconsole",
+      label: INSPECTOR_L10N.getStr("inspectorUseInConsole.label"),
+      click: () => this._useInConsole(),
+    }));
 
-      if (isSelectionElement) {
-        const checked = this.selection.nodeFront.hasPseudoClassLock(":" + name);
-        menuitem.checked = checked;
-      } else {
-        menuitem.disabled = true;
-      }
+    menu.append(new MenuItem({
+      id: "node-menu-showdomproperties",
+      label: INSPECTOR_L10N.getStr("inspectorShowDOMProperties.label"),
+      click: () => this._showDOMProperties(),
+    }));
 
-      menu.append(menuitem);
+    this._buildA11YMenuItem(menu);
+
+    if (this.selection.nodeFront.customElementLocation) {
+      menu.append(new MenuItem({
+        id: "node-menu-jumptodefinition",
+        label: INSPECTOR_L10N.getStr("inspectorCustomElementDefinition.label"),
+        click: () => this._jumpToCustomElementDefinition(),
+      }));
     }
+
+    menu.append(new MenuItem({
+      type: "separator",
+    }));
+
+    menu.append(new MenuItem({
+      label: INSPECTOR_L10N.getStr("inspectorPseudoClassSubmenu.label"),
+      submenu: this._getPseudoClassSubmenu(isSelectionElement),
+    }));
+
+    menu.append(new MenuItem({
+      id: "node-menu-screenshotnode",
+      label: INSPECTOR_L10N.getStr("inspectorScreenshotNode.label"),
+      disabled: !isScreenshotable,
+      click: () => this.inspector.screenshotNode().catch(console.error),
+    }));
+
+    menu.append(new MenuItem({
+      id: "node-menu-scrollnodeintoview",
+      label: INSPECTOR_L10N.getStr("inspectorScrollNodeIntoView.label"),
+      accesskey:
+        INSPECTOR_L10N.getStr("inspectorScrollNodeIntoView.accesskey"),
+      disabled: !isSelectionElement,
+      click: () => this.markup.scrollNodeIntoView(),
+    }));
 
     menu.append(new MenuItem({
       type: "separator",
@@ -696,49 +752,6 @@ class MarkupContextMenu {
       disabled: !isNodeWithChildren || !markupContainer.expanded,
       click: () => this.markup.collapseAll(this.selection.nodeFront),
     }));
-
-    menu.append(new MenuItem({
-      type: "separator",
-    }));
-
-    menu.append(new MenuItem({
-      id: "node-menu-scrollnodeintoview",
-      label: INSPECTOR_L10N.getStr("inspectorScrollNodeIntoView.label"),
-      accesskey:
-        INSPECTOR_L10N.getStr("inspectorScrollNodeIntoView.accesskey"),
-      disabled: !isSelectionElement,
-      click: () => this.markup.scrollNodeIntoView(),
-    }));
-    menu.append(new MenuItem({
-      id: "node-menu-screenshotnode",
-      label: INSPECTOR_L10N.getStr("inspectorScreenshotNode.label"),
-      disabled: !isScreenshotable,
-      click: () => this.inspector.screenshotNode().catch(console.error),
-    }));
-    menu.append(new MenuItem({
-      id: "node-menu-useinconsole",
-      label: INSPECTOR_L10N.getStr("inspectorUseInConsole.label"),
-      click: () => this._useInConsole(),
-    }));
-    menu.append(new MenuItem({
-      id: "node-menu-showdomproperties",
-      label: INSPECTOR_L10N.getStr("inspectorShowDOMProperties.label"),
-      click: () => this._showDOMProperties(),
-    }));
-
-    if (this.selection.nodeFront.customElementLocation) {
-      menu.append(new MenuItem({
-        type: "separator",
-      }));
-
-      menu.append(new MenuItem({
-        id: "node-menu-jumptodefinition",
-        label: INSPECTOR_L10N.getStr("inspectorCustomElementDefinition.label"),
-        click: () => this._jumpToCustomElementDefinition(),
-      }));
-    }
-
-    this._buildA11YMenuItem(menu);
 
     const nodeLinkMenuItems = this._getNodeLinkMenuItems();
     if (nodeLinkMenuItems.filter(item => item.visible).length > 0) {

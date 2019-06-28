@@ -6,10 +6,9 @@ add_task(async function() {
   registerCleanupFunction(async function() {
     clearAllPluginPermissions();
     Services.prefs.clearUserPref("extensions.blocklist.suppressUI");
-    Services.prefs.clearUserPref("plugins.click_to_play");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Test Plug-in");
     setTestPluginEnabledState(Ci.nsIPluginTag.STATE_ENABLED, "Second Test Plug-in");
-    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
     resetBlocklist();
     gBrowser.removeCurrentTab();
     window.focus();
@@ -19,7 +18,6 @@ add_task(async function() {
 
 add_task(async function() {
   Services.prefs.setBoolPref("extensions.blocklist.suppressUI", true);
-  Services.prefs.setBoolPref("plugins.click_to_play", true);
 
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
   gTestBrowser = gBrowser.selectedBrowser;
@@ -34,7 +32,7 @@ add_task(async function() {
 add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 
   // Work around for delayed PluginBindingAttached
   await promiseUpdatePluginBindings(gTestBrowser);
@@ -48,7 +46,7 @@ add_task(async function() {
 // Load a fresh page, load a new plugin blocklist, then load the same page again.
 add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html>GO!</html>");
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginHard.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginHard", gTestBrowser);
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
   // Work around for delayed PluginBindingAttached
@@ -65,7 +63,7 @@ add_task(async function() {
 add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html>GO!</html>");
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 
   // Hack the planet! Load our blocklist shim, so we can mess with blocklist
   // return results in the content process. Active until we close our tab.
@@ -87,7 +85,7 @@ add_task(async function() {
 // Load a fresh page, load a new plugin blocklist, then load the same page again.
 add_task(async function() {
   await promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html>GO!</html>");
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginHard.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginHard", gTestBrowser);
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
   // Work around for delayed PluginBindingAttached
@@ -98,5 +96,5 @@ add_task(async function() {
     Assert.ok(!test.activated, "task 4a: test plugin shouldn't activate!");
   });
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 });

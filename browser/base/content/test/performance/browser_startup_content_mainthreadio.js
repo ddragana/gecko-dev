@@ -262,7 +262,7 @@ add_task(async function() {
     });
   }
 
-  let tmpPath = expandWhitelistPath(MAC ? "TmpD:" : "/dev/shm").toLowerCase();
+  let tmpPath = expandWhitelistPath("TmpD:").toLowerCase();
   let shouldPass = true;
   for (let procName in processes) {
     let whitelist = processes[procName];
@@ -311,15 +311,22 @@ add_task(async function() {
         continue;
       }
 
-      if (!WIN) {
-        if (filename == "/dev/urandom") {
-          continue;
-        }
+      if (!WIN && filename == "/dev/urandom") {
+        continue;
+      }
 
-        // Ignore I/O due to IPC. This doesn't really touch the disk.
-        if (filename.startsWith(tmpPath + "/org.chromium.")) {
-          continue;
-        }
+      // /dev/shm is always tmpfs (a memory filesystem); this isn't
+      // really I/O any more than mmap/munmap are.
+      if (LINUX && filename.startsWith("/dev/shm/")) {
+        continue;
+      }
+
+      // Shared memory uses temporary files on MacOS <= 10.11 to avoid
+      // a kernel security bug that will never be patched (see
+      // https://crbug.com/project-zero/1671 for details).  This can
+      // be removed when we no longer support those OS versions.
+      if (MAC && filename.startsWith(tmpPath + "/org.mozilla.ipc.")) {
+        continue;
       }
 
       let expected = false;
@@ -384,7 +391,7 @@ add_task(async function() {
   if (shouldPass) {
     ok(shouldPass, "No unexpected main thread I/O during startup");
   } else {
-    const filename = "child-startup-mainthreadio-profile.json";
+    const filename = "profile_startup_content_mainthreadio.json";
     let path = Cc["@mozilla.org/process/environment;1"]
                  .getService(Ci.nsIEnvironment)
                  .get("MOZ_UPLOAD_DIR");
@@ -394,6 +401,6 @@ add_task(async function() {
                               encoder.encode(JSON.stringify(startupRecorder.data.profile)));
     ok(false,
        "Unexpected main thread I/O behavior during child process startup; " +
-       "profile uploaded in " + filename);
+       `open the ${filename} artifact in the Firefox Profiler to see what happened`);
   }
 });

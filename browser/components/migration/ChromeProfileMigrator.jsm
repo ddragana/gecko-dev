@@ -288,9 +288,24 @@ async function GetCookiesResource(aProfileFolder) {
     type: MigrationUtils.resourceTypes.COOKIES,
 
     async migrate(aCallback) {
+      // Get columns names and set is_sceure, is_httponly fields accordingly.
+      let columns = await MigrationUtils.getRowsFromDBWithoutLocks(cookiesPath, "Chrome cookies",
+        `PRAGMA table_info(cookies)`).catch(ex => {
+          Cu.reportError(ex);
+          aCallback(false);
+        });
+      // If the promise was rejected we will have already called aCallback,
+      // so we can just return here.
+      if (!columns) {
+        return;
+      }
+      columns = columns.map(c => c.getResultByName("name"));
+      let isHttponly = columns.includes("is_httponly") ? "is_httponly" : "httponly";
+      let isSecure = columns.includes("is_secure") ? "is_secure" : "secure";
+
       // We don't support decrypting cookies yet so only import plaintext ones.
       let rows = await MigrationUtils.getRowsFromDBWithoutLocks(cookiesPath, "Chrome cookies",
-       `SELECT host_key, name, value, path, expires_utc, secure, httponly, encrypted_value
+       `SELECT host_key, name, value, path, expires_utc, ${isSecure}, ${isHttponly}, encrypted_value
         FROM cookies
         WHERE length(encrypted_value) = 0`).catch(ex => {
           Cu.reportError(ex);
@@ -316,12 +331,12 @@ async function GetCookiesResource(aProfileFolder) {
                                row.getResultByName("path"),
                                row.getResultByName("name"),
                                row.getResultByName("value"),
-                               row.getResultByName("secure"),
-                               row.getResultByName("httponly"),
+                               row.getResultByName(isSecure),
+                               row.getResultByName(isHttponly),
                                false,
                                parseInt(expiresUtc),
                                {},
-                               Ci.nsICookie2.SAMESITE_UNSET);
+                               Ci.nsICookie.SAMESITE_NONE);
         } catch (e) {
           Cu.reportError(e);
         }
@@ -368,8 +383,8 @@ async function GetWindowsPasswordsResource(aProfileFolder) {
             password: crypto.
                       decryptData(crypto.arrayToString(row.getResultByName("password_value")),
                                                        null),
-            hostname: origin_url.prePath,
-            formSubmitURL: null,
+            origin: origin_url.prePath,
+            formActionOrigin: null,
             httpRealm: null,
             usernameElement: row.getResultByName("username_element"),
             passwordElement: row.getResultByName("password_element"),
@@ -383,21 +398,21 @@ async function GetWindowsPasswordsResource(aProfileFolder) {
               let action_url = row.getResultByName("action_url");
               if (!action_url) {
                 // If there is no action_url, store the wildcard "" value.
-                // See the `formSubmitURL` IDL comments.
-                loginInfo.formSubmitURL = "";
+                // See the `formActionOrigin` IDL comments.
+                loginInfo.formActionOrigin = "";
                 break;
               }
               let action_uri = NetUtil.newURI(action_url);
               if (!kValidSchemes.has(action_uri.scheme)) {
                 continue; // This continues the outer for loop.
               }
-              loginInfo.formSubmitURL = action_uri.prePath;
+              loginInfo.formActionOrigin = action_uri.prePath;
               break;
             case AUTH_TYPE.SCHEME_BASIC:
             case AUTH_TYPE.SCHEME_DIGEST:
               // signon_realm format is URIrealm, so we need remove URI
               loginInfo.httpRealm = row.getResultByName("signon_realm")
-                                       .substring(loginInfo.hostname.length + 1);
+                                       .substring(loginInfo.origin.length + 1);
               break;
             default:
               throw new Error("Login data scheme type not supported: " +

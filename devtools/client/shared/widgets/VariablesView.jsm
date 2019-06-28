@@ -29,6 +29,7 @@ const {KeyCodes} = require("devtools/client/shared/keycodes");
 const {PluralForm} = require("devtools/shared/plural-form");
 const {LocalizationHelper, ELLIPSIS} = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper(DBG_STRINGS_URI);
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
   "@mozilla.org/widget/clipboardhelper;1",
@@ -430,10 +431,9 @@ VariablesView.prototype = {
     // properties to display.
     container.hidden = !this._store.length;
 
-    const searchbox = this._searchboxNode = document.createXULElement("textbox");
+    const searchbox = this._searchboxNode = document.createElementNS(HTML_NS, "input");
     searchbox.className = "variables-view-searchinput devtools-filterinput";
     searchbox.setAttribute("placeholder", this._searchboxPlaceholder);
-    searchbox.setAttribute("flex", "1");
     searchbox.addEventListener("input", this._onSearchboxInput);
     searchbox.addEventListener("keydown", this._onSearchboxKeyDown);
 
@@ -799,6 +799,7 @@ VariablesView.prototype = {
   /**
    * Listener handling a key down event on the view.
    */
+  /* eslint-disable complexity */
   _onViewKeyDown: function(e) {
     const item = this.getFocusedItem();
 
@@ -889,6 +890,7 @@ VariablesView.prototype = {
         item._onAddProperty(e);
     }
   },
+  /* eslint-enable complexity */
 
   /**
    * Sets the text displayed in this container when there are no available items.
@@ -984,7 +986,7 @@ VariablesView.prototype = {
 
   /**
    * Gets the owner document holding this view.
-   * @return nsIHTMLDocument
+   * @return HTMLDocument
    */
   get document() {
     return this._document || (this._document = this._parent.ownerDocument);
@@ -2046,7 +2048,7 @@ Scope.prototype = {
 
   /**
    * Gets the owner document holding this scope.
-   * @return nsIHTMLDocument
+   * @return HTMLDocument
    */
   get document() {
     return this._document || (this._document = this.ownerView.document);
@@ -2793,6 +2795,7 @@ Variable.prototype = extend(Scope.prototype, {
    * and specifies if it's a 'this', '<exception>', '<return>' or '__proto__'
    * reference.
    */
+  /* eslint-disable complexity */
   _setAttributes: function() {
     const ownerView = this.ownerView;
     if (ownerView.preventDescriptorModifiers) {
@@ -2850,6 +2853,7 @@ Variable.prototype = extend(Scope.prototype, {
       target.setAttribute("pseudo-item", "");
     }
   },
+  /* eslint-enable complexity */
 
   /**
    * Adds the necessary event listeners for this variable.
@@ -4035,10 +4039,10 @@ Editable.prototype = {
 
     // Create a texbox input element which will be shown in the current
     // element's specified label location.
-    const input = this._input = this._variable.document.createXULElement("textbox");
-    input.className = "plain " + this.className;
+    const input = this._input =
+      this._variable.document.createElementNS(HTML_NS, "input");
+    input.className = this.className;
     input.setAttribute("value", initialString);
-    input.setAttribute("flex", "1");
 
     // Replace the specified label with a textbox input element.
     label.parentNode.replaceChild(input, label);

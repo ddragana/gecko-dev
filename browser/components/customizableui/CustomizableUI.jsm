@@ -1621,8 +1621,7 @@ var CustomizableUIInternal = {
     }
     try {
       if (Array.isArray(aFormatArgs) && aFormatArgs.length) {
-        return gWidgetsBundle.formatStringFromName(name, aFormatArgs,
-          aFormatArgs.length) || def;
+        return gWidgetsBundle.formatStringFromName(name, aFormatArgs) || def;
       }
       return gWidgetsBundle.GetStringFromName(name) || def;
     } catch (ex) {
@@ -4438,7 +4437,7 @@ OverflowableToolbar.prototype = {
       let mainView = doc.getElementById(mainViewId);
       let contextMenu = doc.getElementById(mainView.getAttribute("context"));
       gELS.addSystemEventListener(contextMenu, "command", this, true);
-      let anchor = doc.getAnonymousElementByAttribute(this._chevron, "class", "toolbarbutton-icon");
+      let anchor = this._chevron.icon;
       // Ensure we update the gEditUIVisible flag when opening the popup, in
       // case the edit controls are in it.
       this._panel.addEventListener("popupshowing", () => doc.defaultView.updateEditUIVisibility(), {once: true});

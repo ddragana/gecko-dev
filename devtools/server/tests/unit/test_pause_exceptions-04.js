@@ -10,11 +10,12 @@
  */
 
 add_task(threadClientTest(async ({ threadClient, client, debuggee }) => {
+  let onResume = null;
   let packet = null;
 
-  threadClient.addOneTimeListener("paused", function(event, pkt) {
+  threadClient.once("paused", function(pkt) {
     packet = pkt;
-    threadClient.resume();
+    onResume = threadClient.resume();
   });
 
   await threadClient.pauseOnExceptions(true, true);
@@ -35,14 +36,16 @@ add_task(threadClientTest(async ({ threadClient, client, debuggee }) => {
     /* eslint-enable */
   } catch (e) {}
 
+  await onResume;
+
   Assert.equal(!!packet, true);
   Assert.equal(packet.why.type, "exception");
   Assert.equal(packet.why.exception, "42");
   packet = null;
 
-  threadClient.addOneTimeListener("paused", function(event, pkt) {
+  threadClient.once("paused", function(pkt) {
     packet = pkt;
-    threadClient.resume();
+    onResume = threadClient.resume();
   });
 
   await threadClient.pauseOnExceptions(false, true);
@@ -84,6 +87,8 @@ add_task(threadClientTest(async ({ threadClient, client, debuggee }) => {
     );
     /* eslint-enable */
   } catch (e) {}
+
+  await onResume;
 
   // Test that the paused listener callback has been called
   // on the thrown error from stopMeAgain()

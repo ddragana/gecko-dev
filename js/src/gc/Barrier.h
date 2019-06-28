@@ -425,9 +425,8 @@ class MOZ_NON_MEMMOVABLE BarrieredBase {
 
 // Base class for barriered pointer types that intercept only writes.
 template <class T>
-class WriteBarriered
-    : public BarrieredBase<T>,
-      public WrappedPtrOperations<T, WriteBarriered<T>> {
+class WriteBarriered : public BarrieredBase<T>,
+                       public WrappedPtrOperations<T, WriteBarriered<T>> {
  protected:
   using BarrieredBase<T>::value;
 
@@ -864,6 +863,10 @@ class ImmutableTenuredPtr {
   const T* address() { return &value; }
 };
 
+#if MOZ_IS_GCC
+template struct JS_PUBLIC_API MovableCellHasher<JSObject*>;
+#endif
+
 template <typename T>
 struct MovableCellHasher<PreBarriered<T>> {
   using Key = PreBarriered<T>;
@@ -958,6 +961,21 @@ struct WeakHeapPtrHasher {
   }
 };
 
+// Wrapper around GCCellPtr for use with RootedVector<StackGCCellPtr>.
+class MOZ_STACK_CLASS StackGCCellPtr {
+  JS::GCCellPtr ptr_;
+
+ public:
+  MOZ_IMPLICIT StackGCCellPtr(JS::GCCellPtr ptr) : ptr_(ptr) {}
+  StackGCCellPtr() = default;
+
+  void operator=(const StackGCCellPtr& other) { ptr_ = other.ptr_; }
+
+  void trace(JSTracer* trc);
+
+  JS::GCCellPtr get() const { return ptr_; }
+};
+
 }  // namespace js
 
 namespace mozilla {
@@ -1001,6 +1019,7 @@ using GCPtrNativeObject = GCPtr<NativeObject*>;
 using GCPtrArrayObject = GCPtr<ArrayObject*>;
 using GCPtrBaseShape = GCPtr<BaseShape*>;
 using GCPtrAtom = GCPtr<JSAtom*>;
+using GCPtrBigInt = GCPtr<BigInt*>;
 using GCPtrFlatString = GCPtr<JSFlatString*>;
 using GCPtrFunction = GCPtr<JSFunction*>;
 using GCPtrObject = GCPtr<JSObject*>;

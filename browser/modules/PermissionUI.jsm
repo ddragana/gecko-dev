@@ -364,9 +364,9 @@ var PermissionPromptPrototype = {
       // If we're reading and setting permissions, then we need
       // to check to see if we already have a permission setting
       // for this particular principal.
-      let {state} = SitePermissions.get(requestingURI,
-                                        this.permissionKey,
-                                        this.browser);
+      let {state} = SitePermissions.getForPrincipal(this.principal,
+                                                    this.permissionKey,
+                                                    this.browser);
 
       if (state == SitePermissions.BLOCK) {
         // If this block was done based on a global user setting, we want to show
@@ -439,19 +439,19 @@ var PermissionPromptPrototype = {
               if (PrivateBrowsingUtils.isBrowserPrivate(this.browser)) {
                 scope = SitePermissions.SCOPE_SESSION;
               }
-              SitePermissions.set(this.principal.URI,
-                                  this.permissionKey,
-                                  promptAction.action,
-                                  scope);
+              SitePermissions.setForPrincipal(this.principal,
+                                              this.permissionKey,
+                                              promptAction.action,
+                                              scope);
             } else if (promptAction.action == SitePermissions.BLOCK) {
               // Temporarily store BLOCK permissions only
               // SitePermissions does not consider subframes when storing temporary
               // permissions on a tab, thus storing ALLOW could be exploited.
-              SitePermissions.set(this.principal.URI,
-                                  this.permissionKey,
-                                  promptAction.action,
-                                  SitePermissions.SCOPE_TEMPORARY,
-                                  this.browser);
+              SitePermissions.setForPrincipal(this.principal,
+                                              this.permissionKey,
+                                              promptAction.action,
+                                              SitePermissions.SCOPE_TEMPORARY,
+                                              this.browser);
             }
 
             // Grant permission if action is ALLOW.
@@ -528,10 +528,10 @@ var PermissionPromptPrototype = {
           if (PrivateBrowsingUtils.isBrowserPrivate(browser)) {
             scope = SitePermissions.SCOPE_SESSION;
           }
-          SitePermissions.set(principal.URI,
-                              this.permissionKey,
-                              promptAction.action,
-                              scope);
+          SitePermissions.setForPrincipal(principal,
+                                          this.permissionKey,
+                                          promptAction.action,
+                                          scope);
         },
       };
       popupNotificationActions.push(action);
@@ -727,7 +727,7 @@ GeolocationPermissionPrompt.prototype = {
     }
 
     return gBrowserBundle.formatStringFromName("geolocation.shareWithSite3",
-                                               ["<>"], 1);
+                                               ["<>"]);
   },
 
   get promptActions() {
@@ -797,7 +797,7 @@ DesktopNotificationPermissionPrompt.prototype = {
 
   get message() {
     return gBrowserBundle.formatStringFromName("webNotifications.receiveFromSite2",
-                                                    ["<>"], 1);
+                                                    ["<>"]);
   },
 
   get promptActions() {
@@ -887,7 +887,7 @@ PersistentStoragePermissionPrompt.prototype = {
 
   get message() {
     return gBrowserBundle.formatStringFromName("persistentStorage.allowWithSite",
-                                                    ["<>"], 1);
+                                                    ["<>"]);
   },
 
   get promptActions() {
@@ -985,10 +985,10 @@ MIDIPermissionPrompt.prototype = {
       }
     } else if (this.isSysexPerm) {
       message = gBrowserBundle.formatStringFromName("midi.shareSysexWithSite.message",
-                                                    ["<>"], 1);
+                                                    ["<>"]);
     } else {
       message = gBrowserBundle.formatStringFromName("midi.shareWithSite.message",
-                                                    ["<>"], 1);
+                                                    ["<>"]);
     }
     return message;
   },
@@ -1056,7 +1056,7 @@ StorageAccessPermissionPrompt.prototype = {
     let document = this.browser.ownerDocument;
     let label =
       gBrowserBundle.formatStringFromName("storageAccess.description.label",
-                                          [this.prettifyHostPort(this.request.principal.URI), "<>"], 2);
+                                          [this.prettifyHostPort(this.request.principal.URI), "<>"]);
     let parts = label.split("<>");
     if (parts.length == 1) {
       parts.push("");
@@ -1086,7 +1086,7 @@ StorageAccessPermissionPrompt.prototype = {
   },
 
   get message() {
-    return gBrowserBundle.formatStringFromName("storageAccess.message", ["<>", "<>"], 2);
+    return gBrowserBundle.formatStringFromName("storageAccess.message", ["<>", "<>"]);
   },
 
   get promptActions() {

@@ -8,6 +8,12 @@
 // leaking to window scope.
 {
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {AppConstants} = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
+
+let LazyModules = {};
+
+ChromeUtils.defineModuleGetter(LazyModules, "PermitUnloader",
+  "resource://gre/actors/BrowserElementParent.jsm");
 
 const elementsToDestroyOnUnload = new Set();
 
@@ -41,6 +47,12 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     super();
 
     this.onPageHide = this.onPageHide.bind(this);
+
+    this.isNavigating = false;
+
+    this._documentURI = null;
+    this._characterSet = null;
+    this._documentContentType = null;
 
     /**
      * These are managed by the tabbrowser:
@@ -222,8 +234,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
     this._controller = null;
 
-    this._selectParentHelper = null;
-
     this._remoteWebNavigation = null;
 
     this._remoteWebProgress = null;
@@ -234,7 +244,11 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
     this._mayEnableCharacterEncodingMenu = null;
 
+    this._charsetAutodetected = false;
+
     this._contentPrincipal = null;
+
+    this._contentStoragePrincipal = null;
 
     this._csp = null;
 
@@ -300,8 +314,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this._autoScrollScrollId = null;
 
     this._autoScrollPresShellId = null;
-
-    this._permitUnloadId = 0;
   }
 
   connectedCallback() {
@@ -352,6 +364,16 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this.contentDocument ? this.contentDocument.contentType : null;
   }
 
+  set documentContentType(aContentType) {
+    if (aContentType != null) {
+      if (this.isRemoteBrowser) {
+        this._documentContentType = aContentType;
+      } else {
+        this.contentDocument.documentContentType = aContentType;
+      }
+    }
+  }
+
   set sameProcessAsFrameLoader(val) {
     this._sameProcessAsFrameLoader = Cu.getWeakReference(val);
   }
@@ -377,6 +399,30 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   get dateTimePicker() {
     return document.getElementById(this.getAttribute("datetimepicker"));
+  }
+
+  /**
+   * Provides a node to hang popups (such as the datetimepicker) from.
+   * If this <browser> isn't the descendant of a <stack>, null is returned
+   * instead and popup code must handle this case.
+   */
+  get popupAnchor() {
+    let stack = this.closest("stack");
+    if (!stack) {
+      return null;
+    }
+
+    let popupAnchor = stack.querySelector(".popup-anchor");
+    if (popupAnchor) {
+      return popupAnchor;
+    }
+
+    // Create an anchor for the popup
+    popupAnchor = document.createXULElement("hbox");
+    popupAnchor.className = "popup-anchor";
+    popupAnchor.hidden = true;
+    stack.appendChild(popupAnchor);
+    return popupAnchor;
   }
 
   set docShellIsActive(val) {
@@ -578,7 +624,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   set characterSet(val) {
     if (this.isRemoteBrowser) {
-      this.messageManager.sendAsyncMessage("UpdateCharacterSet", { value: val });
+      this.sendMessageToActor("UpdateCharacterSet", { value: val }, "BrowserTab");
       this._characterSet = val;
     } else {
       this.docShell.charset = val;
@@ -594,14 +640,32 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this.isRemoteBrowser ? this._mayEnableCharacterEncodingMenu : this.docShell.mayEnableCharacterEncodingMenu;
   }
 
+  set mayEnableCharacterEncodingMenu(aMayEnable) {
+    if (this.isRemoteBrowser) {
+      this._mayEnableCharacterEncodingMenu = aMayEnable;
+    }
+  }
+
+  get charsetAutodetected() {
+    return this.isRemoteBrowser ? this._charsetAutodetected : this.docShell.charsetAutodetected;
+  }
+
+  set charsetAutodetected(aAutodetected) {
+    if (this.isRemoteBrowser) {
+      this._charsetAutodetected = aAutodetected;
+    }
+  }
+
   get contentPrincipal() {
     return this.isRemoteBrowser ? this._contentPrincipal : this.contentDocument.nodePrincipal;
   }
 
+  get contentStoragePrincipal() {
+    return this.isRemoteBrowser ? this._contentStoragePrincipal : this.contentDocument.effectiveStoragePrincipal;
+  }
+
   get csp() {
-    // After Bug 965637 we can query the csp directly from the contentDocument
-    // instead of contentDocument.nodePrincipal.
-    return this.isRemoteBrowser ? this._csp : this.contentDocument.nodePrincipal.csp;
+    return this.isRemoteBrowser ? this._csp : this.contentDocument.csp;
   }
 
   get contentRequestContextID() {
@@ -634,9 +698,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
       if (changed) {
         this._fullZoom = val;
-        try {
-          this.messageManager.sendAsyncMessage("FullZoom", { value: val });
-        } catch (ex) {}
+        this.sendMessageToActor("FullZoom", { value: val }, "Zoom", true);
 
         let event = new Event("FullZoomChange", { bubbles: true });
         this.dispatchEvent(event);
@@ -659,9 +721,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
       if (changed) {
         this._textZoom = val;
-        try {
-          this.messageManager.sendAsyncMessage("TextZoom", { value: val });
-        } catch (ex) {}
+        this.sendMessageToActor("TextZoom", { value: val }, "Zoom", true);
 
         let event = new Event("TextZoomChange", { bubbles: true });
         this.dispatchEvent(event);
@@ -759,11 +819,11 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   _wrapURIChangeCall(fn) {
     if (!this.isRemoteBrowser) {
-      this.inLoadURI = true;
+      this.isNavigating = true;
       try {
         fn();
       } finally {
-        this.inLoadURI = false;
+        this.isNavigating = false;
       }
     } else {
       fn();
@@ -801,23 +861,24 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
   /**
    * throws exception for unknown schemes
    */
-  loadURI(aURI, aParams) {
+  loadURI(aURI, aParams = {}) {
     if (!aURI) {
       aURI = "about:blank";
     }
     let {
-      flags = Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
         referrerInfo,
         triggeringPrincipal,
         postData,
         headers,
         csp,
-    } = aParams || {};
+    } = aParams;
+    let loadFlags = aParams.loadFlags || aParams.flags ||
+                    Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
     let loadURIOptions = {
       triggeringPrincipal,
       csp,
       referrerInfo,
-      loadFlags: flags,
+      loadFlags,
       postData,
       headers,
     };
@@ -941,14 +1002,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this.dispatchEvent(event);
   }
 
-  notifyGloballyAutoplayBlocked() {
-    let event = document.createEvent("CustomEvent");
-    event.initCustomEvent("GloballyAutoplayBlocked", true, false, {
-      url: this.documentURI,
-    });
-    this.dispatchEvent(event);
-  }
-
   /**
    * When the pref "media.block-autoplay-until-in-foreground" is on,
    * Gecko delays starting playback of media resources in tabs until the
@@ -981,12 +1034,12 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     if (!transientState) {
       this._audioMuted = true;
     }
-    this.messageManager.sendAsyncMessage("AudioPlayback", { type: "mute" });
+    this.frameLoader.browsingContext.notifyMediaMutedChanged(true);
   }
 
   unmute() {
     this._audioMuted = false;
-    this.messageManager.sendAsyncMessage("AudioPlayback", { type: "unmute" });
+    this.frameLoader.browsingContext.notifyMediaMutedChanged(false);
   }
 
   pauseMedia(disposable) {
@@ -1022,7 +1075,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
   }
 
   didStartLoadSinceLastUserTyping() {
-    return !this.inLoadURI &&
+    return !this.isNavigating &&
       this.urlbarChangeTracker._startedLoadSinceLastUserTyping;
   }
 
@@ -1053,9 +1106,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this.messageManager.addMessageListener("Browser:Init", this);
       this.messageManager.addMessageListener("DOMTitleChanged", this);
       this.messageManager.addMessageListener("ImageDocumentLoaded", this);
-      this.messageManager.addMessageListener("FullZoomChange", this);
-      this.messageManager.addMessageListener("TextZoomChange", this);
-      this.messageManager.addMessageListener("ZoomChangeUsingMouseWheel", this);
 
       // browser-child messages, such as Content:LocationChange, are handled in
       // RemoteWebProgress, ensure it is loaded and ready.
@@ -1074,11 +1124,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this._remoteWebProgress = this._remoteWebProgressManager.topLevelWebProgress;
 
       this.messageManager.loadFrameScript("chrome://global/content/browser-child.js", true);
-
-      if (this.hasAttribute("selectmenulist")) {
-        this.messageManager.addMessageListener("Forms:ShowDropDown", this);
-        this.messageManager.addMessageListener("Forms:HideDropDown", this);
-      }
 
       if (!this.hasAttribute("disablehistory")) {
         Services.obs.addObserver(this.observer, "browser:purge-session-history", true);
@@ -1145,12 +1190,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStart", this);
       this.messageManager.addMessageListener("AudioPlayback:ActiveMediaBlockStop", this);
       this.messageManager.addMessageListener("UnselectedTabHover:Toggle", this);
-      this.messageManager.addMessageListener("GloballyAutoplayBlocked", this);
-
-      if (this.hasAttribute("selectmenulist")) {
-        this.messageManager.addMessageListener("Forms:ShowDropDown", this);
-        this.messageManager.addMessageListener("Forms:HideDropDown", this);
-      }
     }
   }
 
@@ -1162,9 +1201,13 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     elementsToDestroyOnUnload.delete(this);
 
     // Make sure that any open select is closed.
-    if (this._selectParentHelper) {
+    if (this.hasAttribute("selectmenulist")) {
       let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-      this._selectParentHelper.hide(menulist, this);
+      if (menulist) {
+        let resourcePath = "resource://gre/modules/SelectParentHelper.jsm";
+        let {SelectParentHelper} = ChromeUtils.import(resourcePath);
+        SelectParentHelper.hide(menulist, this);
+      }
     }
 
     this.resetFields();
@@ -1260,38 +1303,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
           ++this._unselectedTabHoverMessageListenerCount > 0 :
           --this._unselectedTabHoverMessageListenerCount == 0;
         break;
-      case "GloballyAutoplayBlocked":
-        this.notifyGloballyAutoplayBlocked();
-        break;
-      case "Forms:ShowDropDown":
-        {
-          if (!this._selectParentHelper) {
-            this._selectParentHelper =
-              ChromeUtils.import("resource://gre/modules/SelectParentHelper.jsm", {}).SelectParentHelper;
-          }
-
-          let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-          menulist.menupopup.style.direction = data.style.direction;
-
-          let useFullZoom = !this.isRemoteBrowser ||
-                            Services.prefs.getBoolPref("browser.zoom.full") ||
-                            this.isSyntheticDocument;
-          let zoom = useFullZoom ? this._fullZoom : this._textZoom;
-          this._selectParentHelper.populate(menulist, data.options.options,
-            data.options.uniqueStyles, data.selectedIndex, zoom,
-            data.defaultStyle, data.style);
-          this._selectParentHelper.open(this, menulist, data.rect, data.isOpenedViaTouch);
-          break;
-        }
-
-      case "Forms:HideDropDown":
-        {
-          if (this._selectParentHelper) {
-            let menulist = document.getElementById(this.getAttribute("selectmenulist"));
-            this._selectParentHelper.hide(menulist, this);
-          }
-          break;
-        }
     }
     return undefined;
   }
@@ -1315,33 +1326,6 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
           height: data.height,
         };
         break;
-
-      case "FullZoomChange":
-        {
-          this._fullZoom = data.value;
-          let event = document.createEvent("Events");
-          event.initEvent("FullZoomChange", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
-      case "TextZoomChange":
-        {
-          this._textZoom = data.value;
-          let event = document.createEvent("Events");
-          event.initEvent("TextZoomChange", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
-      case "ZoomChangeUsingMouseWheel":
-        {
-          let event = document.createEvent("Events");
-          event.initEvent("ZoomChangeUsingMouseWheel", true, false);
-          this.dispatchEvent(event);
-          break;
-        }
-
       default:
         return this._receiveMessage(aMessage);
     }
@@ -1369,6 +1353,68 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this._remoteWebProgressManager;
   }
 
+  updateForStateChange(aCharset, aDocumentURI, aContentType) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      if (aCharset != null) {
+        this._characterSet = aCharset;
+      }
+
+      if (aDocumentURI != null) {
+        this._documentURI = aDocumentURI;
+      }
+
+      if (aContentType != null) {
+        this._documentContentType = aContentType;
+      }
+    }
+  }
+
+  updateWebNavigationForLocationChange(aCanGoBack, aCanGoForward) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      let remoteWebNav = this._remoteWebNavigationImpl;
+      remoteWebNav.canGoBack = aCanGoBack;
+      remoteWebNav.canGoForward = aCanGoForward;
+    }
+  }
+
+  updateForLocationChange(aLocation,
+                          aCharset,
+                          aMayEnableCharacterEncodingMenu,
+                          aCharsetAutodetected,
+                          aDocumentURI,
+                          aTitle,
+                          aContentPrincipal,
+                          aContentStoragePrincipal,
+                          aCSP,
+                          aIsSynthetic,
+                          aInnerWindowID,
+                          aHaveRequestContextID,
+                          aRequestContextID,
+                          aContentType) {
+    if (this.isRemoteBrowser && this.messageManager) {
+      if (aCharset != null) {
+        this._characterSet = aCharset;
+        this._mayEnableCharacterEncodingMenu = aMayEnableCharacterEncodingMenu;
+        this._charsetAutodetected = aCharsetAutodetected;
+      }
+
+      if (aContentType != null) {
+        this._documentContentType = aContentType;
+      }
+
+      this._remoteWebNavigationImpl._currentURI = aLocation;
+      this._documentURI = aDocumentURI;
+      this._contentTile = aTitle;
+      this._imageDocument = null;
+      this._contentPrincipal = aContentPrincipal;
+      this._contentStoragePrincipal = aContentStoragePrincipal;
+      this._csp = aCSP;
+      this._isSyntheticDocument = aIsSynthetic;
+      this._innerWindowID = aInnerWindowID;
+      this._contentRequestContextID = aHaveRequestContextID ? aRequestContextID : null;
+    }
+  }
+
   purgeSessionHistory() {
     if (this.isRemoteBrowser) {
       try {
@@ -1386,7 +1432,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     this.messageManager.sendAsyncMessage("Browser:PurgeSessionHistory");
   }
 
-  createAboutBlankContentViewer(aPrincipal) {
+  createAboutBlankContentViewer(aPrincipal, aStoragePrincipal) {
     if (this.isRemoteBrowser) {
       // Ensure that the content process has the permissions which are
       // needed to create a document with the given principal.
@@ -1394,12 +1440,26 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
         BrowserUtils.principalWithMatchingOA(aPrincipal, this.contentPrincipal);
       this.frameLoader.remoteTab.transmitPermissionsForPrincipal(permissionPrincipal);
 
-      // Create the about blank content viewer in the content process
-      this.messageManager.sendAsyncMessage("Browser:CreateAboutBlank", aPrincipal);
+      // This still uses the message manager, for the following reasons:
+      //
+      // 1. Due to bug 1523638, it's virtually certain that, if we've just created
+      //    this <xul:browser>, that the WindowGlobalParent for the top-level frame
+      //    of this browser doesn't exist yet, so it's not possible to get at a
+      //    JS Window Actor for it.
+      //
+      // 2. JS Window Actors are tied to the principals for the frames they're running
+      //    in - switching principals is therefore self-destructive and unexpected.
+      //
+      // So we'll continue to use the message manager until we come up with a better
+      // solution.
+      this.messageManager.sendAsyncMessage("BrowserElement:CreateAboutBlank",
+                                           {principal: aPrincipal,
+                                            storagePrincipal: aStoragePrincipal});
       return;
     }
     let principal = BrowserUtils.principalWithMatchingOA(aPrincipal, this.contentPrincipal);
-    this.docShell.createAboutBlankContentViewer(principal);
+    let storagePrincipal = BrowserUtils.principalWithMatchingOA(aStoragePrincipal, this.contentStoragePrincipal);
+    this.docShell.createAboutBlankContentViewer(principal, storagePrincipal);
   }
 
   stopScroll() {
@@ -1473,7 +1533,8 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
       // Exclude second-rate platforms
       this._autoScrollPopup.setAttribute("transparent", !/BeOS|OS\/2/.test(navigator.appVersion));
       // Enable translucency on Windows and Mac
-      this._autoScrollPopup.setAttribute("translucent", /Win|Mac/.test(navigator.platform));
+      this._autoScrollPopup.setAttribute("translucent",
+        AppConstants.platform == "win" || AppConstants.platform == "macosx");
     }
 
     this._autoScrollPopup.setAttribute("scrolldir", scrolldir);
@@ -1658,6 +1719,7 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
         "_contentTitle",
         "_characterSet",
         "_mayEnableCharacterEncodingMenu",
+        "_charsetAutodetected",
         "_contentPrincipal",
         "_imageDocument",
         "_fullZoom",
@@ -1718,16 +1780,13 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   getInPermitUnload(aCallback) {
     if (this.isRemoteBrowser) {
-      let id = this._permitUnloadId++;
-      let mm = this.messageManager;
-      mm.sendAsyncMessage("InPermitUnload", { id });
-      mm.addMessageListener("InPermitUnload", function listener(msg) {
-        if (msg.data.id != id) {
-          return;
-        }
-        mm.removeMessageListener("InPermitUnload", listener);
-        aCallback(msg.data.inPermitUnload);
-      });
+      let { remoteTab } = this.frameLoader;
+      if (!remoteTab) {
+        // If we're crashed, we're definitely not in this state anymore.
+        aCallback(false);
+        return;
+      }
+      aCallback(LazyModules.PermitUnloader.inPermitUnload(this.frameLoader));
       return;
     }
 
@@ -1740,68 +1799,11 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
 
   permitUnload(aPermitUnloadFlags) {
     if (this.isRemoteBrowser) {
-      let { remoteTab } = this.frameLoader;
-
-      if (!remoteTab.hasBeforeUnload) {
+      if (!LazyModules.PermitUnloader.hasBeforeUnload(this.frameLoader)) {
         return { permitUnload: true, timedOut: false };
       }
 
-      const kTimeout = 1000;
-
-      let finished = false;
-      let responded = false;
-      let permitUnload;
-      let id = this._permitUnloadId++;
-      let mm = this.messageManager;
-      let {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-      let msgListener = msg => {
-        if (msg.data.id != id) {
-          return;
-        }
-        if (msg.data.kind == "start") {
-          responded = true;
-          return;
-        }
-        done(msg.data.permitUnload);
-      };
-
-      let observer = subject => {
-        if (subject == mm) {
-          done(true);
-        }
-      };
-
-      function done(result) {
-        finished = true;
-        permitUnload = result;
-        mm.removeMessageListener("PermitUnload", msgListener);
-        Services.obs.removeObserver(observer, "message-manager-close");
-      }
-
-      mm.sendAsyncMessage("PermitUnload", { id, aPermitUnloadFlags });
-      mm.addMessageListener("PermitUnload", msgListener);
-      Services.obs.addObserver(observer, "message-manager-close");
-
-      let timedOut = false;
-
-      function timeout() {
-        if (!responded) {
-          timedOut = true;
-        }
-
-        // Dispatch something to ensure that the main thread wakes up.
-        Services.tm.dispatchToMainThread(function() {});
-      }
-
-      let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-      timer.initWithCallback(timeout, kTimeout, timer.TYPE_ONE_SHOT);
-
-      while (!finished && !timedOut) {
-        Services.tm.currentThread.processNextEvent(true);
-      }
-
-      return { permitUnload, timedOut };
+      return LazyModules.PermitUnloader.permitUnload(this.frameLoader, aPermitUnloadFlags);
     }
 
     if (!this.docShell || !this.docShell.contentViewer) {
@@ -1854,6 +1856,41 @@ class MozBrowser extends MozElements.MozElementMixin(XULFrameElement) {
     return this.docShell ?
       this.docShell.getContentBlockingLog() :
       Promise.reject("docshell isn't available");
+  }
+
+  // Send an asynchronous message to the remote child via an actor.
+  // Note: use this only for messages through an actor. For old-style
+  // messages, use the message manager. If 'all' is true, then send
+  // a message to all descendant processes.
+  sendMessageToActor(messageName, args, actorName, all) {
+    if (!this.frameLoader) {
+      return;
+    }
+
+    let windowGlobal = this.browsingContext.currentWindowGlobal;
+    if (!windowGlobal) {
+      // Workaround for bug 1523638 where about:blank is loaded in a tab.
+      if (messageName == "Browser:AppTab") {
+        setTimeout(() => { this.sendMessageToActor(messageName, args, actorName); }, 0);
+      }
+      return;
+    }
+
+    function sendToChildren(browsingContext, checkRoot) {
+      let windowGlobal = browsingContext.currentWindowGlobal;
+      if (windowGlobal && (!checkRoot || windowGlobal.isProcessRoot)) {
+        windowGlobal.getActor(actorName).sendAsyncMessage(messageName, args);
+      }
+
+      if (all) {
+        let contexts = browsingContext.getChildren();
+        for (let context of contexts) {
+          sendToChildren(context, true);
+        }
+      }
+    }
+
+    sendToChildren(this.browsingContext, false);
   }
 }
 

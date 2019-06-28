@@ -286,7 +286,7 @@ void RestyleManager::CharacterDataChanged(
     return;
   }
 
-  const nsTextFragment* text = aContent->GetText();
+  const nsTextFragment* text = &aContent->AsText()->TextFragment();
 
   const size_t oldLength = aInfo.mChangeStart;
   const size_t newLength = text->GetLength();
@@ -809,8 +809,8 @@ static bool RecomputePosition(nsIFrame* aFrame) {
     parentReflowInput.mCBReflowInput = cbReflowInput.ptr();
   }
 
-  NS_WARNING_ASSERTION(parentSize.ISize(parentWM) != NS_INTRINSICSIZE &&
-                           parentSize.BSize(parentWM) != NS_INTRINSICSIZE,
+  NS_WARNING_ASSERTION(parentSize.ISize(parentWM) != NS_UNCONSTRAINEDSIZE &&
+                           parentSize.BSize(parentWM) != NS_UNCONSTRAINEDSIZE,
                        "parentSize should be valid");
   parentReflowInput.SetComputedISize(std::max(parentSize.ISize(parentWM), 0));
   parentReflowInput.SetComputedBSize(std::max(parentSize.BSize(parentWM), 0));
@@ -820,7 +820,7 @@ static bool RecomputePosition(nsIFrame* aFrame) {
   parentReflowInput.ComputedPhysicalBorderPadding() =
       parentFrame->GetUsedBorderAndPadding();
   LogicalSize availSize = parentSize.ConvertTo(frameWM, parentWM);
-  availSize.BSize(frameWM) = NS_INTRINSICSIZE;
+  availSize.BSize(frameWM) = NS_UNCONSTRAINEDSIZE;
 
   ViewportFrame* viewport = do_QueryFrame(parentFrame);
   nsSize cbSize =
@@ -837,19 +837,19 @@ static bool RecomputePosition(nsIFrame* aFrame) {
   nsSize computedSize(reflowInput.ComputedWidth(),
                       reflowInput.ComputedHeight());
   computedSize.width += reflowInput.ComputedPhysicalBorderPadding().LeftRight();
-  if (computedSize.height != NS_INTRINSICSIZE) {
+  if (computedSize.height != NS_UNCONSTRAINEDSIZE) {
     computedSize.height +=
         reflowInput.ComputedPhysicalBorderPadding().TopBottom();
   }
   nsSize size = aFrame->GetSize();
   // The RecomputePosition hint is not used if any offset changed between auto
-  // and non-auto. If computedSize.height == NS_INTRINSICSIZE then the new
+  // and non-auto. If computedSize.height == NS_UNCONSTRAINEDSIZE then the new
   // element height will be its intrinsic height, and since 'top' and 'bottom''s
   // auto-ness hasn't changed, the old height must also be its intrinsic
   // height, which we can assume hasn't changed (or reflow would have
   // been triggered).
   if (computedSize.width == size.width &&
-      (computedSize.height == NS_INTRINSICSIZE ||
+      (computedSize.height == NS_UNCONSTRAINEDSIZE ||
        computedSize.height == size.height)) {
     // If we're solving for 'left' or 'top', then compute it here, in order to
     // match the reflow code path.
@@ -1546,23 +1546,6 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
     }
 
     if (hint & nsChangeHint_ReconstructFrame) {
-      // Record whether this frame was absolutely positioned before and after
-      // frame construction, to detect changes for scroll anchor adjustment
-      // suppression.
-      bool wasAbsPosStyle = false;
-      ScrollAnchorContainer* previousAnchorContainer = nullptr;
-      AutoWeakFrame previousAnchorContainerFrame;
-      if (frame) {
-        wasAbsPosStyle = frame->StyleDisplay()->IsAbsolutelyPositionedStyle();
-        previousAnchorContainer = ScrollAnchorContainer::FindFor(frame);
-
-        // It's possible for the scroll anchor container to be destroyed by
-        // frame construction, so use a weak frame to detect this.
-        if (previousAnchorContainer) {
-          previousAnchorContainerFrame = previousAnchorContainer->Frame();
-        }
-      }
-
       // If we ever start passing true here, be careful of restyles
       // that involve a reframe and animations.  In particular, if the
       // restyle we're processing here is an animation restyle, but
@@ -1575,33 +1558,6 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
       frameConstructor->RecreateFramesForContent(
           content, nsCSSFrameConstructor::InsertionKind::Sync);
       frame = content->GetPrimaryFrame();
-
-      // See the check above for absolutely positioned style.
-      bool isAbsPosStyle = false;
-      ScrollAnchorContainer* newAnchorContainer = nullptr;
-      if (frame) {
-        isAbsPosStyle = frame->StyleDisplay()->IsAbsolutelyPositionedStyle();
-        newAnchorContainer = ScrollAnchorContainer::FindFor(frame);
-      }
-
-      // If this frame construction was due to a change in absolute
-      // positioning, then suppress scroll anchor adjustments in the scroll
-      // anchor container the frame was in, and the one it moved into.
-      //
-      // This isn't entirely accurate to the specification, which requires us
-      // to do this for all frames that change being absolutely positioned. It's
-      // possible for multiple style changes to cause frame reconstruction and
-      // coalesce, which could cause a suppression trigger to be missed. It's
-      // unclear whether this will be an issue as suppression triggers are just
-      // heuristics.
-      if (wasAbsPosStyle != isAbsPosStyle) {
-        if (previousAnchorContainerFrame) {
-          previousAnchorContainer->SuppressAdjustments();
-        }
-        if (newAnchorContainer) {
-          newAnchorContainer->SuppressAdjustments();
-        }
-      }
     } else {
       NS_ASSERTION(frame, "This shouldn't happen");
 
@@ -2475,7 +2431,7 @@ struct RestyleManager::TextPostTraversalState {
   ComputedStyle& ParentStyle() {
     if (!mParentContext) {
       mLazilyResolvedParentContext =
-          mParentRestyleState.StyleSet().ResolveServoStyle(mParentElement);
+          ServoStyleSet::ResolveServoStyle(mParentElement);
       mParentContext = mLazilyResolvedParentContext;
     }
     return *mParentContext;
@@ -2516,9 +2472,8 @@ static void UpdateBackdropIfNeeded(nsIFrame* aFrame, ServoStyleSet& aStyleSet,
              PseudoStyleType::backdrop);
 
   RefPtr<ComputedStyle> newStyle = aStyleSet.ResolvePseudoElementStyle(
-      aFrame->GetContent()->AsElement(), PseudoStyleType::backdrop,
-      aFrame->Style(),
-      /* aPseudoElement = */ nullptr);
+      *aFrame->GetContent()->AsElement(), PseudoStyleType::backdrop,
+      aFrame->Style());
 
   // NOTE(emilio): We can't use the changes handled for the owner of the
   // backdrop frame, since it's out of flow, and parented to the viewport or
@@ -2526,8 +2481,11 @@ static void UpdateBackdropIfNeeded(nsIFrame* aFrame, ServoStyleSet& aStyleSet,
   MOZ_ASSERT(backdropFrame->GetParent()->IsViewportFrame() ||
              backdropFrame->GetParent()->IsCanvasFrame());
   nsTArray<nsIFrame*> wrappersToRestyle;
-  ServoRestyleState state(aStyleSet, aChangeList, wrappersToRestyle);
+  nsTArray<nsIFrame*> anchorsToSuppress;
+  ServoRestyleState state(aStyleSet, aChangeList, wrappersToRestyle,
+                          anchorsToSuppress);
   nsIFrame::UpdateStyleOfOwnedChildFrame(backdropFrame, newStyle, state);
+  MOZ_ASSERT(anchorsToSuppress.IsEmpty());
 }
 
 static void UpdateFirstLetterIfNeeded(nsIFrame* aFrame,
@@ -2561,8 +2519,7 @@ static void UpdateOneAdditionalComputedStyle(nsIFrame* aFrame, uint32_t aIndex,
 
   RefPtr<ComputedStyle> newStyle =
       aRestyleState.StyleSet().ResolvePseudoElementStyle(
-          aFrame->GetContent()->AsElement(), pseudoType, aFrame->Style(),
-          /* aPseudoElement = */ nullptr);
+          *aFrame->GetContent()->AsElement(), pseudoType, aFrame->Style());
 
   uint32_t equalStructs;  // Not used, actually.
   nsChangeHint childHint =
@@ -2711,8 +2668,7 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
       static_cast<nsChangeHint>(Servo_TakeChangeHint(aElement, &wasRestyled));
 
   RefPtr<ComputedStyle> upToDateStyleIfRestyled =
-      wasRestyled ? aRestyleState.StyleSet().ResolveServoStyle(*aElement)
-                  : nullptr;
+      wasRestyled ? ServoStyleSet::ResolveServoStyle(*aElement) : nullptr;
 
   // We should really fix the weird primary frame mapping for image maps
   // (bug 135040)...
@@ -2782,6 +2738,12 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   // XXXbholley: We should teach the frame constructor how to clear the dirty
   // descendants bit to avoid the traversal here.
   if (changeHint & nsChangeHint_ReconstructFrame) {
+    if (wasRestyled && styleFrame &&
+        styleFrame->StyleDisplay()->IsAbsolutelyPositionedStyle() !=
+            upToDateStyleIfRestyled->StyleDisplay()
+                ->IsAbsolutelyPositionedStyle()) {
+      aRestyleState.AddPendingScrollAnchorSuppression(styleFrame);
+    }
     ClearRestyleStateFromSubtree(aElement);
     return true;
   }
@@ -2804,8 +2766,7 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   const bool isDisplayContents = !styleFrame && aElement->HasServoData() &&
                                  Servo_Element_IsDisplayContents(aElement);
   if (isDisplayContents) {
-    oldOrDisplayContentsStyle =
-        aRestyleState.StyleSet().ResolveServoStyle(*aElement);
+    oldOrDisplayContentsStyle = ServoStyleSet::ResolveServoStyle(*aElement);
   }
 
   Maybe<ServoRestyleState> thisFrameRestyleState;
@@ -3081,16 +3042,32 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
     nsStyleChangeList currentChanges;
     bool anyStyleChanged = false;
 
+    nsTArray<RefPtr<nsIContent>> anchorContentToSuppress;
+
     // Recreate styles , and queue up change hints (which also handle lazy frame
     // construction).
     {
       AutoRestyleTimelineMarker marker(presContext->GetDocShell(), false);
       DocumentStyleRootIterator iter(doc->GetServoRestyleRoot());
+      nsTArray<nsIFrame*> anchorsToSuppress;
       while (Element* root = iter.GetNextStyleRoot()) {
         nsTArray<nsIFrame*> wrappersToRestyle;
-        ServoRestyleState state(*styleSet, currentChanges, wrappersToRestyle);
+        ServoRestyleState state(*styleSet, currentChanges, wrappersToRestyle,
+                                anchorsToSuppress);
         ServoPostTraversalFlags flags = ServoPostTraversalFlags::Empty;
         anyStyleChanged |= ProcessPostTraversal(root, nullptr, state, flags);
+      }
+
+      // We want to suppress adjustments the current (before-change) scroll
+      // anchor container now, and save a reference to the content node so that
+      // we can suppress them in the after-change scroll anchor .
+      anchorContentToSuppress.SetCapacity(anchorsToSuppress.Length());
+      for (nsIFrame* frame : anchorsToSuppress) {
+        MOZ_ASSERT(frame->GetContent());
+        if (auto* container = ScrollAnchorContainer::FindFor(frame)) {
+          container->SuppressAdjustments();
+        }
+        anchorContentToSuppress.AppendElement(frame->GetContent());
       }
     }
 
@@ -3124,6 +3101,16 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
         newChanges.Clear();
       }
       mReentrantChanges = nullptr;
+    }
+
+    // Suppress adjustments in the after-change scroll anchors if needed, now
+    // that we're done reframing everything.
+    for (nsIContent* content : anchorContentToSuppress) {
+      if (nsIFrame* frame = content->GetPrimaryFrame()) {
+        if (auto* container = ScrollAnchorContainer::FindFor(frame)) {
+          container->SuppressAdjustments();
+        }
+      }
     }
 
     if (anyStyleChanged) {
@@ -3365,8 +3352,8 @@ static inline bool AttributeChangeRequiresSubtreeRestyle(
     return aElement.IsHTMLElement(nsGkAtoms::table);
   }
   if (aAttr == nsGkAtoms::lwtheme || aAttr == nsGkAtoms::lwthemetextcolor) {
-    return aElement.GetNameSpaceID() == kNameSpaceID_XUL &&
-           &aElement == aElement.OwnerDoc()->GetRootElement();
+    Document* doc = aElement.OwnerDoc();
+    return doc->IsInChromeDocShell() && &aElement == doc->GetRootElement();
   }
 
   return aAttr == nsGkAtoms::lang;
@@ -3388,6 +3375,10 @@ void RestyleManager::AttributeChanged(Element* aElement, int32_t aNameSpaceID,
     restyleHint |= RestyleHint::RestyleSubtree();
   } else if (aElement->IsAttributeMapped(aAttribute)) {
     // FIXME(emilio): Does this really need to re-selector-match?
+    restyleHint |= StyleRestyleHint_RESTYLE_SELF;
+  } else if (aElement->IsInShadowTree() && aAttribute == nsGkAtoms::part) {
+    // TODO(emilio): Maybe finer-grained invalidation for part attribute
+    // changes?
     restyleHint |= StyleRestyleHint_RESTYLE_SELF;
   }
 

@@ -251,6 +251,7 @@ function openBrowserWindow(cmdLine, triggeringPrincipal, urlOrUrlList, postData 
                          // needs a conversion. Hopefully bug 1485961 will fix.
               undefined, // user context id
               null, // origin principal
+              null, // origin storage principal
               triggeringPrincipal];
     }
   }
@@ -562,6 +563,7 @@ nsBrowserContentHandler.prototype = {
 
             overridePage = Services.urlFormatter.formatURLPref("startup.homepage_override_url");
             if (prefb.prefHasUserValue("app.update.postupdate")) {
+              prefb.clearUserPref("app.update.postupdate");
               overridePage = getPostUpdateOverridePage(overridePage);
               // Send the update ping to signal that the update was successful.
               UpdatePing.handleUpdateSuccess(old_mstone, old_buildId);
@@ -571,6 +573,7 @@ nsBrowserContentHandler.prototype = {
             break;
           case OVERRIDE_NEW_BUILD_ID:
             if (prefb.prefHasUserValue("app.update.postupdate")) {
+              prefb.clearUserPref("app.update.postupdate");
               // Send the update ping to signal that the update was successful.
               UpdatePing.handleUpdateSuccess(old_mstone, old_buildId);
             }

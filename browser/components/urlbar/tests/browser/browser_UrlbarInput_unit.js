@@ -93,6 +93,10 @@ async function withNewWindow(callback) {
 
   let input = new UrlbarInput(inputOptions);
 
+  // Flush pending styles explicitely to make sure the added textbox and
+  // popupset are styled before proceeding test.  See bug 1488871 comment 26.
+  doc.documentElement.getBoundingClientRect();
+
   await callback(input);
 
   await BrowserTestUtils.closeWindow(win);
@@ -156,46 +160,6 @@ add_task(async function test_input_with_private_browsing() {
       searchString: "search",
       isPrivate: true,
     });
-
-    sandbox.resetHistory();
-  });
-});
-
-add_task(async function test_autofill_disabled_on_prefix_search() {
-  await withNewWindow(input => {
-    // search for "autofill" -- autofill should be enabled
-    input.inputField.value = "autofill";
-    input.handleEvent({
-      target: input.inputField,
-      type: "input",
-    });
-    checkStartQueryCall(fakeController.startQuery, {
-      searchString: "autofill",
-      allowAutofill: true,
-    });
-
-    // search for "auto" -- autofill should be disabled since the previous
-    // search string starts with the new search string
-    input.inputField.value = "auto";
-    input.handleEvent({
-      target: input.inputField,
-      type: "input",
-    });
-    checkStartQueryCall(fakeController.startQuery, {
-      searchString: "auto",
-      allowAutofill: false,
-    }, 1);
-
-    // search for "autofill" again -- autofill should be enabled
-    input.inputField.value = "autofill";
-    input.handleEvent({
-      target: input.inputField,
-      type: "input",
-    });
-    checkStartQueryCall(fakeController.startQuery, {
-      searchString: "autofill",
-      allowAutofill: true,
-    }, 2);
 
     sandbox.resetHistory();
   });

@@ -382,7 +382,7 @@ nsToolkitProfileService::nsToolkitProfileService()
       mIsFirstRun(true),
       mUseDevEditionProfile(false),
 #ifdef MOZ_DEDICATED_PROFILES
-      mUseDedicatedProfile(!IsSnapEnvironment()),
+      mUseDedicatedProfile(!IsSnapEnvironment() && !UseLegacyProfiles()),
 #else
       mUseDedicatedProfile(false),
 #endif
@@ -771,9 +771,22 @@ nsresult nsToolkitProfileService::Init() {
     // Try to find the descriptor for the default profile for this install.
     rv = mProfileDB.GetString(mInstallSection.get(), "Default",
                               installProfilePath);
+
     // Not having a value means this install doesn't appear in installs.ini so
     // this is the first run for this install.
-    mIsFirstRun = NS_FAILED(rv);
+    if (NS_FAILED(rv)) {
+      mIsFirstRun = true;
+
+      // Gets the install section that would have been created if the install
+      // path has incorrect casing (see bug 1555319). We use this later during
+      // profile selection.
+      rv = gDirServiceProvider->GetLegacyInstallHash(installHash);
+      NS_ENSURE_SUCCESS(rv, rv);
+      CopyUTF16toUTF8(installHash, mLegacyInstallSection);
+      mLegacyInstallSection.Insert(INSTALL_PREFIX, 0);
+    } else {
+      mIsFirstRun = false;
+    }
   }
 
   nsToolkitProfile* currentProfile = nullptr;
@@ -852,6 +865,24 @@ nsresult nsToolkitProfileService::Init() {
     currentProfile = new nsToolkitProfile(name, rootDir, localDir, true);
     NS_ENSURE_TRUE(currentProfile, NS_ERROR_OUT_OF_MEMORY);
 
+    // If a user has modified the ini file path it may make for a valid profile
+    // path but not match what we would have serialised and so may not match
+    // the path in the install section. Re-serialise it to get it in the
+    // expected form again.
+    bool nowRelative;
+    nsCString descriptor;
+    GetProfileDescriptor(currentProfile, descriptor, &nowRelative);
+
+    if (isRelative != nowRelative || !descriptor.Equals(filePath)) {
+      mProfileDB.SetString(profileID.get(), "IsRelative",
+                           nowRelative ? "1" : "0");
+      mProfileDB.SetString(profileID.get(), "Path", descriptor.get());
+
+      // Should we flush now? It costs some startup time and we will fix it on
+      // the next startup anyway. If something else causes a flush then it will
+      // be fixed in the ini file then.
+    }
+
     rv = mProfileDB.GetString(profileID.get(), "Default", buffer);
     if (NS_SUCCEEDED(rv) && buffer.EqualsLiteral("1")) {
       mNormalDefault = currentProfile;
@@ -859,7 +890,7 @@ nsresult nsToolkitProfileService::Init() {
 
     // Is this the default profile for this install?
     if (mUseDedicatedProfile && !mDedicatedProfile &&
-        installProfilePath.Equals(filePath)) {
+        installProfilePath.Equals(descriptor)) {
       // Found a profile for this install.
       mDedicatedProfile = currentProfile;
     }
@@ -1080,8 +1111,9 @@ nsresult nsToolkitProfileService::CreateDefaultProfile(
 NS_IMETHODIMP
 nsToolkitProfileService::SelectStartupProfile(
     const nsTArray<nsCString>& aArgv, bool aIsResetting,
-    const nsACString& aUpdateChannel, nsIFile** aRootDir, nsIFile** aLocalDir,
-    nsIToolkitProfile** aProfile, bool* aDidCreate) {
+    const nsACString& aUpdateChannel, const nsACString& aLegacyInstallHash,
+    nsIFile** aRootDir, nsIFile** aLocalDir, nsIToolkitProfile** aProfile,
+    bool* aDidCreate) {
   int argc = aArgv.Length();
   // Our command line handling expects argv to be null-terminated so construct
   // an appropriate array.
@@ -1097,6 +1129,10 @@ nsToolkitProfileService::SelectStartupProfile(
   argv[argc] = nullptr;
 
   mUpdateChannel = aUpdateChannel;
+  if (!aLegacyInstallHash.IsEmpty()) {
+    mLegacyInstallSection.Assign(aLegacyInstallHash);
+    mLegacyInstallSection.Insert(INSTALL_PREFIX, 0);
+  }
 
   bool wasDefault;
   nsresult rv =
@@ -1179,14 +1215,6 @@ nsresult nsToolkitProfileService::SelectStartupProfile(
 
           mCurrent = profile;
         } else {
-          if (aIsResetting) {
-            // We don't want to create a fresh profile when we're attempting a
-            // profile reset so just bail out here, the calling code will handle
-            // it.
-            *aProfile = nullptr;
-            return NS_OK;
-          }
-
           rv = CreateDefaultProfile(getter_AddRefs(mCurrent));
           if (NS_FAILED(rv)) {
             *aProfile = nullptr;
@@ -1353,15 +1381,51 @@ nsresult nsToolkitProfileService::SelectStartupProfile(
     return NS_ERROR_SHOW_PROFILE_MANAGER;
   }
 
+  if (mIsFirstRun && mUseDedicatedProfile &&
+      !mInstallSection.Equals(mLegacyInstallSection)) {
+    // The default profile could be assigned to a hash generated from an
+    // incorrectly cased version of the installation directory (see bug
+    // 1555319). Ideally we'd do all this while loading profiles.ini but we
+    // can't override the legacy section value before that for tests.
+    nsCString defaultDescriptor;
+    rv = mProfileDB.GetString(mLegacyInstallSection.get(), "Default",
+                              defaultDescriptor);
+
+    if (NS_SUCCEEDED(rv)) {
+      // There is a default here, need to see if it matches any profiles.
+      bool isRelative;
+      nsCString descriptor;
+
+      for (RefPtr<nsToolkitProfile> profile : mProfiles) {
+        GetProfileDescriptor(profile, descriptor, &isRelative);
+
+        if (descriptor.Equals(defaultDescriptor)) {
+          // Found the default profile. Copy the install section over to
+          // the correct location. We leave the old info in place for older
+          // versions of Firefox to use.
+          nsTArray<UniquePtr<KeyValue>> strings =
+              GetSectionStrings(&mProfileDB, mLegacyInstallSection.get());
+          for (const auto& kv : strings) {
+            mProfileDB.SetString(mInstallSection.get(), kv->key.get(),
+                                 kv->value.get());
+          }
+
+          // Flush now. This causes a small blip in startup but it should be
+          // one time only whereas not flushing means we have to do this search
+          // on every startup.
+          Flush();
+
+          // Now start up with the found profile.
+          mDedicatedProfile = profile;
+          mIsFirstRun = false;
+          break;
+        }
+      }
+    }
+  }
+
   // If this is a first run then create a new profile.
   if (mIsFirstRun) {
-    if (aIsResetting) {
-      // We don't want to create a fresh profile when we're attempting a
-      // profile reset so just bail out here, the calling code will handle it.
-      *aProfile = nullptr;
-      return NS_OK;
-    }
-
     // If we're configured to always show the profile manager then don't create
     // a new profile to use.
     if (!mStartWithLast) {
@@ -1747,6 +1811,17 @@ nsToolkitProfileService::CreateProfile(nsIFile* aRootDir,
  */
 bool nsToolkitProfileService::IsSnapEnvironment() {
   return !!PR_GetEnv("SNAP_NAME");
+}
+
+/**
+ * In some situations dedicated profile support does not work well. This
+ * includes a handful of linux distributions which always install different
+ * application versions to different locations, some application sandboxing
+ * systems as well as enterprise deployments. This environment variable provides
+ * a way to opt out of dedicated profiles for these cases.
+ */
+bool nsToolkitProfileService::UseLegacyProfiles() {
+  return !!PR_GetEnv("MOZ_LEGACY_PROFILES");
 }
 
 struct FindInstallsClosure {

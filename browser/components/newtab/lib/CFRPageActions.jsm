@@ -4,7 +4,6 @@
 "use strict";
 
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-const {DOMLocalization} = ChromeUtils.import("resource://gre/modules/DOMLocalization.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
@@ -291,7 +290,7 @@ class PageAction {
   }
 
   _createElementAndAppend({type, id}, parent) {
-    let element = this.window.document.createElement(type);
+    let element = this.window.document.createXULElement(type);
     if (id) {
       element.setAttribute("id", id);
     }
@@ -374,7 +373,8 @@ class PageAction {
       footerLink.onclick = () => this._sendTelemetry({message_id: id, bucket_id: content.bucket_id, event: "LEARN_MORE"});
 
       primaryActionCallback = async () => {
-        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id); // eslint-disable-line no-use-before-define
+        // eslint-disable-next-line no-use-before-define
+        primary.action.data.url = await CFRPageActions._fetchLatestAddonVersion(content.addon.id);
         this._blockMessage(id);
         this.dispatchUserAction(primary.action);
         this.hideAddressBarNotifier();
@@ -397,12 +397,13 @@ class PageAction {
         stepsContainer.remove();
         stepsContainer = stepsContainer.cloneNode(false);
       } else {
-        stepsContainer = this.window.document.createElement("vbox");
+        stepsContainer = this.window.document.createXULElement("vbox");
         stepsContainer.setAttribute("id", stepsContainerId);
       }
       footerText.parentNode.appendChild(stepsContainer);
       for (let step of content.descriptionDetails.steps) {
-        const li = this.window.document.createElement("li");
+        // This li is a generic xul element with custom styling
+        const li = this.window.document.createXULElement("li");
         this._l10n.setAttributes(li, step.string_id);
         stepsContainer.appendChild(li);
       }

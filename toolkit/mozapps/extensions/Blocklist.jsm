@@ -19,11 +19,6 @@ ChromeUtils.defineModuleGetter(this, "AddonManager",
                                "resource://gre/modules/AddonManager.jsm");
 ChromeUtils.defineModuleGetter(this, "AddonManagerPrivate",
                                "resource://gre/modules/AddonManager.jsm");
-// The remote settings updater is the new system in charge of fetching remote data
-// securely and efficiently. It will replace the current XML-based system.
-// See Bug 1257565 and Bug 1252456.
-ChromeUtils.defineModuleGetter(this, "BlocklistClients",
-                               "resource://services-common/blocklist-clients.js");
 ChromeUtils.defineModuleGetter(this, "CertUtils",
                                "resource://gre/modules/CertUtils.jsm");
 ChromeUtils.defineModuleGetter(this, "FileUtils",
@@ -393,6 +388,11 @@ this.GfxBlocklistRS = {
     }
   },
 
+  sync() {
+    this._ensureInitialized();
+    return this._client.sync();
+  },
+
   async checkForEntries() {
     this._ensureInitialized();
     if (!gBlocklistEnabled) {
@@ -517,7 +517,7 @@ this.PluginBlocklistRS = {
   },
 
   async _ensureEntries() {
-    await this._ensureInitialized();
+    await this.ensureInitialized();
     if (!this._entries && gBlocklistEnabled) {
       await this._updateEntries();
 
@@ -569,7 +569,12 @@ this.PluginBlocklistRS = {
     return entry;
   },
 
-  async _ensureInitialized() {
+  sync() {
+    this.ensureInitialized();
+    return this._client.sync();
+  },
+
+  ensureInitialized() {
     if (!gBlocklistEnabled || this._initialized) {
       return;
     }
@@ -592,7 +597,7 @@ this.PluginBlocklistRS = {
 
   async _onUpdate() {
     let oldEntries = this._entries || [];
-    await this._ensureInitialized();
+    this.ensureInitialized();
     await this._updateEntries();
     const pluginHost = Cc["@mozilla.org/plugin/host;1"].
                          getService(Ci.nsIPluginHost);
@@ -888,7 +893,7 @@ this.PluginBlocklistRS = {
  */
 this.ExtensionBlocklistRS = {
   async _ensureEntries() {
-    await this._ensureInitialized();
+    this.ensureInitialized();
     if (!this._entries && gBlocklistEnabled) {
       await this._updateEntries();
     }
@@ -945,7 +950,12 @@ this.ExtensionBlocklistRS = {
     return entry;
   },
 
-  async _ensureInitialized() {
+  sync() {
+    this.ensureInitialized();
+    return this._client.sync();
+  },
+
+  ensureInitialized() {
     if (!gBlocklistEnabled || this._initialized) {
       return;
     }
@@ -968,7 +978,7 @@ this.ExtensionBlocklistRS = {
 
   async _onUpdate() {
     let oldEntries = this._entries || [];
-    await this._ensureInitialized();
+    await this.ensureInitialized();
     await this._updateEntries();
 
     const types = ["extension", "theme", "locale", "dictionary", "service"];
@@ -2533,9 +2543,17 @@ let BlocklistRS = {
     // when the timer fires and subsequently gets enabled. That seems OK.
   },
 
+  forceUpdate() {
+    for (let blocklist of [GfxBlocklistRS, ExtensionBlocklistRS, PluginBlocklistRS]) {
+      blocklist.sync().catch(Cu.reportError);
+    }
+  },
+
   loadBlocklistAsync() {
     // Need to ensure we notify gfx of new stuff.
     GfxBlocklistRS.checkForEntries();
+    ExtensionBlocklistRS.ensureInitialized();
+    PluginBlocklistRS.ensureInitialized();
     // Also ensure that if we start the other service after this, we
     // initialize it straight away.
     gLoadingWasTriggered = true;
@@ -2561,10 +2579,6 @@ let BlocklistRS = {
     ExtensionBlocklistRS._onUpdate();
     PluginBlocklistRS._onUpdate();
   },
-
-  initializeClients() {
-    BlocklistClients.initialize();
-  },
 };
 
 const kSharedAPIs = [
@@ -2586,12 +2600,6 @@ let Blocklist = {
     Services.prefs.addObserver("extensions.blocklist.", this);
     Services.prefs.addObserver(PREF_EM_LOGGING_ENABLED, this);
 
-    // Instantiate Remote Settings clients for blocklists.
-    // Their initialization right here serves two purposes:
-    // - Make sure they are instantiated (it's cheap) in order to be included in the synchronization process;
-    // - Ensure that onecrl and other consumers in there are loaded.
-    // Ideally, this should happen only when BlocklistRS is initialized.
-    BlocklistRS.initializeClients();
     // Define forwarding functions:
     for (let k of kSharedAPIs) {
       this[k] = (...args) => this._impl[k](...args);
@@ -2612,9 +2620,23 @@ let Blocklist = {
     return this._impl.isLoaded;
   },
 
-  onUpdateImplementation() {
+  onUpdateImplementation(shouldCheckForUpdates = false) {
     this._impl = this.useXML ? BlocklistXML : BlocklistRS;
     this._impl._init();
+    if (shouldCheckForUpdates) {
+      if (this.useXML) {
+        // In theory, we should be able to use the "last update" pref to figure out
+        // when we last fetched updates and avoid fetching it if we switched
+        // this on and off within a day. However, the pref is updated by the
+        // update timer code, but the request is made in our code - and a request is
+        // not made if we're not using the XML blocklist, despite the pref being
+        // updated. In other words, the pref being updated is no guarantee that we
+        // actually updated the list that day. So just unconditionally update it:
+        this._impl.notify();
+      } else {
+        this._impl.forceUpdate();
+      }
+    }
   },
 
   shutdown() {
@@ -2663,6 +2685,6 @@ let Blocklist = {
 
 XPCOMUtils.defineLazyPreferenceGetter(
   Blocklist, "useXML", "extensions.blocklist.useXML", true,
-  () => Blocklist.onUpdateImplementation());
+  () => Blocklist.onUpdateImplementation(true));
 
 Blocklist._init();

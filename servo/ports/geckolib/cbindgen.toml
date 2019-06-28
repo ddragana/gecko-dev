@@ -29,11 +29,17 @@ includes = ["mozilla/ServoStyleConstsForwards.h"]
 
 [parse]
 parse_deps = true
+extra_bindings = ["style"]
 include = ["style", "cssparser", "style_traits", "servo_arc"]
 
 [struct]
 derive_eq = true
 derive_neq = true
+
+[defines]
+# This will actually never be defined, but is handy to avoid cbindgen
+# generating Servo-only types.
+"feature = servo" = "CBINDGEN_IS_SERVO"
 
 [macro_expansion]
 bitflags = true
@@ -46,6 +52,10 @@ cast_assert_name = "MOZ_ASSERT"
 
 [export]
 prefix = "Style"
+exclude = [
+  "NS_LogCtor",
+  "NS_LogDtor",
+]
 include = [
   "Appearance",
   "BreakBetween",
@@ -69,7 +79,8 @@ include = [
   "FontFamilyNameSyntax",
   "OverflowWrap",
   "TimingFunction",
-  "PathCommand",
+  "OffsetPath",
+  "OffsetRotate",
   "UnicodeRange",
   "UserSelect",
   "Float",
@@ -105,6 +116,7 @@ include = [
   "Perspective",
   "ZIndex",
   "TransformOrigin",
+  "LineBreak",
   "WordBreak",
   "Contain",
   "Origin",
@@ -113,6 +125,7 @@ include = [
   "WillChange",
   "TextDecorationLine",
   "TextTransform",
+  "TextOverflow",
   "MozListReversed",
   "Owned",
   "OwnedOrNull",
@@ -120,6 +133,7 @@ include = [
   "ScrollbarColor",
   "Color",
   "ColorOrAuto",
+  "SystemColor",
   "GradientItem",
   "VerticalAlign",
   "BasicShape",
@@ -135,14 +149,23 @@ include = [
   "Rotate",
   "Scale",
   "Translate",
+  "BorderImageWidth",
+  "ComputedUrl",
+  "ComputedImageUrl",
+  "UrlOrNone",
+  "Filter",
+  "Gradient",
+  "GridTemplateAreas",
+  "GridLine",
 ]
-item_types = ["enums", "structs", "typedefs", "functions"]
+item_types = ["enums", "structs", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
 
 # Prevent some renaming for Gecko types that cbindgen doesn't otherwise understand.
 [export.rename]
 "nscolor" = "nscolor"
 "nsAtom" = "nsAtom"
+"nsIURI" = "nsIURI"
 "nsCompatibility" = "nsCompatibility"
 "SharedFontList" = "SharedFontList"
 "nsSimpleContentList" = "nsSimpleContentList"
@@ -355,14 +378,15 @@ renaming_overrides_prefixing = true
     ptr((T*)alignof(T)),
     len(0) {}
 
-  // Should be easily implementable if wanted, but the default implementation would leak.
-  StyleOwnedSlice& operator=(const StyleOwnedSlice&) = delete;
-  StyleOwnedSlice& operator=(StyleOwnedSlice&&) = delete;
+  inline void Clear();
+  inline void CopyFrom(const StyleOwnedSlice&);
+  inline void SwapElements(StyleOwnedSlice&);
+
+  StyleOwnedSlice& operator=(const StyleOwnedSlice&);
+  StyleOwnedSlice& operator=(StyleOwnedSlice&&);
 
   inline StyleOwnedSlice(const StyleOwnedSlice&);
   inline StyleOwnedSlice(StyleOwnedSlice&&);
-
-  inline void Clear();
 
   inline ~StyleOwnedSlice();
 
@@ -385,6 +409,13 @@ renaming_overrides_prefixing = true
   }
 """
 
+"ArcInner" = """
+  // Increase the reference count.
+  inline void IncrementRef();
+  // Release the reference count, and return whether the result must be freed or not.
+  MOZ_MUST_USE inline bool DecrementRef();
+"""
+
 "ArcSlice" = """
   inline StyleArcSlice();
   inline StyleArcSlice(const StyleArcSlice& aOther);
@@ -402,6 +433,33 @@ renaming_overrides_prefixing = true
   inline bool operator!=(const StyleArcSlice& other) const;
 """
 
+"Arc" = """
+  StyleArc() = delete;
+  inline StyleArc(const StyleArc& Other);
+ private:
+  inline void Release();
+ public:
+  inline ~StyleArc();
+
+  inline StyleArc& operator=(const StyleArc&);
+  inline StyleArc& operator=(StyleArc&&);
+
+  const T* operator->() const {
+    MOZ_DIAGNOSTIC_ASSERT(p, "Arc shouldn't be null");
+    return &p->data;
+  }
+  const T& operator*() const {
+    MOZ_DIAGNOSTIC_ASSERT(p, "Arc shouldn't be null");
+    return p->data;
+  }
+  bool operator==(const StyleArc& other) const {
+    return p == other.p || *(*this) == *other;
+  }
+  bool operator!=(const StyleArc& other) const {
+    return !(*this == other);
+  }
+"""
+
 "CustomIdent" = """
   inline nsAtom* AsAtom() const;
 """
@@ -410,11 +468,17 @@ renaming_overrides_prefixing = true
   StyleAtom(size_t) = delete;
   StyleAtom() = delete;
 
-  // NOTE(emilio): For now we don't need to expose anything else, but it'd be trivial if we wanted to.
   inline bool IsStatic() const;
   inline nsAtom* AsAtom() const;
 
+ private:
+  inline void AddRef();
+  inline void Release();
+
+ public:
+  inline explicit StyleAtom(already_AddRefed<nsAtom> aAtom);
   inline StyleAtom(const StyleAtom& aOther);
+  inline StyleAtom& operator=(const StyleAtom&);
   inline ~StyleAtom();
 """
 
@@ -436,9 +500,109 @@ renaming_overrides_prefixing = true
  public:
 """
 
-
+"GenericUrlOrNone" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleGenericUrlOrNone() {}
+ public:
+"""
 "Angle" = """
   inline static StyleAngle Zero();
   inline float ToDegrees() const;
   inline double ToRadians() const;
+"""
+
+"OffsetPath" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleOffsetPath() {}
+ public:
+"""
+
+"TextOverflowSide" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleTextOverflowSide() {}
+ public:
+"""
+
+"TextOverflow" = """
+  StyleTextOverflow()
+    : first(StyleTextOverflowSide::Clip()),
+      second(StyleTextOverflowSide::Clip()),
+      sides_are_logical(true) {}
+"""
+
+"UrlExtraData" = """
+  StyleUrlExtraData() = delete;
+
+  // Could be implemented if wanted.
+  StyleUrlExtraData(const StyleUrlExtraData&) = delete;
+  StyleUrlExtraData& operator=(const StyleUrlExtraData&) = delete;
+
+  inline bool IsShared() const;
+
+  inline ~StyleUrlExtraData();
+  inline const URLExtraData& get() const;
+"""
+
+"CssUrlData" = """
+  // Implemented in nsStyleStruct.cpp
+  bool operator==(const StyleCssUrlData& other) const;
+  bool operator!=(const StyleCssUrlData& other) const {
+    return !(*this == other);
+  }
+"""
+
+"LoadData" = """
+  ~StyleLoadData();
+"""
+
+"CssUrl" = """
+  inline nsDependentCSubstring SpecifiedSerialization() const;
+  inline const URLExtraData& ExtraData() const;
+  inline StyleLoadData& LoadData() const;
+  inline nsIURI* GetURI() const;
+"""
+
+"ComputedUrl" = """
+  // Forwarded from CssUrl.
+  inline nsDependentCSubstring SpecifiedSerialization() const;
+  inline const URLExtraData& ExtraData() const;
+  inline nsIURI* GetURI() const;
+  inline StyleLoadData& LoadData() const;
+
+  inline bool IsLocalRef() const;
+  inline bool HasRef() const;
+  inline CORSMode CorsMode() const;
+  already_AddRefed<nsIURI> ResolveLocalRef(nsIURI* aBase) const;
+  already_AddRefed<nsIURI> ResolveLocalRef(const nsIContent* aContent) const;
+  imgRequestProxy* LoadImage(mozilla::dom::Document&);
+"""
+
+"GenericGradient" = """
+  bool IsOpaque() const;
+"""
+
+"GridTemplateAreas" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleGridTemplateAreas() {}
+ public:
+"""
+
+"GenericGridLine" = """
+  // Returns the `auto` value.
+  inline StyleGenericGridLine();
+  inline bool IsAuto() const;
+  // The line name, or nsGkAtoms::_empty if not present.
+  inline nsAtom* LineName() const;
 """

@@ -11,7 +11,8 @@ typedef CustomEventInit TestDictionaryTypedef;
 
 interface TestExternalInterface;
 
-[Pref="xyz"]
+// We need a pref name that's in StaticPrefList.h here.
+[Pref="abc.def"]
 interface TestRenamedInterface {
 };
 
@@ -1219,6 +1220,11 @@ dictionary DictWithConditionalMembers {
   long funcControlledMember;
   [ChromeOnly, Func="nsGenericHTMLElement::LegacyTouchAPIEnabled"]
   long chromeOnlyFuncControlledMember;
+  // We need a pref name that's in StaticPrefList.h here.
+  [Pref="abc.def"]
+  long prefControlledMember;
+  [Pref="abc.def", ChromeOnly, Func="TestFuncControlledMember"]
+  long chromeOnlyFuncAndPrefControlledMember;
 };
 
 interface TestIndexedGetterInterface {

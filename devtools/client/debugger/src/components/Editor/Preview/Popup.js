@@ -6,6 +6,7 @@
 
 import React, { Component } from "react";
 import { connect } from "../../../utils/connect";
+import { isTesting } from "devtools-environment";
 
 import Reps from "devtools-reps";
 const {
@@ -54,7 +55,7 @@ type State = {
 export class Popup extends Component<Props, State> {
   marker: any;
   pos: any;
-  popup: ?HTMLDivElement;
+  popover: ?React$ElementRef<typeof Popover>;
   timerId: ?IntervalID;
 
   constructor(props: Props) {
@@ -66,11 +67,29 @@ export class Popup extends Component<Props, State> {
 
   componentDidMount() {
     this.startTimer();
+    this.addHighlightToToken();
   }
 
   componentWillUnmount() {
     if (this.timerId) {
       clearInterval(this.timerId);
+    }
+    this.removeHighlightFromToken();
+  }
+
+  addHighlightToToken() {
+    const target = this.props.preview.target;
+    if (target) {
+      target.classList.add("preview-token");
+      addHighlightToTargetSiblings(target, this.props);
+    }
+  }
+
+  removeHighlightFromToken() {
+    const target = this.props.preview.target;
+    if (target) {
+      target.classList.remove("preview-token");
+      removeHighlightForTargetSiblings(target);
     }
   }
 
@@ -83,10 +102,14 @@ export class Popup extends Component<Props, State> {
 
     // Don't clear the current preview if mouse is hovered on
     // the current preview's element (target) or the popup element
+    // Note, we disregard while testing because it is impossible to hover
     const currentTarget = preview.target;
     if (
+      isTesting() ||
       currentTarget.matches(":hover") ||
-      (this.popup && this.popup.matches(":hover"))
+      !this.popover ||
+      (this.popover.$popover && this.popover.$popover.matches(":hover")) ||
+      (this.popover.$tooltip && this.popover.$tooltip.matches(":hover"))
     ) {
       return;
     }
@@ -115,7 +138,6 @@ export class Popup extends Component<Props, State> {
     return (
       <div
         className="preview-popup"
-        ref={a => (this.popup = a)}
         onClick={() =>
           selectSourceURL(cx, result.location.url, {
             line: result.location.line,
@@ -140,7 +162,6 @@ export class Popup extends Component<Props, State> {
       <div
         className="preview-popup"
         style={{ maxHeight: this.calculateMaxHeight() }}
-        ref={a => (this.popup = a)}
       >
         <ObjectInspector
           roots={properties}
@@ -164,7 +185,7 @@ export class Popup extends Component<Props, State> {
       preview: { result },
     } = this.props;
     return (
-      <div className="preview-popup" ref={a => (this.popup = a)}>
+      <div className="preview-popup">
         {Rep({
           object: result,
           mode: MODE.LONG,
@@ -226,10 +247,64 @@ export class Popup extends Component<Props, State> {
         type={type}
         onPopoverCoords={this.onPopoverCoords}
         editorRef={editorRef}
+        ref={a => (this.popover = a)}
       >
         {this.renderPreview()}
       </Popover>
     );
+  }
+}
+
+function addHighlightToTargetSiblings(target: Element, props: Object) {
+  // Look at target's pervious and next token siblings.
+  // If they are the same token type, and are also found in the preview expression,
+  // add the highlight class to them as well.
+
+  const tokenType = target.classList.item(0);
+  const previewExpression = props.preview.expression;
+
+  if (
+    tokenType &&
+    previewExpression &&
+    target.innerHTML !== previewExpression
+  ) {
+    let nextSibling = target.nextElementSibling;
+    while (
+      nextSibling &&
+      nextSibling.className.includes(tokenType) &&
+      previewExpression.includes(nextSibling.innerHTML)
+    ) {
+      nextSibling.classList.add("preview-token");
+      nextSibling = nextSibling.nextElementSibling;
+    }
+    let previousSibling = target.previousElementSibling;
+    while (
+      previousSibling &&
+      previousSibling.className.includes(tokenType) &&
+      previewExpression.includes(previousSibling.innerHTML)
+    ) {
+      previousSibling.classList.add("preview-token");
+      previousSibling = previousSibling.previousElementSibling;
+    }
+  }
+}
+
+function removeHighlightForTargetSiblings(target: Element) {
+  // Look at target's previous and next token siblings.
+  // If they also have the highlight class 'preview-token',
+  // remove that class.
+  let nextSibling = target.nextElementSibling;
+  while (nextSibling && nextSibling.className.includes("preview-token")) {
+    nextSibling.classList.remove("preview-token");
+    nextSibling = nextSibling.nextElementSibling;
+  }
+  let previousSibling = target.previousElementSibling;
+  while (
+    previousSibling &&
+    previousSibling.className.includes("preview-token")
+  ) {
+    previousSibling.classList.remove("preview-token");
+    previousSibling = previousSibling.previousElementSibling;
   }
 }
 

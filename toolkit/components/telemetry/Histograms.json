@@ -648,7 +648,7 @@
   },
   "GC_IN_PROGRESS_MS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["smaug@mozilla.com"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "smaug@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 10000,
@@ -852,7 +852,7 @@
   "GC_NURSERY_BYTES": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
-    "expires_in_version": "never",
+    "expires_in_version": "72",
     "kind": "linear",
     "high": 16777216,
     "n_buckets": 16,
@@ -919,6 +919,39 @@
     "n_buckets": 100,
     "bug_numbers": [1475896],
     "description": "The number of objects marked per ms during GC."
+  },
+  "GC_TIME_BETWEEN_S": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "jcoppeard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 120,
+    "n_buckets": 50,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1556467],
+    "description": "Time spent in between garbage collections for the main runtime (seconds)"
+  },
+  "GC_TIME_BETWEEN_SLICES_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "jcoppeard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 2000,
+    "n_buckets": 50,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1556467],
+    "description": "Time spent in between garbage collections slice for the main runtime (ms)"
+  },
+  "GC_SLICE_COUNT": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org", "jcoppeard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 200,
+    "n_buckets": 50,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1556467],
+    "description": "The number of slices in an incremental GC for the main runtime"
   },
   "GEOLOCATION_ACCURACY_EXPONENTIAL": {
     "record_in_processes": ["main", "content"],
@@ -1072,6 +1105,17 @@
     "n_buckets": 100,
     "bug_numbers": [1226196],
     "description": "Resident memory size (KB)"
+  },
+  "MEMORY_RESIDENT_PEAK": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["memshrink-telemetry-alerts@mozilla.com", "kgupta@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "low": 32768,
+    "high": 16777216,
+    "n_buckets": 100,
+    "bug_numbers": [1551648],
+    "description": "Peak resident memory size (KB)"
   },
   "MEMORY_TOTAL": {
     "record_in_processes": ["main"],
@@ -6229,7 +6273,7 @@
   "FX_TAB_SWITCH_SPINNER_VISIBLE_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["mconley@mozilla.com", "dothayer@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "77",
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 20,
@@ -6240,7 +6284,7 @@
   "FX_TAB_SWITCH_SPINNER_VISIBLE_LONG_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["mconley@mozilla.com", "dothayer@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "77",
     "kind": "exponential",
     "low": 1000,
     "high": 64000,
@@ -6253,7 +6297,7 @@
     "record_in_processes": ["main"],
     "alert_emails": ["dothayer@mozilla.com"],
     "bug_numbers": [1442068],
-    "expires_in_version": "70",
+    "expires_in_version": "77",
     "kind": "categorical",
     "labels": ["none", "preActions", "postActions", "onLoadTimeout", "onLayersReady", "onSizeModeOrOcc", "onEndSwapDocShells"],
     "releaseChannelCollection": "opt-out",
@@ -6261,7 +6305,7 @@
   },
   "FX_TAB_SWITCH_REQUEST_TAB_WARMING_STATE": {
     "record_in_processes": ["main"],
-    "expires_in_version": "70",
+    "expires_in_version": "77",
     "alert_emails": ["mconley@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
@@ -6281,17 +6325,6 @@
     "high": 1000,
     "n_buckets": 20,
     "description": "Firefox: Time in ms spent on switching tabs in response to a tab click"
-  },
-  "FX_TAB_REMOTE_NAVIGATION_DELAY_MS": {
-    "record_in_processes": ["content"],
-    "alert_emails": ["mconley@mozilla.com"],
-    "bug_numbers": [1352961, 1501295],
-    "expires_in_version": "69",
-    "kind": "exponential",
-    "high": 4000,
-    "n_buckets": 100,
-    "keyed": true,
-    "description": "Time taken (in ms) from the point of the parent sending the naviagion triggering message to the content and the content receiving it. This message can be either SessionStore:restoreTabContent or WebNavigation:LoadURI and these names are used as keys for this histogram. This is e10s only and recorded in the content process."
   },
   "FX_BOOKMARKS_TOOLBAR_INIT_MS": {
     "record_in_processes": ["main", "content"],
@@ -6338,6 +6371,28 @@
     "description": "Firefox: Time taken to load a page (ms). This includes all static contents, no dynamic content. Loading of about: pages is not counted.",
     "bug_numbers": [1504247],
     "alert_emails": ["tdsmith@mozilla.com", "perfteam@mozilla.com", "product-metrics-telemetry-alerts@mozilla.com"],
+    "releaseChannelCollection": "opt-out"
+  },
+  "FX_PAGE_RELOAD_NORMAL_MS": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": 10000,
+    "n_buckets": 200,
+    "description": "Firefox: Time taken to reload a page (ms) when using the LOAD_RELOAD_NORMAL flag",
+    "bug_numbers": [1549519],
+    "alert_emails": ["sefeng@mozilla.com", "perfteam@mozilla.com", "product-metrics-telemetry-alerts@mozilla.com"],
+    "releaseChannelCollection": "opt-out"
+  },
+  "FX_PAGE_RELOAD_SKIP_CACHE_MS": {
+    "record_in_processes": ["main"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": 10000,
+    "n_buckets": 200,
+    "description": "Firefox: Time taken to reload a page (ms) when caches are skipped",
+    "bug_numbers": [1549519],
+    "alert_emails": ["sefeng@mozilla.com", "perfteam@mozilla.com", "product-metrics-telemetry-alerts@mozilla.com"],
     "releaseChannelCollection": "opt-out"
   },
   "FX_SCHEDULE_PRESSURE_IDLE_SAMPLE_MS": {
@@ -6949,8 +7004,8 @@
   "ENCODING_OVERRIDE_SITUATION": {
     "record_in_processes": ["main", "content"],
     "alert_emails": ["hsivonen@mozilla.com"],
-    "bug_numbers": [840476, 977573, 1513473],
-    "expires_in_version": "69",
+    "bug_numbers": [840476, 977573, 1513473, 1554592],
+    "expires_in_version": "72",
     "releaseChannelCollection": "opt-out",
     "kind": "categorical",
     "labels": ["Local", "RemoteTld", "RemoteNonTld", "LocalChardet", "RemoteChardet", "Labeled", "AlreadyOverridden", "Bug"],
@@ -8229,7 +8284,7 @@
   },
   "SEARCH_SERVICE_INIT_MS": {
     "record_in_processes": ["main"],
-    "alert_emails": ["mdeboer@mozilla.com", "dolske@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "releaseChannelCollection": "opt-out",
     "kind": "exponential",
@@ -8240,7 +8295,7 @@
   },
   "SEARCH_SERVICE_COUNTRY_FETCH_TIME_MS": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "exponential",
     "n_buckets": 30,
@@ -8249,7 +8304,7 @@
   },
   "SEARCH_SERVICE_COUNTRY_FETCH_RESULT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
@@ -8257,56 +8312,49 @@
   },
   "SEARCH_SERVICE_COUNTRY_TIMEOUT": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "True if we stopped waiting for the XHR response before it completed"
   },
-  "SEARCH_SERVICE_COUNTRY_FETCH_CAUSED_SYNC_INIT": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "True if the search service was synchronously initialized while we were waiting for the XHR response"
-  },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_TIMEZONE": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "flag",
     "description": "Set if the fetched country-code indicates US but the time-zone heuristic doesn't"
   },
   "SEARCH_SERVICE_US_TIMEZONE_MISMATCHED_COUNTRY": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "flag",
     "description": "Set if the time-zone heuristic indicates US but the fetched country code doesn't"
   },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_PLATFORM_OSX": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on OSX and either the OSX countryCode or the geoip countryCode indicates we are in the US, set to false if they both do or true otherwise"
   },
   "SEARCH_SERVICE_NONUS_COUNTRY_MISMATCHED_PLATFORM_OSX": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on OSX and neither the OSX countryCode nor the geoip countryCode indicates we are in the US, set to false if they both agree on the value or true otherwise"
   },
   "SEARCH_SERVICE_US_COUNTRY_MISMATCHED_PLATFORM_WIN": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on Windows and either the Windows countryCode or the geoip countryCode indicates we are in the US, set to false if they both do or true otherwise"
   },
   "SEARCH_SERVICE_NONUS_COUNTRY_MISMATCHED_PLATFORM_WIN": {
     "record_in_processes": ["main", "content"],
-    "alert_emails": ["mhammond@mozilla.com", "gavin@mozilla.com"],
+    "alert_emails": ["mdeboer@mozilla.com", "fx-search@mozilla.com"],
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "If we are on Windows and neither the Windows countryCode nor the geoip countryCode indicates we are in the US, set to false if they both agree on the value or true otherwise"
@@ -8347,15 +8395,6 @@
     "high": 5000,
     "n_buckets": 15,
     "description": "Time (ms) it takes to figure out extension last modified time"
-  },
-  "TELEMETRY_MEMORY_REPORTER_MS": {
-    "record_in_processes": ["main", "content"],
-    "alert_emails": ["memshrink-telemetry-alerts@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 5000,
-    "n_buckets": 10,
-    "description": "Time (ms) it takes to run memory reporters when sending a telemetry ping"
   },
   "SSL_SUCCESFUL_CERT_VALIDATION_TIME_MOZILLAPKIX" : {
     "record_in_processes": ["main", "content"],
@@ -8483,7 +8522,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
-    "description": "User actions taken in the plugin notification: 0: allownow 1: allowalways 2: block 3: blockalways",
+    "description": "User actions taken in the plugin notification: 0: allownow 1: allowalways 2: block 3: blockalways; Note: 1 and 3 are unused from Firefox 69 onwards.",
     "bug_numbers": [902075, 1345894, 1398972],
     "alert_emails": ["flashvideo-2015@mozilla.com"]
   },
@@ -14252,35 +14291,26 @@
     "n_values": 64,
     "description": "URL CLassifier-related (aka Safe Browsing) UI events. See nsIUrlClassifierUITelemetry.idl for the specific values."
   },
-  "USER_CHROME_CSS_LOADED": {
-    "record_in_processes": ["main"],
-    "bug_numbers": [1416044],
-    "expires_in_version": "62",
-    "alert_emails": ["sfoster@mozilla.com"],
-    "kind": "boolean",
-    "releaseChannelCollection": "opt-out",
-    "description": "Was a userChrome.css stylesheet loaded when the profile was initialized?"
-  },
  "WEBAUTHN_CREATE_CREDENTIAL_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "78",
     "releaseChannelCollection": "opt-out",
     "kind": "exponential",
     "high": 120000,
     "n_buckets": 100,
-    "bug_numbers": [1265472],
+    "bug_numbers": [1265472, 1558870],
     "description": "Time in milliseconds to complete a WebAuthn create credential."
   },
   "WEBAUTHN_GET_ASSERTION_MS": {
     "record_in_processes": ["main"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "jjones@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "78",
     "releaseChannelCollection": "opt-out",
     "kind": "exponential",
     "high": 120000,
     "n_buckets": 100,
-    "bug_numbers": [1265472],
+    "bug_numbers": [1265472, 1558870],
     "description": "Time in milliseconds to complete a WebAuthn get assertion."
   },
   "VIDEO_UNBLACKINGLISTING_DXVA_DRIVER_RUNTIME_STATUS": {
@@ -14650,6 +14680,20 @@
     "bug_numbers": [1499418],
     "description": "GeckoView: Time taken to load a page in ms. This includes all static contents, no dynamic content. Loading of about: pages is not counted."
   },
+  "GV_PAGE_RELOAD_MS": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": [
+      "geckoview-team@mozilla.com",
+      "sefeng@mozilla.com",
+      "perfteam@mozilla.com"
+    ],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 100000,
+    "n_buckets": 100,
+    "bug_numbers": [1549519],
+    "description": "GeckoView: Time taken to reload a page in ms. This includes all static contents, no dynamic content. Loading of about: pages is not counted."
+  },
   "GV_STARTUP_RUNTIME_MS": {
     "record_in_processes": ["main", "content"],
     "alert_emails": [
@@ -14822,5 +14866,16 @@
       "Transaction"
     ],
     "description": "Numbers of HTTP transactions and connections by type. There are some categories separated by labels based on 5 parameters: 1. normal browsing or private browsing 2. system principal or not 3. first party or third party 4. class of service (Leader/Background/Others) 5. tracking classification (Basic/Content/FingerprintingContent)."
+  },
+  "THREAD_WAKEUP": {
+    "record_in_processes": ["main", "content"],
+    "alert_emails": ["opettay@mozilla.com" ],
+    "bug_numbers": [1554292],
+    "expires_in_version": "71",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "keyed": true,
+    "description": "How many milliseconds it took before 100 wakeups for the thread was done because of new Runnables."
   }
 }

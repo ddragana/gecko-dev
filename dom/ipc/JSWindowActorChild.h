@@ -45,12 +45,13 @@ class JSWindowActorChild final : public JSWindowActor {
     return MakeAndAddRef<JSWindowActorChild>();
   }
 
-  WindowGlobalChild* Manager() const;
+  WindowGlobalChild* GetManager() const;
   void Init(const nsAString& aName, WindowGlobalChild* aManager);
   void StartDestroy();
   void AfterDestroy();
   Document* GetDocument(ErrorResult& aRv);
   BrowsingContext* GetBrowsingContext(ErrorResult& aRv);
+  nsIDocShell* GetDocShell(ErrorResult& aRv);
   Nullable<WindowProxyHolder> GetContentWindow(ErrorResult& aRv);
 
  protected:

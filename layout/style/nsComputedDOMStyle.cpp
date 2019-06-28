@@ -199,7 +199,7 @@ struct ComputedStyleMap {
 
   // This generated file includes definition of kEntries which is typed
   // Entry[] and used below, so this #include has to be put here.
-#include "nsComputedDOMStyleGenerated.cpp"
+#include "nsComputedDOMStyleGenerated.inc"
 
   /**
    * Returns the number of properties that should be exposed on an
@@ -619,7 +619,8 @@ static void AddImageURL(nsIURI& aURI, nsTArray<nsString>& aURLs) {
   aURLs.AppendElement(NS_ConvertUTF8toUTF16(spec));
 }
 
-static void AddImageURL(const css::URLValue& aURL, nsTArray<nsString>& aURLs) {
+static void AddImageURL(const StyleComputedUrl& aURL,
+                        nsTArray<nsString>& aURLs) {
   if (aURL.IsLocalRef()) {
     return;
   }
@@ -631,9 +632,7 @@ static void AddImageURL(const css::URLValue& aURL, nsTArray<nsString>& aURLs) {
 
 static void AddImageURL(const nsStyleImageRequest& aRequest,
                         nsTArray<nsString>& aURLs) {
-  if (auto* value = aRequest.GetImageValue()) {
-    AddImageURL(*value, aURLs);
-  }
+  AddImageURL(aRequest.GetImageValue(), aURLs);
 }
 
 static void AddImageURL(const nsStyleImage& aImage, nsTArray<nsString>& aURLs) {
@@ -645,9 +644,6 @@ static void AddImageURL(const nsStyleImage& aImage, nsTArray<nsString>& aURLs) {
 static void AddImageURL(const StyleShapeSource& aShapeSource,
                         nsTArray<nsString>& aURLs) {
   switch (aShapeSource.GetType()) {
-    case StyleShapeSourceType::URL:
-      AddImageURL(aShapeSource.URL(), aURLs);
-      break;
     case StyleShapeSourceType::Image:
       AddImageURL(aShapeSource.ShapeImage(), aURLs);
       break;
@@ -663,9 +659,8 @@ static void AddImageURLs(const nsStyleImageLayers& aLayers,
   }
 }
 
-// FIXME(stylo-everywhere): This should be `const ComputedStyle&`.
 static void CollectImageURLsForProperty(nsCSSPropertyID aProp,
-                                        ComputedStyle& aStyle,
+                                        const ComputedStyle& aStyle,
                                         nsTArray<nsString>& aURLs) {
   if (nsCSSProps::IsShorthand(aProp)) {
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(p, aProp,
@@ -1224,7 +1219,7 @@ void nsComputedDOMStyle::SetValueToPosition(const Position& aPosition,
   aValueList->AppendCSSValue(valY.forget());
 }
 
-void nsComputedDOMStyle::SetValueToURLValue(const css::URLValue* aURL,
+void nsComputedDOMStyle::SetValueToURLValue(const StyleComputedUrl* aURL,
                                             nsROCSSPrimitiveValue* aValue) {
   if (!aURL) {
     aValue->SetIdent(eCSSKeyword_none);
@@ -1241,9 +1236,7 @@ void nsComputedDOMStyle::SetValueToURLValue(const css::URLValue* aURL,
   }
 
   // Otherwise, serialize the specified URL value.
-  nsAutoString source;
-  aURL->GetSourceString(source);
-
+  NS_ConvertUTF8toUTF16 source(aURL->SpecifiedSerialization());
   nsAutoString url;
   url.AppendLiteral(u"url(");
   nsStyleUtil::AppendEscapedCSSString(source, url, '"');
@@ -1252,13 +1245,14 @@ void nsComputedDOMStyle::SetValueToURLValue(const css::URLValue* aURL,
 }
 
 void nsComputedDOMStyle::AppendGridLineNames(
-    nsString& aResult, const nsTArray<nsString>& aLineNames) {
+    nsString& aResult, const nsTArray<RefPtr<nsAtom>>& aLineNames) {
   uint32_t numLines = aLineNames.Length();
   if (numLines == 0) {
     return;
   }
   for (uint32_t i = 0;;) {
-    nsStyleUtil::AppendEscapedCSSIdent(aLineNames[i], aResult);
+    nsStyleUtil::AppendEscapedCSSIdent(nsDependentAtomString(aLineNames[i]),
+                                       aResult);
     if (++i == numLines) {
       break;
     }
@@ -1267,7 +1261,7 @@ void nsComputedDOMStyle::AppendGridLineNames(
 }
 
 void nsComputedDOMStyle::AppendGridLineNames(
-    nsDOMCSSValueList* aValueList, const nsTArray<nsString>& aLineNames,
+    nsDOMCSSValueList* aValueList, const nsTArray<RefPtr<nsAtom>>& aLineNames,
     bool aSuppressEmptyList) {
   if (aLineNames.IsEmpty() && aSuppressEmptyList) {
     return;
@@ -1282,8 +1276,8 @@ void nsComputedDOMStyle::AppendGridLineNames(
 }
 
 void nsComputedDOMStyle::AppendGridLineNames(
-    nsDOMCSSValueList* aValueList, const nsTArray<nsString>& aLineNames1,
-    const nsTArray<nsString>& aLineNames2) {
+    nsDOMCSSValueList* aValueList, const nsTArray<RefPtr<nsAtom>>& aLineNames1,
+    const nsTArray<RefPtr<nsAtom>>& aLineNames2) {
   if (aLineNames1.IsEmpty() && aLineNames2.IsEmpty()) {
     return;
   }
@@ -1488,7 +1482,8 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridTemplateColumnsRows(
       for (int32_t i = 0;; i++) {
         if (aTrackList.HasRepeatAuto()) {
           if (i == aTrackList.mRepeatAutoIndex) {
-            const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[i];
+            const nsTArray<RefPtr<nsAtom>>& lineNames =
+                aTrackList.mLineNameLists[i];
             if (i == endOfRepeat) {
               // All auto-fit tracks are empty, but we report them anyway.
               AppendGridLineNames(valueList, lineNames,
@@ -1508,7 +1503,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridTemplateColumnsRows(
             // Before appending the last line, finish off any removed auto-fits.
             AppendRemovedAutoFits(LinesPrecede);
 
-            const nsTArray<nsString>& lineNames =
+            const nsTArray<RefPtr<nsAtom>>& lineNames =
                 aTrackList.mLineNameLists[aTrackList.mRepeatAutoIndex + 1];
             AppendGridLineNames(
                 valueList, aTrackList.mRepeatAutoLineNameListAfter, lineNames);
@@ -1519,11 +1514,13 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridTemplateColumnsRows(
             AppendRemovedAutoFits(LinesFollow);
           } else {
             uint32_t j = i > endOfRepeat ? i - offsetToLastRepeat : i;
-            const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[j];
+            const nsTArray<RefPtr<nsAtom>>& lineNames =
+                aTrackList.mLineNameLists[j];
             AppendGridLineNames(valueList, lineNames);
           }
         } else {
-          const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[i];
+          const nsTArray<RefPtr<nsAtom>>& lineNames =
+              aTrackList.mLineNameLists[i];
           AppendGridLineNames(valueList, lineNames);
         }
         if (uint32_t(i) == numExplicitTracks) {
@@ -1546,7 +1543,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridTemplateColumnsRows(
     // We don't have a frame.  So, we'll just return a serialization of
     // the tracks from the style (without resolved sizes).
     for (uint32_t i = 0;; i++) {
-      const nsTArray<nsString>& lineNames = aTrackList.mLineNameLists[i];
+      const nsTArray<RefPtr<nsAtom>>& lineNames = aTrackList.mLineNameLists[i];
       if (!lineNames.IsEmpty()) {
         AppendGridLineNames(valueList, lineNames);
       }
@@ -1620,41 +1617,6 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetGridTemplateRows() {
   }
 
   return GetGridTemplateColumnsRows(StylePosition()->GridTemplateRows(), info);
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::GetGridLine(
-    const nsStyleGridLine& aGridLine) {
-  if (aGridLine.IsAuto()) {
-    RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    val->SetIdent(eCSSKeyword_auto);
-    return val.forget();
-  }
-
-  RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
-
-  if (aGridLine.mHasSpan) {
-    RefPtr<nsROCSSPrimitiveValue> span = new nsROCSSPrimitiveValue;
-    span->SetIdent(eCSSKeyword_span);
-    valueList->AppendCSSValue(span.forget());
-  }
-
-  if (aGridLine.mInteger != 0) {
-    RefPtr<nsROCSSPrimitiveValue> integer = new nsROCSSPrimitiveValue;
-    integer->SetNumber(aGridLine.mInteger);
-    valueList->AppendCSSValue(integer.forget());
-  }
-
-  if (!aGridLine.mLineName.IsEmpty()) {
-    RefPtr<nsROCSSPrimitiveValue> lineName = new nsROCSSPrimitiveValue;
-    nsString escapedLineName;
-    nsStyleUtil::AppendEscapedCSSIdent(aGridLine.mLineName, escapedLineName);
-    lineName->SetString(escapedLineName);
-    valueList->AppendCSSValue(lineName.forget());
-  }
-
-  NS_ASSERTION(valueList->Length() > 0,
-               "Should have appended at least one value");
-  return valueList.forget();
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetPaddingTop() {
@@ -2105,9 +2067,18 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetPaddingWidthFor(
 bool nsComputedDOMStyle::GetLineHeightCoord(nscoord& aCoord) {
   AssertFlushedPendingReflows();
 
-  nscoord blockHeight = NS_AUTOHEIGHT;
-  if (StyleText()->mLineHeight.IsMozBlockHeight()) {
-    if (!mInnerFrame) return false;
+  nscoord blockHeight = NS_UNCONSTRAINEDSIZE;
+  const auto& lh = StyleText()->mLineHeight;
+
+  if (lh.IsNormal() &&
+      StaticPrefs::layout_css_line_height_normal_as_resolved_value_enabled()) {
+    return false;
+  }
+
+  if (lh.IsMozBlockHeight()) {
+    if (!mInnerFrame) {
+      return false;
+    }
 
     if (nsLayoutUtils::IsNonWrapperBlock(mInnerFrame)) {
       blockHeight = mInnerFrame->GetContentRect().height;
@@ -2561,8 +2532,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetMask() {
       !firstLayer.mRepeat.IsInitialValue() ||
       !firstLayer.mSize.IsInitialValue() ||
       !(firstLayer.mImage.GetType() == eStyleImageType_Null ||
-        firstLayer.mImage.GetType() == eStyleImageType_Image ||
-        firstLayer.mImage.GetType() == eStyleImageType_URL)) {
+        firstLayer.mImage.GetType() == eStyleImageType_Image)) {
     return nullptr;
   }
 

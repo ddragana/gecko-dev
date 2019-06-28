@@ -51,8 +51,7 @@ class HTMLVideoElement final : public HTMLMediaElement {
 
   virtual nsresult Clone(NodeInfo*, nsINode** aResult) const override;
 
-  virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true) override;
+  virtual void UnbindFromTree(bool aNullParent = true) override;
 
   // Set size with the current video frame's height and width.
   // If there is no video frame, returns NS_ERROR_FAILURE.
@@ -132,7 +131,7 @@ class HTMLVideoElement final : public HTMLMediaElement {
   already_AddRefed<VideoPlaybackQuality> GetVideoPlaybackQuality();
 
   bool MozOrientationLockEnabled() const {
-    return StaticPrefs::MediaVideocontrolsLockVideoOrientation();
+    return StaticPrefs::media_videocontrols_lock_video_orientation();
   }
 
   bool MozIsOrientationLocked() const { return mIsOrientationLocked; }

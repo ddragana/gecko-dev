@@ -62,9 +62,9 @@ const TRAILHEAD_CONFIG = {
   },
   LOCALES: ["en-US", "en-GB", "en-CA", "de", "de-DE", "fr", "fr-FR"],
   EXPERIMENT_RATIOS: [
-    ["", 1],
+    ["", 0],
     ["interrupts", 1],
-    ["triplets", 1],
+    ["triplets", 3],
   ],
 };
 
@@ -724,6 +724,11 @@ class _ASRouter {
     let interrupt;
     let triplet;
 
+    // Use control Trailhead Branch (for cards) if we are showing RTAMO.
+    if (await this._hasAddonAttributionData()) {
+      return {experiment, interrupt: "control", triplet: ""};
+    }
+
     // If a value is set in TRAILHEAD_OVERRIDE_PREF, it will be returned and no experiment will be set.
     const overrideValue = Services.prefs.getStringPref(TRAILHEAD_CONFIG.OVERRIDE_PREF, "");
     if (overrideValue) {
@@ -733,7 +738,7 @@ class _ASRouter {
 
     const locale = Services.locale.appLocaleAsLangTag;
 
-    if (TRAILHEAD_CONFIG.LOCALES.includes(locale) && !(await this._hasAddonAttributionData())) {
+    if (TRAILHEAD_CONFIG.LOCALES.includes(locale)) {
       const {userId} = ClientEnvironment;
       experiment = await chooseBranch(`${userId}-trailhead-experiments`, TRAILHEAD_CONFIG.EXPERIMENT_RATIOS);
 
@@ -987,7 +992,7 @@ class _ASRouter {
         break;
       case "fxa_bookmark_panel":
         if (force) {
-          BookmarkPanelHub._forceShowMessage(message);
+          BookmarkPanelHub._forceShowMessage(target, message);
         }
         break;
       default:

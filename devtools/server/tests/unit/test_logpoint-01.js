@@ -37,7 +37,7 @@ function test_simple_breakpoint() {
     },
   };
 
-  gThreadClient.addOneTimeListener("paused", async function(event, packet) {
+  gThreadClient.once("paused", async function(packet) {
     const source = await getSourceById(
       gThreadClient,
       packet.frame.where.actor
@@ -48,9 +48,13 @@ function test_simple_breakpoint() {
       sourceUrl: source.url,
       line: 3,
     }, { logValue: "a" });
+    await gClient.waitForRequestsToSettle();
 
     // Execute the rest of the code.
-    gThreadClient.resume();
+    await gThreadClient.resume();
+    Assert.equal(lastMessage.level, "logPoint");
+    Assert.equal(lastMessage.arguments[0], "three");
+    finishClient(gClient);
   });
 
   /* eslint-disable */
@@ -62,7 +66,4 @@ function test_simple_breakpoint() {
                    "test.js",
                    1);
   /* eslint-enable */
-
-  Assert.equal(lastMessage.arguments[0], "three");
-  finishClient(gClient);
 }

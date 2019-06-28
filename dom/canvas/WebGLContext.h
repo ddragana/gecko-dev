@@ -6,6 +6,7 @@
 #ifndef WEBGLCONTEXT_H_
 #define WEBGLCONTEXT_H_
 
+#include <memory>
 #include <stdarg.h>
 
 #include "GLContextTypes.h"
@@ -21,6 +22,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/WeakPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "nsLayoutUtils.h"
@@ -99,6 +101,7 @@ class MozFramebuffer;
 namespace webgl {
 class AvailabilityRunnable;
 struct CachedDrawFetchLimits;
+struct FbAttachInfo;
 struct FormatInfo;
 class FormatUsageAuthority;
 struct FormatUsageInfo;
@@ -268,7 +271,8 @@ class AvailabilityRunnable final : public Runnable {
 
 class WebGLContext : public nsICanvasRenderingContextInternal,
                      public nsSupportsWeakReference,
-                     public nsWrapperCache {
+                     public nsWrapperCache,
+                     public SupportsWeakPtr<WebGLContext> {
   friend class ScopedDrawCallWrapper;
   friend class ScopedDrawWithTransformFeedback;
   friend class ScopedFakeVertexAttrib0;
@@ -343,9 +347,9 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
       WebGLContext, nsICanvasRenderingContextInternal)
+  MOZ_DECLARE_WEAKREFERENCE_TYPENAME(WebGLContext)
 
   virtual JSObject* WrapObject(JSContext* cx,
                                JS::Handle<JSObject*> givenProto) override = 0;
@@ -598,11 +602,24 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   void DrawBuffers(const dom::Sequence<GLenum>& buffers);
   void Flush();
   void Finish();
+
+ private:
+  void FramebufferAttach(GLenum target, GLenum attachEnum,
+                         TexTarget reqTexTarget,
+                         const webgl::FbAttachInfo& toAttach) const;
+
+ public:
   void FramebufferRenderbuffer(GLenum target, GLenum attachment,
-                               GLenum rbTarget, WebGLRenderbuffer* rb);
+                               GLenum rbTarget, WebGLRenderbuffer* rb) const;
   void FramebufferTexture2D(GLenum target, GLenum attachment,
                             GLenum texImageTarget, WebGLTexture* tex,
-                            GLint level);
+                            GLint level) const;
+  void FramebufferTextureLayer(GLenum target, GLenum attachment,
+                               WebGLTexture* tex, GLint level,
+                               GLint layer) const;
+  void FramebufferTextureMultiview(GLenum target, GLenum attachment,
+                                   WebGLTexture* texture, GLint level,
+                                   GLint baseViewIndex, GLsizei numViews) const;
 
   void FrontFace(GLenum mode);
   already_AddRefed<WebGLActiveInfo> GetActiveAttrib(const WebGLProgram& prog,
@@ -1491,7 +1508,8 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   mutable GLenum mWebGLError;
 
-  webgl::ShaderValidator* CreateShaderValidator(GLenum shaderType) const;
+  std::unique_ptr<webgl::ShaderValidator> CreateShaderValidator(
+      GLenum shaderType) const;
 
   // some GL constants
   uint32_t mGLMaxTextureUnits = 0;
@@ -1533,6 +1551,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   uint32_t mGLMaxCubeMapTextureSize = 0;
   uint32_t mGLMax3DTextureSize = 0;
   uint32_t mGLMaxArrayTextureLayers = 0;
+  uint32_t mGLMaxMultiviewViews = 1;
   uint32_t mGLMaxRenderbufferSize = 0;
 
  public:
@@ -1738,7 +1757,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   //////
  public:
   bool ValidateObjectAllowDeleted(const char* const argName,
-                                  const WebGLContextBoundObject& object) {
+                                  const WebGLContextBoundObject& object) const {
     if (!object.IsCompatibleWithContext(this)) {
       ErrorInvalidOperation(
           "%s: Object from different WebGL context (or older"
@@ -1752,7 +1771,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   bool ValidateObject(const char* const argName,
                       const WebGLDeletableObject& object,
-                      const bool isShaderOrProgram = false) {
+                      const bool isShaderOrProgram = false) const {
     if (!ValidateObjectAllowDeleted(argName, object)) return false;
 
     if (isShaderOrProgram) {
@@ -1789,8 +1808,10 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   // Program and Shader are incomplete, so we can't inline the conversion to
   // WebGLDeletableObject here.
-  bool ValidateObject(const char* const argName, const WebGLProgram& object);
-  bool ValidateObject(const char* const argName, const WebGLShader& object);
+  bool ValidateObject(const char* const argName,
+                      const WebGLProgram& object) const;
+  bool ValidateObject(const char* const argName,
+                      const WebGLShader& object) const;
 
   ////
 
@@ -1821,7 +1842,7 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   WebGLRefPtr<WebGLProgram> mCurrentProgram;
   RefPtr<const webgl::LinkedProgramInfo> mActiveProgramLinkInfo;
 
-  bool ValidateFramebufferTarget(GLenum target);
+  bool ValidateFramebufferTarget(GLenum target) const;
   bool ValidateInvalidateFramebuffer(GLenum target,
                                      const dom::Sequence<GLenum>& attachments,
                                      ErrorResult* const out_rv,
@@ -1835,6 +1856,10 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
   WebGLRefPtr<WebGLTransformFeedback> mBoundTransformFeedback;
   WebGLRefPtr<WebGLVertexArray> mBoundVertexArray;
 
+ public:
+  const auto& BoundReadFb() const { return mBoundReadFramebuffer; }
+
+ protected:
   LinkedList<WebGLBuffer> mBuffers;
   LinkedList<WebGLFramebuffer> mFramebuffers;
   LinkedList<WebGLProgram> mPrograms;
@@ -1983,6 +2008,8 @@ class WebGLContext : public nsICanvasRenderingContextInternal,
 
   // --
 
+  bool ShouldResistFingerprinting() const;
+
  public:
   void LoseOldestWebGLContextIfLimitExceeded();
   void UpdateLastUseIndex();
@@ -2070,44 +2097,33 @@ bool ValidateTexImageTarget(WebGLContext* webgl, uint8_t funcDims,
                             TexImageTarget* const out_texImageTarget,
                             WebGLTexture** const out_tex);
 
-class ScopedUnpackReset final : public gl::ScopedGLWrapper<ScopedUnpackReset> {
-  friend struct gl::ScopedGLWrapper<ScopedUnpackReset>;
-
+class ScopedUnpackReset final {
  private:
   const WebGLContext* const mWebGL;
 
  public:
   explicit ScopedUnpackReset(const WebGLContext* webgl);
-
- private:
-  void UnwrapImpl();
+  ~ScopedUnpackReset();
 };
 
-class ScopedFBRebinder final : public gl::ScopedGLWrapper<ScopedFBRebinder> {
-  friend struct gl::ScopedGLWrapper<ScopedFBRebinder>;
-
+class ScopedFBRebinder final {
  private:
   const WebGLContext* const mWebGL;
 
  public:
-  explicit ScopedFBRebinder(const WebGLContext* const webgl)
-      : ScopedGLWrapper<ScopedFBRebinder>(webgl->gl), mWebGL(webgl) {}
-
- private:
-  void UnwrapImpl();
+  explicit ScopedFBRebinder(const WebGLContext* const webgl) : mWebGL(webgl) {}
+  ~ScopedFBRebinder();
 };
 
-class ScopedLazyBind final : public gl::ScopedGLWrapper<ScopedLazyBind> {
-  friend struct gl::ScopedGLWrapper<ScopedLazyBind>;
-
+class ScopedLazyBind final {
+ private:
+  gl::GLContext* const mGL;
   const GLenum mTarget;
   const WebGLBuffer* const mBuf;
 
  public:
   ScopedLazyBind(gl::GLContext* gl, GLenum target, const WebGLBuffer* buf);
-
- private:
-  void UnwrapImpl();
+  ~ScopedLazyBind();
 };
 
 ////

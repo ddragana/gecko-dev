@@ -19,24 +19,37 @@ nsLoginInfo.prototype = {
   // nsILoginInfo interfaces...
   //
 
-  hostname: null,
-  formSubmitURL: null,
+  origin: null,
+  formActionOrigin: null,
   httpRealm: null,
   username: null,
   password: null,
   usernameField: null,
   passwordField: null,
 
-  init(aHostname, aFormSubmitURL, aHttpRealm,
-       aUsername, aPassword,
-       aUsernameField, aPasswordField) {
-    this.hostname      = aHostname;
-    this.formSubmitURL = aFormSubmitURL;
+  /**
+   * @deprecated Use `origin` instead.
+   */
+  get hostname() {
+    return this.origin;
+  },
+
+  /**
+   * @deprecated Use `formActionOrigin` instead.
+   */
+  get formSubmitURL() {
+    return this.formActionOrigin;
+  },
+
+  init(aOrigin, aFormActionOrigin, aHttpRealm, aUsername, aPassword,
+       aUsernameField = "", aPasswordField = "") {
+    this.origin        = aOrigin;
+    this.formActionOrigin = aFormActionOrigin;
     this.httpRealm     = aHttpRealm;
     this.username      = aUsername;
     this.password      = aPassword;
-    this.usernameField = aUsernameField;
-    this.passwordField = aPasswordField;
+    this.usernameField = aUsernameField || "";
+    this.passwordField = aPasswordField || "";
   },
 
   matches(aLogin, ignorePassword) {
@@ -46,8 +59,8 @@ nsLoginInfo.prototype = {
   },
 
   equals(aLogin) {
-    if (this.hostname != aLogin.hostname ||
-        this.formSubmitURL != aLogin.formSubmitURL ||
+    if (this.origin != aLogin.origin ||
+        this.formActionOrigin != aLogin.formActionOrigin ||
         this.httpRealm != aLogin.httpRealm ||
         this.username != aLogin.username ||
         this.password != aLogin.password ||
@@ -62,7 +75,7 @@ nsLoginInfo.prototype = {
   clone() {
     let clone = Cc["@mozilla.org/login-manager/loginInfo;1"].
                 createInstance(Ci.nsILoginInfo);
-    clone.init(this.hostname, this.formSubmitURL, this.httpRealm,
+    clone.init(this.origin, this.formActionOrigin, this.httpRealm,
                this.username, this.password,
                this.usernameField, this.passwordField);
 
@@ -89,4 +102,4 @@ nsLoginInfo.prototype = {
 
 }; // end of nsLoginInfo implementation
 
-var EXPORTED_SYMBOLS = ["nsLoginInfo"];
+const EXPORTED_SYMBOLS = ["nsLoginInfo"];

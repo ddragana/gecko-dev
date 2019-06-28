@@ -60,6 +60,17 @@ var PictureInPicture = {
   },
 
   /**
+   * Remove attribute which enables pip icon in tab
+   */
+  clearPipTabIcon() {
+    let win = this.browser.ownerGlobal;
+    let tab = win.gBrowser.getTabForBrowser(this.browser);
+    if (tab) {
+      tab.removeAttribute("pictureinpicture");
+    }
+  },
+
+  /**
    * Find and close any pre-existing Picture in Picture windows.
    */
   async closePipWindow() {
@@ -109,6 +120,9 @@ var PictureInPicture = {
     if (videoData.playing) {
       controls.classList.add("playing");
     }
+    // set attribute which shows pip icon in tab
+    let tab = parentWin.gBrowser.getTabForBrowser(browser);
+    tab.setAttribute("pictureinpicture", true);
     win.setupPlayer(browser, videoData);
   },
 
@@ -117,6 +131,7 @@ var PictureInPicture = {
    * browser object.
    */
   unload() {
+    this.clearPipTabIcon();
     delete this.weakPipControls;
     delete this.browser;
   },
@@ -197,7 +212,8 @@ var PictureInPicture = {
     // to position it in the bottom right corner. Since we know the width of the
     // available rect, we need to subtract the dimensions of the window we're
     // opening to get the top left coordinates that openWindow expects.
-    let pipLeft = screenWidth.value - resultWidth;
+    let isRTL = Services.locale.isAppLocaleRTL;
+    let pipLeft = isRTL ? 0 : screenWidth.value - resultWidth;
     let pipTop = screenHeight.value - resultHeight;
     let features = `${PLAYER_FEATURES},top=${pipTop},left=${pipLeft},` +
                    `outerWidth=${resultWidth},outerHeight=${resultHeight}`;

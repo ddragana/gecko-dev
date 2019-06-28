@@ -55,6 +55,7 @@ const THREE_PANE_ENABLED_PREF = "devtools.inspector.three-pane-enabled";
 const THREE_PANE_ENABLED_SCALAR = "devtools.inspector.three_pane_enabled";
 const THREE_PANE_CHROME_ENABLED_PREF = "devtools.inspector.chrome.three-pane-enabled";
 const TELEMETRY_EYEDROPPER_OPENED = "devtools.toolbar.eyedropper.opened";
+const TELEMETRY_SCALAR_NODE_SELECTION_COUNT = "devtools.inspector.node_selection_count";
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -135,7 +136,8 @@ function Inspector(toolbox) {
   this.onSidebarSelect = this.onSidebarSelect.bind(this);
   this.onSidebarShown = this.onSidebarShown.bind(this);
   this.onSidebarToggle = this.onSidebarToggle.bind(this);
-  this.handleThreadState = this.handleThreadState.bind(this);
+  this.handleThreadPaused = this.handleThreadPaused.bind(this);
+  this.handleThreadResumed = this.handleThreadResumed.bind(this);
 
   this._target.on("will-navigate", this._onBeforeNavigate);
 }
@@ -156,8 +158,8 @@ Inspector.prototype = {
       }
       this._replayResumed = !dbg.isPaused();
 
-      this._target.threadClient.addListener("paused", this.handleThreadState);
-      this._target.threadClient.addListener("resumed", this.handleThreadState);
+      this._target.threadClient.on("paused", this.handleThreadPaused);
+      this._target.threadClient.on("resumed", this.handleThreadResumed);
     }
 
     await Promise.all([
@@ -1137,10 +1139,18 @@ Inspector.prototype = {
   },
 
   /**
-   * When replaying, reset the inspector whenever the target paused or unpauses.
+   * When replaying, reset the inspector whenever the target pauses.
    */
-  handleThreadState(event) {
-    this._replayResumed = event != "paused";
+  handleThreadPaused() {
+    this._replayResumed = false;
+    this.onNewRoot();
+  },
+
+  /**
+   * When replaying, reset the inspector whenever the target resumes.
+   */
+  handleThreadResumed() {
+    this._replayResumed = true;
     this.onNewRoot();
   },
 
@@ -1299,6 +1309,7 @@ Inspector.prototype = {
     executeSoon(() => {
       try {
         selfUpdate(this.selection.nodeFront);
+        this.telemetry.scalarAdd(TELEMETRY_SCALAR_NODE_SELECTION_COUNT, 1);
       } catch (ex) {
         console.error(ex);
       }
@@ -1376,6 +1387,9 @@ Inspector.prototype = {
     if (this._panelDestroyer) {
       return this._panelDestroyer;
     }
+
+    this._target.threadClient.off("paused", this.handleThreadPaused);
+    this._target.threadClient.off("resumed", this.handleThreadResumed);
 
     if (this.walker) {
       this.walker.off("new-root", this.onNewRoot);

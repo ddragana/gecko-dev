@@ -33,22 +33,16 @@
 }
 
 .textbox-search-clear {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   background-image: url(chrome://global/skin/icons/searchfield-cancel.svg);
   background-repeat: no-repeat;
+  background-size: 12px 12px;
+  margin-top: 2px;
 }
 
 .textbox-search-clear:not([disabled]) {
   cursor: default;
-}
-
-.textbox-search-clear:not([disabled]):hover {
-  background-position: -16px 0;
-}
-
-.textbox-search-clear:not([disabled]):hover:active {
-  background-position: -32px 0;
 }
 
 .client .item.tab > .item-title-container {

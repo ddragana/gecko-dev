@@ -24,7 +24,7 @@ geckoview-junit:
     run-on-projects:
         by-test-platform:
             android-em-4.3-arm7-api-16/opt: ['try']
-            default: built-projects
+            default: ['try', 'trunk', 'mozilla-beta', 'mozilla-release']
     mozharness:
         script: android_emulator_unittest.py
         config:
@@ -43,6 +43,7 @@ robocop:
     suite: robocop
     treeherder-symbol: M(rc)
     instance-size: xlarge
+    tier: 2
     chunks:
         by-test-platform:
             # android-em-4.3-arm7-api-16/debug -- not run
@@ -52,7 +53,7 @@ robocop:
     e10s: false
     run-on-projects:
         by-test-platform:
-            android-em-4.3-arm7-api-16/opt: ['try']
+            android-em-4.*/.*: ['try', 'mozilla-central']
             default: built-projects
     mozharness:
         script: android_emulator_unittest.py
@@ -66,7 +67,7 @@ telemetry-tests-client:
     description: "Telemetry tests client run"
     suite: telemetry-tests-client
     treeherder-symbol: tt(c)
-    max-run-time: 600
+    max-run-time: 1200
     tier: default
     mozharness:
         script: telemetry/telemetry_client.py
@@ -90,7 +91,7 @@ test-verify:
     allow-software-gl-layers: false
     run-on-projects:
         by-test-platform:
-            android-em-4.3-arm7-api-16/opt: ['try']
+            android-em-4.*/.*: ['try', 'mozilla-central']  # bug 1548659
             # do not run on ccov
             .*-ccov/.*: []
             .*-asan/.*: []

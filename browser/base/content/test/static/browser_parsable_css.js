@@ -13,18 +13,8 @@ let whitelist = [
   // CodeMirror is imported as-is, see bug 1004423.
   {sourceName: /codemirror\.css$/i,
    isFromDevTools: true},
-  // The debugger uses cross-browser CSS.
-  {sourceName: /devtools\/client\/debugger\/dist\/vendors.css/i,
-   isFromDevTools: true},
   {sourceName: /devtools\/client\/debugger\/src\/components\/([A-z\/]+).css/i,
   isFromDevTools: true},
-   // Reps uses cross-browser CSS.
-   {sourceName: /devtools-client-shared\/components\/reps\/reps.css/i,
-   isFromDevTools: true},
-  // PDFjs rules needed for compat with other UAs.
-  {sourceName: /web\/viewer\.css$/i,
-   errorMessage: /Unknown property.*(appearance|user-select)/i,
-   isFromDevTools: false},
   // Highlighter CSS uses a UA-only pseudo-class, see bug 985597.
   {sourceName: /highlighters\.css$/i,
    errorMessage: /Unknown pseudo-class.*moz-native-anonymous/i,
@@ -40,10 +30,17 @@ let whitelist = [
   {sourceName: /\b(html|mathml|ua)\.css$/i,
    errorMessage: /Unknown property.*-moz-/i,
    isFromDevTools: false},
+  {sourceName: /minimal-xul\.css$/i,
+   errorMessage: /Unknown property.*-moz-list-reversed/i,
+   isFromDevTools: false},
   // Reserved to UA sheets unless layout.css.overflow-clip-box.enabled flipped to true.
   {sourceName: /(?:res|gre-resources)\/forms\.css$/i,
    errorMessage: /Unknown property.*overflow-clip-box/i,
    isFromDevTools: false},
+  // System colors reserved to UA / chrome sheets
+  {sourceName: /(?:res|gre-resources)\/forms\.css$/i,
+   errorMessage: /Expected color but found \u2018-moz.*/i,
+   platforms: ["linux"], isFromDevTools: false},
   // The '-moz-menulist-button' value is only supported in chrome and UA sheets
   // but forms.css is loaded as a document sheet by this test.
   // Maybe bug 1261237 will fix this?

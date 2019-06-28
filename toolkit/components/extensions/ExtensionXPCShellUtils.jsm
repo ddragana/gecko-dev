@@ -139,7 +139,7 @@ class ContentPage {
     let chromeShell = this.windowlessBrowser.docShell
                           .QueryInterface(Ci.nsIWebNavigation);
 
-    chromeShell.createAboutBlankContentViewer(system);
+    chromeShell.createAboutBlankContentViewer(system, system);
     chromeShell.useGlobalHistory = false;
     let loadURIOptions = {
       triggeringPrincipal: system,
@@ -151,7 +151,7 @@ class ContentPage {
 
     let chromeDoc = await promiseDocumentLoaded(chromeShell.document);
 
-    let browser = chromeDoc.createElement("browser");
+    let browser = chromeDoc.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("disableglobalhistory", "true");
     if (this.userContextId) {

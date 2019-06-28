@@ -178,7 +178,8 @@ already_AddRefed<URL> ParseURLFromWorker(const GlobalObject& aGlobal,
   worker->AssertIsOnWorkerThread();
 
   NS_ConvertUTF8toUTF16 baseURL(worker->GetLocationInfo().mHref);
-  RefPtr<URL> url = URL::WorkerConstructor(aGlobal, aInput, baseURL, aRv);
+  RefPtr<URL> url =
+      URL::Constructor(aGlobal.GetAsSupports(), aInput, baseURL, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     aRv.ThrowTypeError<MSG_INVALID_URL>(aInput);
   }
@@ -322,9 +323,11 @@ already_AddRefed<Request> Request::Constructor(const GlobalObject& aGlobal,
                                        ? aInit.mCredentials.Value()
                                        : fallbackCredentials;
 
-  if (mode == RequestMode::Navigate ||
-      (aInit.IsAnyMemberPresent() &&
-       request->Mode() == RequestMode::Navigate)) {
+  if (mode == RequestMode::Navigate) {
+    aRv.ThrowTypeError<MSG_INVALID_REQUEST_MODE>(NS_LITERAL_STRING("navigate"));
+    return nullptr;
+  }
+  if (aInit.IsAnyMemberPresent() && request->Mode() == RequestMode::Navigate) {
     mode = RequestMode::Same_origin;
   }
 
@@ -426,7 +429,8 @@ already_AddRefed<Request> Request::Constructor(const GlobalObject& aGlobal,
     WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
     if (worker) {
       worker->AssertIsOnWorkerThread();
-      request->SetEnvironmentReferrerPolicy(worker->GetReferrerPolicy());
+      request->SetEnvironmentReferrerPolicy(
+          static_cast<net::ReferrerPolicy>(worker->GetReferrerPolicy()));
       principalInfo =
           MakeUnique<mozilla::ipc::PrincipalInfo>(worker->GetPrincipalInfo());
     }

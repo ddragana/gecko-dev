@@ -145,7 +145,9 @@ add_task(async function test_passwords_change_during_sync() {
 add_task(async function test_prefs_change_during_sync() {
   _("Ensure that we don't bump the score when applying prefs.");
 
-  const TEST_PREF = "services.sync.prefs.sync.test.duringSync";
+  const TEST_PREF = "test.duringSync";
+  // create a "control pref" for the pref we sync.
+  Services.prefs.setBoolPref("services.sync.prefs.sync.test.duringSync", true);
 
   enableValidationPrefs();
 
@@ -470,8 +472,12 @@ add_task(async function test_bookmark_change_during_sync() {
                                               "bookmarks";
       return p.syncs[0].engines.find(e => e.name == name);
     });
-    ok(!engineData[0].validation, "Should not validate after first sync");
-    ok(engineData[1].validation, "Should validate after second sync");
+    if (bufferedBookmarksEnabled()) {
+      ok(engineData[0].validation, "Buffered engine should validate after first sync");
+    } else {
+      ok(!engineData[0].validation, "Legacy engine should not validate after first sync");
+    }
+    ok(engineData[1].validation, "Buffered and legacy engines should validate after second sync");
   } finally {
     engine._uploadOutgoing = uploadOutgoing;
     await cleanup(engine, server);

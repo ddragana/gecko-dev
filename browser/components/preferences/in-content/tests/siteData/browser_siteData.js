@@ -78,7 +78,7 @@ add_task(async function() {
   is(clearBtn.disabled, true, "Should disable clear button while updating sites");
   is(settingsButton.disabled, true, "Should disable settings button while updating sites");
   Assert.deepEqual(doc.l10n.getAttributes(totalSiteDataSizeLabel), {
-    id: "sitedata-total-size-calculating",
+    id: "sitedata-total-size-calculating", args: null,
   }, "Should show the loading message while updating");
 
   Services.obs.notifyObservers(null, "sitedatamanager:sites-updated");
@@ -137,18 +137,18 @@ add_task(async function() {
   let uri2 = Services.io.newURI("https://example.org");
   Services.cookies.add(uri.host, uri.pathQueryRef, "test1", "1",
     false, false, false, Date.now() + 1000 * 60 * 60, {},
-    Ci.nsICookie2.SAMESITE_UNSET);
+    Ci.nsICookie.SAMESITE_NONE);
   Services.cookies.add(uri.host, uri.pathQueryRef, "test2", "2",
     false, false, false, Date.now() + 1000 * 60 * 60, {},
-    Ci.nsICookie2.SAMESITE_UNSET);
+    Ci.nsICookie.SAMESITE_NONE);
   Services.cookies.add(uri2.host, uri2.pathQueryRef, "test1", "1",
     false, false, false, Date.now() + 1000 * 60 * 60, {},
-    Ci.nsICookie2.SAMESITE_UNSET);
+    Ci.nsICookie.SAMESITE_NONE);
 
   // Ensure that private browsing cookies are ignored.
   Services.cookies.add(uri.host, uri.pathQueryRef, "test3", "3",
     false, false, false, Date.now() + 1000 * 60 * 60, { privateBrowsingId: 1 },
-    Ci.nsICookie2.SAMESITE_UNSET);
+    Ci.nsICookie.SAMESITE_NONE);
 
   // Get the exact creation date from the cookies (to avoid intermittents
   // from minimal time differences, since we round up to minutes).
@@ -156,8 +156,8 @@ add_task(async function() {
   // We made two valid cookies for example.com.
   cookiesEnum1.getNext();
   let cookiesEnum2 = Services.cookies.getCookiesFromHost(uri2.host, {});
-  let cookie1 = cookiesEnum1.getNext().QueryInterface(Ci.nsICookie2);
-  let cookie2 = cookiesEnum2.getNext().QueryInterface(Ci.nsICookie2);
+  let cookie1 = cookiesEnum1.getNext().QueryInterface(Ci.nsICookie);
+  let cookie2 = cookiesEnum2.getNext().QueryInterface(Ci.nsICookie);
 
   let fullFormatter = new Services.intl.DateTimeFormat(undefined, {
     dateStyle: "short", timeStyle: "short",

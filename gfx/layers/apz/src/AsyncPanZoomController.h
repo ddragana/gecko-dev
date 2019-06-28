@@ -718,6 +718,21 @@ class AsyncPanZoomController {
   void ClampAndSetScrollOffset(const CSSPoint& aOffset);
 
   /**
+   * Re-clamp mCompositedScrollOffset to the scroll range. This only needs to
+   * be called if the composited scroll offset changes outside of
+   * SampleCompositedAsyncTransform().
+   */
+  void ClampCompositedScrollOffset();
+
+  /**
+   * Recalculate mCompositedLayoutViewport so that it continues to enclose
+   * the composited visual viewport. This only needs to be called if the
+   * composited layout viewport changes outside of
+   * SampleCompositedAsyncTransform().
+   */
+  void RecalculateCompositedLayoutViewport();
+
+  /**
    * Scroll the scroll frame by an X,Y offset.
    * The resulting scroll offset is not clamped to the scrollable rect;
    * the caller must ensure it stays within range.
@@ -1147,9 +1162,9 @@ class AsyncPanZoomController {
    * Returns true if the newly sampled value is different from the previously
    * sampled value.
    *
-   * (This is only relevant when |gfxPrefs::APZFrameDelayEnabled() == true|.
-   * Otherwise, GetCurrentAsyncTransform() always reflects what's stored in
-   * |Metrics()| immediately, without any delay.)
+   * (This is only relevant when StaticPrefs::apz_frame_delay_enabled() is
+   * true. Otherwise, GetCurrentAsyncTransform() always reflects what's stored
+   * in |Metrics()| immediately, without any delay.)
    */
   bool SampleCompositedAsyncTransform();
 
@@ -1594,6 +1609,8 @@ class AsyncPanZoomController {
   LayersId GetLayersId() const { return mLayersId; }
 
   wr::RenderRoot GetRenderRoot() const { return mRenderRoot; }
+
+  bool IsPinchZooming() const { return mState == PINCHING; }
 
  private:
   // Extra offset to add to the async scroll position for testing

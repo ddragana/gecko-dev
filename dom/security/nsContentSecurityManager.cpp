@@ -105,12 +105,12 @@ bool nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
     doc = static_cast<mozilla::dom::BrowserChild*>(browserChild.get())
               ->GetTopLevelDocument();
   }
-  NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(dataSpec));
-  const char16_t* params[] = {specUTF16.get()};
-  nsContentUtils::ReportToConsole(
-      nsIScriptError::warningFlag, NS_LITERAL_CSTRING("DATA_URI_BLOCKED"), doc,
-      nsContentUtils::eSECURITY_PROPERTIES, "BlockTopLevelDataURINavigation",
-      params, ArrayLength(params));
+  AutoTArray<nsString, 1> params;
+  CopyUTF8toUTF16(NS_UnescapeURL(dataSpec), *params.AppendElement());
+  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                  NS_LITERAL_CSTRING("DATA_URI_BLOCKED"), doc,
+                                  nsContentUtils::eSECURITY_PROPERTIES,
+                                  "BlockTopLevelDataURINavigation", params);
   return false;
 }
 
@@ -151,12 +151,12 @@ bool nsContentSecurityManager::AllowInsecureRedirectToDataURI(
   if (node) {
     doc = node->OwnerDoc();
   }
-  NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(dataSpec));
-  const char16_t* params[] = {specUTF16.get()};
-  nsContentUtils::ReportToConsole(
-      nsIScriptError::warningFlag, NS_LITERAL_CSTRING("DATA_URI_BLOCKED"), doc,
-      nsContentUtils::eSECURITY_PROPERTIES, "BlockSubresourceRedirectToData",
-      params, ArrayLength(params));
+  AutoTArray<nsString, 1> params;
+  CopyUTF8toUTF16(NS_UnescapeURL(dataSpec), *params.AppendElement());
+  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                  NS_LITERAL_CSTRING("DATA_URI_BLOCKED"), doc,
+                                  nsContentUtils::eSECURITY_PROPERTIES,
+                                  "BlockSubresourceRedirectToData", params);
   return false;
 }
 
@@ -258,13 +258,12 @@ nsresult nsContentSecurityManager::CheckFTPSubresourceLoad(
 
   nsAutoCString spec;
   uri->GetSpec(spec);
-  NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(spec));
-  const char16_t* params[] = {specUTF16.get()};
+  AutoTArray<nsString, 1> params;
+  CopyUTF8toUTF16(NS_UnescapeURL(spec), *params.AppendElement());
 
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, NS_LITERAL_CSTRING("FTP_URI_BLOCKED"), doc,
-      nsContentUtils::eSECURITY_PROPERTIES, "BlockSubresourceFTP", params,
-      ArrayLength(params));
+      nsContentUtils::eSECURITY_PROPERTIES, "BlockSubresourceFTP", params);
 
   return NS_ERROR_CONTENT_BLOCKED;
 }
@@ -780,8 +779,7 @@ static void DebugDoContentSecurityCheck(nsIChannel* aChannel,
              aLoadInfo->GetInitialSecurityCheckDone() ? "true" : "false"));
 
     // Log CSPrequestPrincipal
-    nsCOMPtr<nsIContentSecurityPolicy> csp;
-    requestPrincipal->GetCsp(getter_AddRefs(csp));
+    nsCOMPtr<nsIContentSecurityPolicy> csp = aLoadInfo->GetCsp();
     if (csp) {
       nsAutoString parsedPolicyStr;
       uint32_t count = 0;
@@ -801,7 +799,7 @@ static void DebugDoContentSecurityCheck(nsIChannel* aChannel,
   }
 }
 
-#if defined(DEBUG) || defined(FUZZING)
+#ifdef EARLY_BETA_OR_EARLIER
 // Assert that we never use the SystemPrincipal to load remote documents
 // i.e., HTTP, HTTPS, FTP URLs
 static void AssertSystemPrincipalMustNotLoadRemoteDocuments(
@@ -861,7 +859,7 @@ static void AssertSystemPrincipalMustNotLoadRemoteDocuments(
     // but other mochitest are exempt from this
     return;
   }
-  MOZ_ASSERT(false, "SystemPrincipal must not load remote documents.");
+  MOZ_RELEASE_ASSERT(false, "SystemPrincipal must not load remote documents.");
 }
 #endif
 
@@ -891,7 +889,7 @@ nsresult nsContentSecurityManager::doContentSecurityCheck(
     DebugDoContentSecurityCheck(aChannel, loadInfo);
   }
 
-#if defined(DEBUG) || defined(FUZZING)
+#ifdef EARLY_BETA_OR_EARLIER
   AssertSystemPrincipalMustNotLoadRemoteDocuments(aChannel);
 #endif
 

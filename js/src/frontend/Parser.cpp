@@ -40,6 +40,7 @@
 #include "frontend/FoldConstants.h"
 #include "frontend/ModuleSharedContext.h"
 #include "frontend/ParseNode.h"
+#include "frontend/ParseNodeVerify.h"
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
 #include "js/RegExpFlags.h"  // JS::RegExpFlags
@@ -50,6 +51,7 @@
 #include "vm/JSScript.h"
 #include "vm/ModuleBuilder.h"  // js::ModuleBuilder
 #include "vm/RegExpObject.h"
+#include "vm/SelfHosting.h"
 #include "vm/StringType.h"
 #include "wasm/AsmJS.h"
 
@@ -88,9 +90,6 @@ template <class T, class U>
 static inline void PropagateTransitiveParseFlags(const T* inner, U* outer) {
   if (inner->bindingsAccessedDynamically()) {
     outer->setBindingsAccessedDynamically();
-  }
-  if (inner->hasDebuggerStatement()) {
-    outer->setHasDebuggerStatement();
   }
   if (inner->hasDirectEval()) {
     outer->setHasDirectEval();
@@ -184,7 +183,7 @@ ParserBase::ParserBase(JSContext* cx, LifoAlloc& alloc,
                        ScriptSourceObject* sourceObject, ParseGoal parseGoal)
     : ParserSharedBase(cx, alloc, usedNames, sourceObject,
                        ParserSharedBase::Kind::Parser),
-      anyChars(cx, options, thisForCtor()),
+      anyChars(cx, options, this),
       ss(nullptr),
       foldConstants_(foldConstants),
 #ifdef DEBUG
@@ -413,6 +412,11 @@ typename ParseHandler::ListNodeType GeneralParser<ParseHandler, Unit>::parse() {
     error(JSMSG_GARBAGE_AFTER_INPUT, "script", TokenKindToDesc(tt));
     return null();
   }
+
+  if (!CheckParseTree(cx_, alloc_, stmtList)) {
+    return null();
+  }
+
   if (foldConstants_) {
     Node node = stmtList;
     // Don't constant-fold inside "use asm" code, as this could create a parse
@@ -1392,6 +1396,10 @@ LexicalScopeNode* Parser<FullParseHandler, Unit>::evalBody(
   }
 #endif
 
+  if (!CheckParseTree(cx_, alloc_, body)) {
+    return null();
+  }
+
   ParseNode* node = body;
   // Don't constant-fold inside "use asm" code, as this could create a parse
   // tree that doesn't type-check as asm.js.
@@ -1442,6 +1450,10 @@ ListNode* Parser<FullParseHandler, Unit>::globalBody(
 
   if (!checkStatementsEOF()) {
     return nullptr;
+  }
+
+  if (!CheckParseTree(cx_, alloc_, body)) {
+    return null();
   }
 
   ParseNode* node = body;
@@ -1536,6 +1548,10 @@ ModuleNode* Parser<FullParseHandler, Unit>::moduleBody(
     p->value()->setClosedOver();
   }
 
+  if (!CheckParseTree(cx_, alloc_, stmtList)) {
+    return null();
+  }
+
   ParseNode* node = stmtList;
   // Don't constant-fold inside "use asm" code, as this could create a parse
   // tree that doesn't type-check as asm.js.
@@ -1606,7 +1622,7 @@ bool PerHandlerParser<ParseHandler>::finishFunctionScopes(
     }
   }
 
-  if (funbox->function()->isNamedLambda() && !isStandaloneFunction) {
+  if (funbox->isNamedLambda() && !isStandaloneFunction) {
     if (!propagateFreeNamesAndMarkClosedOverBindings(pc_->namedLambdaScope())) {
       return false;
     }
@@ -1643,7 +1659,7 @@ bool PerHandlerParser<FullParseHandler>::finishFunction(
     funbox->functionScopeBindings().set(*bindings);
   }
 
-  if (funbox->function()->isNamedLambda() && !isStandaloneFunction) {
+  if (funbox->isNamedLambda() && !isStandaloneFunction) {
     Maybe<LexicalScope::Data*> bindings =
         newLexicalScopeData(pc_->namedLambdaScope());
     if (!bindings) {
@@ -1820,6 +1836,10 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneFunction(
     return null();
   }
 
+  if (!CheckParseTree(cx_, alloc_, funNode)) {
+    return null();
+  }
+
   ParseNode* node = funNode;
   // Don't constant-fold inside "use asm" code, as this could create a parse
   // tree that doesn't type-check as asm.js.
@@ -1939,13 +1959,6 @@ GeneralParser<ParseHandler, Unit>::functionBody(InHandling inHandling,
     }
   }
 
-  if (kind == FunctionSyntaxKind::DerivedClassConstructor) {
-    if (!noteDeclaredName(cx_->names().dotLocalInitializers,
-                          DeclarationKind::Var, pos())) {
-      return null();
-    }
-  }
-
   return finishLexicalScope(pc_->varScope(), body);
 }
 
@@ -1961,6 +1974,10 @@ JSFunction* AllocNewFunction(JSContext* cx, HandleAtom atom,
 
   gc::AllocKind allocKind = gc::AllocKind::FUNCTION;
   JSFunction::Flags flags;
+  bool isExtendedUnclonedSelfHostedFunctionName =
+      isSelfHosting && atom && IsExtendedUnclonedSelfHostedFunctionName(atom);
+  MOZ_ASSERT_IF(isExtendedUnclonedSelfHostedFunctionName, !inFunctionBox);
+
   switch (kind) {
     case FunctionSyntaxKind::Expression:
       flags = (generatorKind == GeneratorKind::NotGenerator &&
@@ -1991,7 +2008,7 @@ JSFunction* AllocNewFunction(JSContext* cx, HandleAtom atom,
       break;
     default:
       MOZ_ASSERT(kind == FunctionSyntaxKind::Statement);
-      if (isSelfHosting && !inFunctionBox) {
+      if (isExtendedUnclonedSelfHostedFunctionName) {
         allocKind = gc::AllocKind::FUNCTION_EXTENDED;
       }
       flags = (generatorKind == GeneratorKind::NotGenerator &&
@@ -2669,7 +2686,7 @@ bool Parser<FullParseHandler, Unit>::trySyntaxParseInnerFunction(
     if (!funbox) {
       return false;
     }
-    funbox->initWithEnclosingParseContext(pc_, kind);
+    funbox->initWithEnclosingParseContext(pc_, fun, kind);
 
     SyntaxParseHandler::Node syntaxNode =
         syntaxParser->innerFunctionForFunctionBox(
@@ -2682,7 +2699,7 @@ bool Parser<FullParseHandler, Unit>::trySyntaxParseInnerFunction(
         // correctness.
         syntaxParser->clearAbortedSyntaxParse();
         usedNames_.rewind(token);
-        MOZ_ASSERT_IF(!syntaxParser->cx_->helperThread(),
+        MOZ_ASSERT_IF(!syntaxParser->cx_->isHelperThreadContext(),
                       !syntaxParser->cx_->isExceptionPending());
         break;
       }
@@ -2798,7 +2815,7 @@ GeneralParser<ParseHandler, Unit>::innerFunction(
   if (!funbox) {
     return null();
   }
-  funbox->initWithEnclosingParseContext(outerpc, kind);
+  funbox->initWithEnclosingParseContext(outerpc, fun, kind);
 
   FunctionNodeType innerFunc = innerFunctionForFunctionBox(
       funNode, outerpc, funbox, inHandling, yieldHandling, kind, newDirectives);
@@ -2871,7 +2888,7 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneLazyFunction(
   if (!funbox) {
     return null();
   }
-  funbox->initFromLazyFunction();
+  funbox->initFromLazyFunction(fun);
 
   Directives newDirectives = directives;
   SourceParseContext funpc(this, funbox, &newDirectives);
@@ -2897,6 +2914,10 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneLazyFunction(
   if (!functionFormalParametersAndBody(InAllowed, yieldHandling, &funNode,
                                        syntaxKind)) {
     MOZ_ASSERT(directives == newDirectives);
+    return null();
+  }
+
+  if (!CheckParseTree(cx_, alloc_, funNode)) {
     return null();
   }
 
@@ -2929,6 +2950,13 @@ bool GeneralParser<ParseHandler, Unit>::functionFormalParametersAndBody(
 
   FunctionBox* funbox = pc_->functionBox();
   RootedFunction fun(cx_, funbox->function());
+
+  if (kind == FunctionSyntaxKind::ClassConstructor ||
+      kind == FunctionSyntaxKind::DerivedClassConstructor) {
+    if (!noteUsedName(cx_->names().dotInitializers)) {
+      return false;
+    }
+  }
 
   // See below for an explanation why arrow function parameters and arrow
   // function bodies are parsed with different yield/await settings.
@@ -4845,7 +4873,7 @@ inline bool GeneralParser<ParseHandler, Unit>::checkExportedNameForClause(
 template <typename Unit>
 bool Parser<FullParseHandler, Unit>::checkExportedNameForFunction(
     FunctionNode* funNode) {
-  return checkExportedName(funNode->funbox()->function()->explicitName());
+  return checkExportedName(funNode->funbox()->explicitName());
 }
 
 template <typename Unit>
@@ -6711,9 +6739,6 @@ GeneralParser<ParseHandler, Unit>::debuggerStatement() {
   }
   p.end = pos().end;
 
-  pc_->sc()->setBindingsAccessedDynamically();
-  pc_->sc()->setHasDebuggerStatement();
-
   return handler_.newDebuggerStatement(p);
 }
 
@@ -6823,8 +6848,13 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       return false;
     }
 
-    return handler_.addClassFieldDefinition(classMembers, propName,
-                                            initializer);
+    ClassFieldType field =
+        handler_.newClassFieldDefinition(propName, initializer);
+    if (!field) {
+      return false;
+    }
+
+    return handler_.addClassMemberDefinition(classMembers, field);
   }
 
   if (propType != PropertyType::Getter && propType != PropertyType::Setter &&
@@ -6875,6 +6905,21 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       }
   }
 
+  // .fieldKeys must be declared outside the scope .initializers is declared in,
+  // hence this extra scope.
+  Maybe<ParseContext::Scope> dotInitializersScope;
+  if (isConstructor && !options().selfHostingMode) {
+    dotInitializersScope.emplace(this);
+    if (!dotInitializersScope->init(pc_)) {
+      return false;
+    }
+
+    if (!noteDeclaredName(cx_->names().dotInitializers, DeclarationKind::Let,
+                          pos())) {
+      return false;
+    }
+  }
+
   // Calling toString on constructors need to return the source text for
   // the entire class. The end offset is unknown at this point in
   // parsing and will be amended when class parsing finishes below.
@@ -6885,8 +6930,22 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
   }
 
   AccessorType atype = ToAccessorType(propType);
-  return handler_.addClassMethodDefinition(classMembers, propName, funNode,
-                                           atype, isStatic);
+
+  Node method =
+      handler_.newClassMethodDefinition(propName, funNode, atype, isStatic);
+  if (!method) {
+    return false;
+  }
+
+  if (dotInitializersScope.isSome()) {
+    method = finishLexicalScope(*dotInitializersScope, method);
+    if (!method) {
+      return false;
+    }
+    dotInitializersScope.reset();
+  }
+
+  return handler_.addClassMemberDefinition(classMembers, method);
 }
 
 template <class ParseHandler, typename Unit>
@@ -6898,6 +6957,19 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
   // JSOP_DERIVEDCONSTRUCTOR due to needing to emit calls to the field
   // initializers in the constructor. So, synthesize a new one.
   if (classStmt.constructorBox == nullptr && numFields > 0) {
+    MOZ_ASSERT(!options().selfHostingMode);
+    // Unconditionally create the scope here, because it's always the
+    // constructor.
+    ParseContext::Scope dotInitializersScope(this);
+    if (!dotInitializersScope.init(pc_)) {
+      return false;
+    }
+
+    if (!noteDeclaredName(cx_->names().dotInitializers, DeclarationKind::Let,
+                          pos())) {
+      return false;
+    }
+
     // synthesizeConstructor assigns to classStmt.constructorBox
     FunctionNodeType synthesizedCtor =
         synthesizeConstructor(className, classStartOffset, hasHeritage);
@@ -6914,10 +6986,15 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
     if (!constructorNameNode) {
       return false;
     }
-
-    if (!handler_.addClassMethodDefinition(classMembers, constructorNameNode,
-                                           synthesizedCtor, AccessorType::None,
-                                           /* isStatic = */ false)) {
+    ClassMethodType method = handler_.newClassMethodDefinition(
+        constructorNameNode, synthesizedCtor, AccessorType::None,
+        /* isStatic = */ false);
+    if (!method) {
+      return false;
+    }
+    LexicalScopeNodeType scope =
+        finishLexicalScope(dotInitializersScope, method);
+    if (!handler_.addClassMemberDefinition(classMembers, scope)) {
       return false;
     }
   }
@@ -6939,6 +7016,10 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
       if (numFields > 0) {
         ctorbox->function()->lazyScript()->setHasThisBinding();
       }
+    }
+
+    if (numFields == 0) {
+      handler_.deleteConstructorScope(cx_, classMembers);
     }
   }
 
@@ -7042,37 +7123,6 @@ GeneralParser<ParseHandler, Unit>::classDefinition(
       }
     }
 
-    if (numFields > 0) {
-      // .initializers is always closed over by the constructor when there are
-      // fields with initializers. However, there's some strange circumstances
-      // which prevents us from using the normal noteUsedName() system. We
-      // cannot call noteUsedName(".initializers") when parsing the constructor,
-      // because .initializers should be marked as used *only if* there are
-      // fields with initializers. Even if we haven't seen any fields yet,
-      // there may be fields after the constructor.
-      // Consider the following class:
-      //
-      //  class C {
-      //    constructor() {
-      //      // do we noteUsedName(".initializers") here?
-      //    }
-      //    // ... because there might be some fields down here.
-      //  }
-      //
-      // So, instead, at the end of class parsing (where we are now), we do some
-      // tricks to pretend that noteUsedName(".initializers") was called in the
-      // constructor.
-      if (!usedNames_.markAsAlwaysClosedOver(cx_, cx_->names().dotInitializers,
-                                             pc_->scriptId(),
-                                             pc_->innermostScope()->id())) {
-        return null();
-      }
-      if (!noteDeclaredName(cx_->names().dotInitializers, DeclarationKind::Let,
-                            namePos)) {
-        return null();
-      }
-    }
-
     if (numFieldKeys > 0) {
       if (!noteDeclaredName(cx_->names().dotFieldKeys, DeclarationKind::Let,
                             namePos)) {
@@ -7164,7 +7214,7 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
   if (!funbox) {
     return null();
   }
-  funbox->initWithEnclosingParseContext(pc_, functionSyntaxKind);
+  funbox->initWithEnclosingParseContext(pc_, fun, functionSyntaxKind);
   handler_.setFunctionBox(funNode, funbox);
   setFunctionEndFromCurrentToken(funbox);
 
@@ -7209,14 +7259,8 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
     return null();
   }
 
-  // One might expect a noteUsedName(".initializers") here. See comment in
-  // GeneralParser<ParseHandler, Unit>::classDefinition on why it's not here.
-
-  if (hasHeritage == HasHeritage::Yes) {
-    if (!noteDeclaredName(cx_->names().dotLocalInitializers,
-                          DeclarationKind::Var, synthesizedBodyPos)) {
-      return null();
-    }
+  if (!noteUsedName(cx_->names().dotInitializers)) {
+    return null();
   }
 
   bool canSkipLazyClosedOverBindings = handler_.canSkipLazyClosedOverBindings();
@@ -7264,10 +7308,6 @@ GeneralParser<ParseHandler, Unit>::synthesizeConstructor(
 
     BinaryNodeType setThis = handler_.newSetThis(thisName, superCall);
     if (!setThis) {
-      return null();
-    }
-
-    if (!noteUsedName(cx_->names().dotLocalInitializers)) {
       return null();
     }
 
@@ -7324,7 +7364,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   }
 
   // Create the function object.
-  RootedFunction fun(cx_, newFunction(propAtom, FunctionSyntaxKind::Expression,
+  RootedFunction fun(cx_, newFunction(nullptr, FunctionSyntaxKind::Method,
                                       GeneratorKind::NotGenerator,
                                       FunctionAsyncKind::SyncFunction));
   if (!fun) {
@@ -7333,7 +7373,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
 
   // Create the top-level field initializer node.
   FunctionNodeType funNode =
-      handler_.newFunction(FunctionSyntaxKind::Expression, firstTokenPos);
+      handler_.newFunction(FunctionSyntaxKind::Method, firstTokenPos);
   if (!funNode) {
     return null();
   }
@@ -7346,7 +7386,7 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   if (!funbox) {
     return null();
   }
-  funbox->initFieldInitializer(pc_, hasHeritage);
+  funbox->initFieldInitializer(pc_, fun, hasHeritage);
   handler_.setFunctionBox(funNode, funbox);
 
   // We can't use setFunctionStartAtCurrentToken because that uses pos().begin,
@@ -7374,6 +7414,9 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
     if (!initializerExpr) {
       return null();
     }
+
+    handler_.checkAndSetIsDirectRHSAnonFunction(initializerExpr);
+
     wholeInitializerPos = pos();
     wholeInitializerPos.begin = firstTokenPos.begin;
   } else {
@@ -7491,6 +7534,10 @@ GeneralParser<ParseHandler, Unit>::fieldInitializerOpt(
   }
 
   handler_.setFunctionBody(funNode, initializerBody);
+
+  if (pc_->superScopeNeedsHomeObject()) {
+    funbox->setNeedsHomeObject();
+  }
 
   if (!finishFunction(/* isStandaloneFunction = */ false,
                       IsFieldInitializer::Yes)) {
@@ -9028,7 +9075,7 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
           return null();
         }
 
-        if (!noteUsedName(cx_->names().dotLocalInitializers)) {
+        if (!noteUsedName(cx_->names().dotInitializers)) {
           return null();
         }
       } else {

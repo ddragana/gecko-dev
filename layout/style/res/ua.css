@@ -48,7 +48,7 @@
   backface-visibility: inherit;
   clip: inherit;
   /* Other transform-related properties */
-  transform-style: inherit;
+  /* transform-style: inherit; Bug 1560704 */
   rotate: inherit;
   scale: inherit;
   translate: inherit;
@@ -61,6 +61,7 @@
   grid-row-end: inherit;
   order: inherit;
   column-span: inherit; /* needed if <table> has "column-span:all" */
+  contain: inherit; /* needed if table has 'contain:layout' or 'paint' */
 }
 
 *|*::-moz-table-row {

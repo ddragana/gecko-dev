@@ -78,6 +78,7 @@ const SEND_BEACON_URL = EXAMPLE_URL + "html_send-beacon.html";
 const CORS_URL = EXAMPLE_URL + "html_cors-test-page.html";
 const PAUSE_URL = EXAMPLE_URL + "html_pause-test-page.html";
 const OPEN_REQUEST_IN_TAB_URL = EXAMPLE_URL + "html_open-request-in-tab.html";
+const CSP_URL = EXAMPLE_URL + "html_csp-test-page.html";
 
 const SIMPLE_SJS = EXAMPLE_URL + "sjs_simple-test-server.sjs";
 const SIMPLE_UNSORTED_COOKIES_SJS = EXAMPLE_URL + "sjs_simple-unsorted-cookies-test-server.sjs";
@@ -118,7 +119,7 @@ const gDefaultFilters = Services.prefs.getCharPref("devtools.netmonitor.filters"
 Services.prefs.setCharPref(
   "devtools.netmonitor.visibleColumns",
   "[\"cause\",\"contentSize\",\"cookies\",\"domain\",\"duration\"," +
-  "\"endTime\",\"file\",\"latency\",\"method\",\"protocol\"," +
+  "\"endTime\",\"file\",\"url\",\"latency\",\"method\",\"protocol\"," +
   "\"remoteip\",\"responseTime\",\"scheme\",\"setCookies\"," +
   "\"startTime\",\"status\",\"transferred\",\"type\",\"waterfall\"]"
 );
@@ -128,6 +129,7 @@ Services.prefs.setCharPref("devtools.netmonitor.columnsData",
   '{"name":"method","minWidth":30,"width":5},' +
   '{"name":"domain","minWidth":30,"width":10},' +
   '{"name":"file","minWidth":30,"width":25},' +
+  '{"name":"url","minWidth":30,"width":25},' +
   '{"name":"cause","minWidth":30,"width":10},' +
   '{"name":"type","minWidth":30,"width":5},' +
   '{"name":"transferred","minWidth":30,"width":10},' +
@@ -641,13 +643,9 @@ function testFilterButtonsCustom(monitor, isChecked) {
   for (let i = 0; i < isChecked.length; i++) {
     const button = buttons[i];
     if (isChecked[i]) {
-      is(button.classList.contains("checked"), true,
-        "The " + button.id + " button should have a 'checked' class.");
       is(button.getAttribute("aria-pressed"), "true",
         "The " + button.id + " button should set 'aria-pressed' = true.");
     } else {
-      is(button.classList.contains("checked"), false,
-        "The " + button.id + " button should not have a 'checked' class.");
       is(button.getAttribute("aria-pressed"), "false",
         "The " + button.id + " button should set 'aria-pressed' = false.");
     }

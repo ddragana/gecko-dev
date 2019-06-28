@@ -169,18 +169,19 @@ BreakpointActor.prototype = {
    * @param frame Debugger.Frame
    *        The stack frame that contained the breakpoint.
    */
+  /* eslint-disable complexity */
   hit: function(frame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
+    const location = this.threadActor.sources.getFrameLocation(frame);
     const {
-      generatedSourceActor,
-      generatedLine,
-      generatedColumn,
-    } = this.threadActor.sources.getFrameLocation(frame);
-    const url = generatedSourceActor.url;
+      sourceActor,
+      line,
+      column,
+    } = location;
 
     if (
-      this.threadActor.sources.isBlackBoxed(url, generatedLine, generatedColumn) ||
+      this.threadActor.sources.isBlackBoxed(sourceActor.url, line, column) ||
       this.threadActor.skipBreakpoints ||
       frame.onStep
     ) {
@@ -189,12 +190,16 @@ BreakpointActor.prototype = {
 
     // If we're trying to pop this frame, and we see a breakpoint at
     // the spot at which popping started, ignore it.  See bug 970469.
-    const locationAtFinish = frame.onPop && frame.onPop.generatedLocation;
+    const locationAtFinish = frame.onPop && frame.onPop.location;
     if (
       locationAtFinish &&
-      locationAtFinish.generatedLine === generatedLine &&
-      locationAtFinish.generatedColumn === generatedColumn
+      locationAtFinish.line === line &&
+      locationAtFinish.column === column
     ) {
+      return undefined;
+    }
+
+    if (!this.threadActor.hasMoved(location, "breakpoint")) {
       return undefined;
     }
 
@@ -210,13 +215,19 @@ BreakpointActor.prototype = {
     if (condition) {
       const { result, message } = this.checkCondition(frame, condition);
 
-      if (result) {
-        if (message) {
-          reason.type = "breakpointConditionThrown";
-          reason.message = message;
-        }
-      } else {
+      // Don't pause if the result is falsey
+      if (!result) {
         return undefined;
+      }
+
+      if (message) {
+        // Don't pause if there is an exception message and POE is false
+        if (!this.threadActor._options.pauseOnExceptions) {
+          return undefined;
+        }
+
+        reason.type = "breakpointConditionThrown";
+        reason.message = message;
       }
     }
 
@@ -224,13 +235,16 @@ BreakpointActor.prototype = {
       const displayName = formatDisplayName(frame);
       const completion = frame.evalWithBindings(`[${logValue}]`, { displayName });
       let value;
+      let level = "logPoint";
+
       if (!completion) {
         // The evaluation was killed (possibly by the slow script dialog).
         value = ["Log value evaluation incomplete"];
       } else if ("return" in completion) {
         value = completion.return;
       } else {
-        value = [this.getThrownMessage(completion)];
+        value = ["[Logpoint threw]: " + this.getThrownMessage(completion)];
+        level = "logPointError";
       }
 
       if (value && typeof value.unsafeDereference === "function") {
@@ -238,11 +252,11 @@ BreakpointActor.prototype = {
       }
 
       const message = {
-        filename: url,
-        lineNumber: generatedLine,
-        columnNumber: generatedColumn,
-        level: "logPoint",
+        filename: sourceActor.url,
+        lineNumber: line,
+        columnNumber: column,
         arguments: value,
+        level,
       };
       this.threadActor._parent._consoleActor.onConsoleAPICall(message);
 
@@ -252,6 +266,7 @@ BreakpointActor.prototype = {
 
     return this.threadActor._pauseAndRespond(frame, reason);
   },
+  /* eslint-enable complexity */
 
   delete: function() {
     // Remove from the breakpoint store.

@@ -27,6 +27,7 @@
 #include "mozilla/gfx/Point.h"  // for IntSize
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/ipc/SharedMemory.h"
+#include "mozilla/layers/CompositionRecorder.h"
 #include "mozilla/layers/CompositorController.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorVsyncSchedulerOwner.h"
@@ -72,7 +73,6 @@ class APZSampler;
 class APZUpdater;
 class AsyncCompositionManager;
 class AsyncImagePipelineManager;
-class CompositionRecorder;
 class Compositor;
 class CompositorAnimationStorage;
 class CompositorBridgeParent;
@@ -85,6 +85,7 @@ class PAPZParent;
 class ContentCompositorBridgeParent;
 class CompositorThreadHolder;
 class InProcessCompositorSession;
+class TextureData;
 class WebRenderBridgeParent;
 
 struct ScopedLayerTreeRegistration {
@@ -139,9 +140,8 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
       const nsTArray<SLGuidAndRenderRoot>& aTargets) = 0;
   virtual void UpdatePaintTime(LayerTransactionParent* aLayerTree,
                                const TimeDuration& aPaintTime) {}
-  virtual void RegisterPayload(
-      LayerTransactionParent* aLayerTree,
-      const InfallibleTArray<CompositionPayload>& aPayload) {}
+  virtual void RegisterPayloads(LayerTransactionParent* aLayerTree,
+                                const nsTArray<CompositionPayload>& aPayload) {}
 
   ShmemAllocator* AsShmemAllocator() override { return this; }
 
@@ -188,6 +188,11 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
                           uint32_t aApzcId) override;
 
   virtual bool IsRemote() const { return false; }
+
+  virtual UniquePtr<SurfaceDescriptor>
+  LookupSurfaceDescriptorForClientDrawTarget(const uintptr_t aDrawTarget) {
+    MOZ_CRASH("Should only be called on ContentCompositorBridgeParent.");
+  }
 
   virtual void ForceComposeToTarget(gfx::DrawTarget* aTarget,
                                     const gfx::IntRect* aRect = nullptr) {
@@ -266,6 +271,8 @@ class CompositorBridgeParentBase : public PCompositorBridgeParent,
       const uint32_t& startIndex, nsTArray<float>* intervals) = 0;
   virtual mozilla::ipc::IPCResult RecvCheckContentOnlyTDR(
       const uint32_t& sequenceNum, bool* isContentOnlyTDR) = 0;
+  virtual mozilla::ipc::IPCResult RecvInitPCanvasParent(
+      Endpoint<PCanvasParent>&& aEndpoint) = 0;
 
   bool mCanSend;
 
@@ -389,6 +396,9 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
       const wr::MaybeExternalImageId& aExternalImageId) override;
   bool DeallocPTextureParent(PTextureParent* actor) override;
 
+  mozilla::ipc::IPCResult RecvInitPCanvasParent(
+      Endpoint<PCanvasParent>&& aEndpoint) final;
+
   bool IsSameProcess() const override;
 
   void NotifyWebRenderContextPurge();
@@ -448,9 +458,8 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
 
   void UpdatePaintTime(LayerTransactionParent* aLayerTree,
                        const TimeDuration& aPaintTime) override;
-  void RegisterPayload(
-      LayerTransactionParent* aLayerTree,
-      const InfallibleTArray<CompositionPayload>& aPayload) override;
+  void RegisterPayloads(LayerTransactionParent* aLayerTree,
+                        const nsTArray<CompositionPayload>& aPayload) override;
 
   /**
    * Check rotation info and schedule a rendering task if needed.
@@ -769,7 +778,7 @@ class CompositorBridgeParent final : public CompositorBridgeParentBase,
   // mSelfRef is cleared in DeferredDestroy which is scheduled by ActorDestroy.
   RefPtr<CompositorBridgeParent> mSelfRef;
   RefPtr<CompositorAnimationStorage> mAnimationStorage;
-  UniquePtr<CompositionRecorder> mCompositionRecorder;
+  RefPtr<CompositionRecorder> mCompositionRecorder;
 
   TimeDuration mPaintTime;
 

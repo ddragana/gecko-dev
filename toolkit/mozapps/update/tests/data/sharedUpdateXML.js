@@ -22,6 +22,7 @@ const STATE_NONE            = "null";
 const STATE_DOWNLOADING     = "downloading";
 const STATE_PENDING         = "pending";
 const STATE_PENDING_SVC     = "pending-service";
+const STATE_PENDING_ELEVATE = "pending-elevate";
 const STATE_APPLYING        = "applying";
 const STATE_APPLIED         = "applied";
 const STATE_APPLIED_SVC     = "applied-service";
@@ -322,6 +323,8 @@ function getUpdateString(aUpdateProps) {
   let detailsURL = "detailsURL=\"" + aUpdateProps.detailsURL + "\" ";
   let promptWaitTime = aUpdateProps.promptWaitTime ?
     "promptWaitTime=\"" + aUpdateProps.promptWaitTime + "\" " : "";
+  let disableBITS = aUpdateProps.disableBITS ?
+    "disableBITS=\"" + aUpdateProps.disableBITS + "\" " : "";
   let custom1 = aUpdateProps.custom1 ? aUpdateProps.custom1 + " " : "";
   let custom2 = aUpdateProps.custom2 ? aUpdateProps.custom2 + " " : "";
   let buildID = "buildID=\"" + aUpdateProps.buildID + "\"";
@@ -332,6 +335,7 @@ function getUpdateString(aUpdateProps) {
                       appVersion +
                       detailsURL +
                       promptWaitTime +
+                      disableBITS +
                       custom1 +
                       custom2 +
                       buildID;

@@ -90,9 +90,9 @@ Prompter.prototype = {
         return p.nsIPrompt_promptPassword(title, text, pass, checkLabel, checkValue);
     },
 
-    select(domWin, title, text, count, list, selected) {
+    select(domWin, title, text, list, selected) {
         let p = this.pickPrompter(domWin);
-        return p.select(title, text, count, list, selected);
+        return p.select(title, text, list, selected);
     },
 
 
@@ -115,7 +115,7 @@ var PromptUtilsTemp = {
 
     getLocalizedString(key, formatArgs) {
         if (formatArgs)
-            return this.strBundle.formatStringFromName(key, formatArgs, formatArgs.length);
+            return this.strBundle.formatStringFromName(key, formatArgs);
         return this.strBundle.GetStringFromName(key);
     },
 
@@ -431,14 +431,14 @@ function openTabPrompt(domWin, tabPrompt, args) {
     }
 }
 
-function openRemotePrompt(domWin, args, tabPrompt) {
+function openRemotePrompt(domWin, args) {
     let docShell = domWin.docShell;
     let messageManager = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                                  .getInterface(Ci.nsIBrowserChild)
                                  .messageManager;
 
     let inPermitUnload = docShell.contentViewer && docShell.contentViewer.inPermitUnload;
-    let eventDetail = Cu.cloneInto({tabPrompt, inPermitUnload}, domWin);
+    let eventDetail = Cu.cloneInto({tabPrompt: args.tabPrompt, inPermitUnload}, domWin);
     PromptUtils.fireDialogEvent(domWin, "DOMWillOpenModalDialog", null, eventDetail);
 
     // If domWin is reloaded while we're showing a remote modal
@@ -539,7 +539,8 @@ ModalPrompter.prototype = {
 
         if (allowTabModal && this.domWin) {
             if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
-                openRemotePrompt(this.domWin, args, true);
+                args.tabPrompt = true;
+                openRemotePrompt(this.domWin, args);
                 return;
             }
 
@@ -551,17 +552,16 @@ ModalPrompter.prototype = {
         }
 
         // If we can't do a tab modal prompt, fallback to using a window-modal dialog.
-        const COMMON_DIALOG = "chrome://global/content/commonDialog.xul";
-        const SELECT_DIALOG = "chrome://global/content/selectDialog.xul";
-
-        let uri = (args.promptType == "select") ? SELECT_DIALOG : COMMON_DIALOG;
-
         if (Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_CONTENT) {
-            args.uri = uri;
+            args.tabPrompt = false;
             openRemotePrompt(this.domWin, args);
             return;
         }
 
+        const COMMON_DIALOG = "chrome://global/content/commonDialog.xul";
+        const SELECT_DIALOG = "chrome://global/content/selectDialog.xul";
+
+        let uri = (args.promptType == "select") ? SELECT_DIALOG : COMMON_DIALOG;
         let propBag = PromptUtils.objectToPropBag(args);
         openModalWindow(this.domWin, uri, propBag);
         PromptUtils.propBagToObject(propBag, args);
@@ -792,7 +792,7 @@ ModalPrompter.prototype = {
         return ok;
     },
 
-    select(title, text, count, list, selected) {
+    select(title, text, list, selected) {
         if (!title)
             title = PromptUtils.getLocalizedString("Select");
 

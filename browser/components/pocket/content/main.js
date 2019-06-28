@@ -461,7 +461,7 @@ var pktUI = (function() {
             var bundle = Services.strings.createBundle("chrome://browser/locale/pocket.properties");
             for (let str of bundle.getSimpleEnumeration()) {
                 if (str.key in data) {
-                    strings[str.key] = bundle.formatStringFromName(str.key, data[str.key], data[str.key].length);
+                    strings[str.key] = bundle.formatStringFromName(str.key, data[str.key]);
                 } else {
                     strings[str.key] = str.value;
                 }
@@ -597,9 +597,7 @@ var pktUIMessaging = (function() {
             var payload = JSON.parse(e.target.getAttribute("payload"))[0];
             var panelId = payload.panelId;
             var data = payload.data;
-            // After Bug 965637 we can query the csp from the document instead
-            // of the nodePrincipal, we can just use: e.target.ownerDocument.csp;
-            var csp = e.target.nodePrincipal.csp;
+            var csp = e.target.ownerDocument.csp;
             callback(panelId, data, nodePrincipal, csp);
 
             // Cleanup the element

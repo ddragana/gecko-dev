@@ -81,6 +81,7 @@ registerCleanupFunction(async () => {
   AppMenuNotifications.removeNotification(/.*/);
   gEnv.set("MOZ_TEST_SKIP_UPDATE_STAGE", "");
   gEnv.set("MOZ_TEST_SLOW_SKIP_UPDATE_STAGE", "");
+  gEnv.set("MOZ_TEST_STAGING_ERROR", "");
   UpdateListener.reset();
   AppMenuNotifications.removeNotification(/.*/);
   reloadUpdateManagerData(true);
@@ -129,6 +130,9 @@ async function continueFileHandler(leafName) {
     interval = 200;
     retries = 600;
     continueFile = getGREBinDir();
+    if (AppConstants.platform == "macosx") {
+      continueFile = continueFile.parent.parent;
+    }
     continueFile.append(leafName);
   } else {
     continueFile = Services.dirsvc.get("CurWorkD", Ci.nsIFile);
@@ -569,7 +573,6 @@ function runDoorhangerUpdateTest(params, steps) {
     await SpecialPowers.pushPrefEnv({
       set: [
         [PREF_APP_UPDATE_DISABLEDFORTESTING, false],
-        [PREF_APP_UPDATE_IDLETIME, 0],
         [PREF_APP_UPDATE_URL_DETAILS, gDetailsURL],
         [PREF_APP_UPDATE_URL_MANUAL, URL_MANUAL_UPDATE],
       ],

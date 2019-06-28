@@ -130,46 +130,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleFont {
   RefPtr<nsAtom> mLanguage;
 };
 
-class nsStyleGradient final {
- public:
-  nsStyleGradient();
-  uint8_t mShape;  // NS_STYLE_GRADIENT_SHAPE_*
-  uint8_t mSize;   // NS_STYLE_GRADIENT_SIZE_*;
-                   // not used (must be FARTHEST_CORNER) for linear shape
-  bool mRepeating;
-  bool mLegacySyntax;  // If true, serialization should use a vendor prefix.
-  // XXXdholbert This will hopefully be going away soon, if bug 1337655 sticks:
-  bool mMozLegacySyntax;  // (Only makes sense when mLegacySyntax is true.)
-                          // If true, serialization should use -moz prefix.
-                          // Else, serialization should use -webkit prefix.
-
-  nsStyleCoord mBgPosX;  // percent, coord, calc, none
-  nsStyleCoord mBgPosY;  // percent, coord, calc, none
-  nsStyleCoord mAngle;   // none, angle
-
-  nsStyleCoord mRadiusX;  // percent, coord, calc, none
-  nsStyleCoord mRadiusY;  // percent, coord, calc, none
-
-  // stops are in the order specified in the stylesheet
-  nsTArray<mozilla::StyleGradientItem> mStops;
-
-  bool operator==(const nsStyleGradient& aOther) const;
-  bool operator!=(const nsStyleGradient& aOther) const {
-    return !(*this == aOther);
-  }
-
-  bool IsOpaque();
-
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsStyleGradient)
-
- private:
-  // Private destructor, to discourage deletion outside of Release():
-  ~nsStyleGradient() {}
-
-  nsStyleGradient(const nsStyleGradient& aOther) = delete;
-  nsStyleGradient& operator=(const nsStyleGradient& aOther) = delete;
-};
-
 /**
  * A wrapper for an imgRequestProxy that supports off-main-thread creation
  * and equality comparison.
@@ -215,7 +175,7 @@ class nsStyleImageRequest {
 
   // Can be called from any thread, but Resolve() must be called later
   // on the main thread before get() can be used.
-  nsStyleImageRequest(Mode aModeFlags, mozilla::css::URLValue* aImageValue);
+  nsStyleImageRequest(Mode aModeFlags, const mozilla::StyleComputedImageUrl&);
 
   bool Resolve(mozilla::dom::Document&,
                const nsStyleImageRequest* aOldImageRequest);
@@ -234,7 +194,9 @@ class nsStyleImageRequest {
   // return true from URLValue::DefinitelyEqualURIs.
   bool DefinitelyEquals(const nsStyleImageRequest& aOther) const;
 
-  mozilla::css::URLValue* GetImageValue() const { return mImageValue; }
+  const mozilla::StyleComputedImageUrl& GetImageValue() const {
+    return mImageURL;
+  }
 
   already_AddRefed<nsIURI> GetImageURI() const;
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nsStyleImageRequest);
@@ -246,7 +208,7 @@ class nsStyleImageRequest {
   void MaybeTrackAndLock();
 
   RefPtr<imgRequestProxy> mRequestProxy;
-  RefPtr<mozilla::css::URLValue> mImageValue;
+  mozilla::StyleComputedImageUrl mImageURL;
   RefPtr<mozilla::dom::ImageTracker> mImageTracker;
 
   // Cache DocGroup for dispatching events in the destructor.
@@ -263,7 +225,6 @@ enum nsStyleImageType {
   eStyleImageType_Image,
   eStyleImageType_Gradient,
   eStyleImageType_Element,
-  eStyleImageType_URL
 };
 
 struct CachedBorderImageData {
@@ -296,8 +257,6 @@ struct CachedBorderImageData {
  * image of type (1)).
  */
 struct nsStyleImage {
-  typedef mozilla::css::URLValue URLValue;
-
   nsStyleImage();
   ~nsStyleImage();
   nsStyleImage(const nsStyleImage& aOther);
@@ -305,10 +264,9 @@ struct nsStyleImage {
 
   void SetNull();
   void SetImageRequest(already_AddRefed<nsStyleImageRequest> aImage);
-  void SetGradientData(nsStyleGradient* aGradient);
+  void SetGradientData(mozilla::UniquePtr<mozilla::StyleGradient>);
   void SetElementId(already_AddRefed<nsAtom> aElementId);
   void SetCropRect(mozilla::UniquePtr<nsStyleSides> aCropRect);
-  void SetURLValue(already_AddRefed<const URLValue> aURLValue);
 
   void ResolveImage(mozilla::dom::Document& aDocument,
                     const nsStyleImage* aOldImage) {
@@ -329,9 +287,9 @@ struct nsStyleImage {
     return mImage;
   }
   imgRequestProxy* GetImageData() const { return ImageRequest()->get(); }
-  nsStyleGradient* GetGradientData() const {
+  const mozilla::StyleGradient& GetGradient() const {
     NS_ASSERTION(mType == eStyleImageType_Gradient, "Data is not a gradient!");
-    return mGradient;
+    return *mGradient;
   }
   bool IsResolved() const {
     return mType != eStyleImageType_Image || ImageRequest()->IsResolved();
@@ -348,7 +306,7 @@ struct nsStyleImage {
 
   already_AddRefed<nsIURI> GetImageURI() const;
 
-  const URLValue* GetURLValue() const;
+  const mozilla::StyleComputedImageUrl* GetURLValue() const;
 
   /**
    * Compute the actual crop rect in pixels, using the source image bounds.
@@ -431,31 +389,12 @@ struct nsStyleImage {
   nsStyleImageType mType;
   union {
     nsStyleImageRequest* mImage;
-    nsStyleGradient* mGradient;
-    const URLValue* mURLValue;  // See the comment in SetStyleImage's 'case
-                                // eCSSUnit_URL' section to know why we need to
-                                // store URLValues separately from mImage.
+    mozilla::StyleGradient* mGradient;
     nsAtom* mElementId;
   };
 
   // This is _currently_ used only in conjunction with eStyleImageType_Image.
   mozilla::UniquePtr<nsStyleSides> mCropRect;
-};
-
-struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColor {
-  explicit nsStyleColor(const mozilla::dom::Document&);
-  nsStyleColor(const nsStyleColor& aOther);
-  ~nsStyleColor() { MOZ_COUNT_DTOR(nsStyleColor); }
-  void TriggerImageLoads(mozilla::dom::Document&, const nsStyleColor*) {}
-  const static bool kHasTriggerImageLoads = false;
-
-  nsChangeHint CalcDifference(const nsStyleColor& aNewData) const;
-
-  // Don't add ANY members to this struct!  We can achieve caching in the rule
-  // tree (rather than the style tree) by letting color stay by itself! -dwh
-  //
-  // FIXME(emilio): Not sure having color in its own struct is worth it anymore.
-  mozilla::StyleRGBA mColor;
 };
 
 struct nsStyleImageLayers {
@@ -837,7 +776,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleBorder {
  public:
   mozilla::StyleBorderRadius mBorderRadius;  // coord, percent
   nsStyleImage mBorderImageSource;
-  nsStyleSides mBorderImageWidth;  // length, factor, percent, auto
+  mozilla::StyleBorderImageWidth mBorderImageWidth;
   mozilla::StyleNonNegativeLengthOrNumberRect mBorderImageOutset;
   mozilla::StyleBorderImageSlice mBorderImageSlice;  // factor, percent
   mozilla::StyleBorderImageRepeat mBorderImageRepeatH;
@@ -1006,47 +945,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleList {
       mMozListReversed;  // true in an <ol reversed> scope
 };
 
-struct nsStyleGridLine {
-  // http://dev.w3.org/csswg/css-grid/#typedef-grid-line
-  // XXXmats we could optimize memory size here
-  bool mHasSpan;
-  int32_t mInteger;    // 0 means not provided
-  nsString mLineName;  // Empty string means not provided.
-
-  // These are the limits that we choose to clamp grid line numbers to.
-  // http://dev.w3.org/csswg/css-grid/#overlarge-grids
-  // mInteger is clamped to this range:
-  static const int32_t kMinLine = -10000;
-  static const int32_t kMaxLine = 10000;
-
-  nsStyleGridLine()
-      : mHasSpan(false),
-        mInteger(0)
-  // mLineName get its default constructor, the empty string
-  {}
-
-  nsStyleGridLine(const nsStyleGridLine& aOther) { (*this) = aOther; }
-
-  void operator=(const nsStyleGridLine& aOther) {
-    mHasSpan = aOther.mHasSpan;
-    mInteger = aOther.mInteger;
-    mLineName = aOther.mLineName;
-  }
-
-  bool operator!=(const nsStyleGridLine& aOther) const {
-    return mHasSpan != aOther.mHasSpan || mInteger != aOther.mInteger ||
-           mLineName != aOther.mLineName;
-  }
-
-  bool IsAuto() const {
-    bool haveInitialValues = mInteger == 0 && mLineName.IsEmpty();
-    MOZ_ASSERT(!(haveInitialValues && mHasSpan),
-               "should not have 'span' when other components are "
-               "at their initial values");
-    return haveInitialValues;
-  }
-};
-
 // Computed value of the grid-template-columns or grid-template-rows property
 // (but *not* grid-template-areas.)
 // http://dev.w3.org/csswg/css-grid/#track-sizing
@@ -1088,11 +986,11 @@ struct nsStyleGridLine {
 // When mIsSubgrid is true, mRepeatAutoLineNameListBefore contains the line
 // names and mRepeatAutoLineNameListAfter is empty.
 struct nsStyleGridTemplate {
-  nsTArray<nsTArray<nsString>> mLineNameLists;
+  nsTArray<nsTArray<RefPtr<nsAtom>>> mLineNameLists;
   nsTArray<nsStyleCoord> mMinTrackSizingFunctions;
   nsTArray<nsStyleCoord> mMaxTrackSizingFunctions;
-  nsTArray<nsString> mRepeatAutoLineNameListBefore;
-  nsTArray<nsString> mRepeatAutoLineNameListAfter;
+  nsTArray<RefPtr<nsAtom>> mRepeatAutoLineNameListBefore;
+  nsTArray<RefPtr<nsAtom>> mRepeatAutoLineNameListAfter;
   int16_t mRepeatAutoIndex;  // -1 or the track index for an auto-fill/fit track
   bool mIsAutoFill : 1;
   bool mIsSubgrid : 1;
@@ -1115,7 +1013,7 @@ struct nsStyleGridTemplate {
   bool HasRepeatAuto() const { return mRepeatAutoIndex != -1; }
 
   bool IsRepeatAutoIndex(uint32_t aIndex) const {
-    MOZ_ASSERT(aIndex < uint32_t(2 * nsStyleGridLine::kMaxLine));
+    MOZ_ASSERT(aIndex < uint32_t(2 * mozilla::StyleMAX_GRID_LINE));
     return int32_t(aIndex) == mRepeatAutoIndex;
   }
 };
@@ -1139,6 +1037,15 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   nsChangeHint CalcDifference(
       const nsStylePosition& aNewData,
       const nsStyleVisibility& aOldStyleVisibility) const;
+
+  // Returns whether we need to compute an hypothetical position if we were
+  // absolutely positioned.
+  bool NeedsHypotheticalPositionIfAbsPos() const {
+    return (mOffset.Get(mozilla::eSideRight).IsAuto() &&
+            mOffset.Get(mozilla::eSideLeft).IsAuto()) ||
+           (mOffset.Get(mozilla::eSideTop).IsAuto() &&
+            mOffset.Get(mozilla::eSideBottom).IsAuto());
+  }
 
   /**
    * Return the used value for 'align-self' given our parent ComputedStyle
@@ -1165,6 +1072,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   nsStyleCoord mGridAutoColumnsMax;  // coord, percent, enum, calc, flex
   nsStyleCoord mGridAutoRowsMin;     // coord, percent, enum, calc, flex
   nsStyleCoord mGridAutoRowsMax;     // coord, percent, enum, calc, flex
+  float mAspectRatio;
   uint8_t mGridAutoFlow;             // NS_STYLE_GRID_AUTO_FLOW_*
   mozilla::StyleBoxSizing mBoxSizing;
 
@@ -1195,13 +1103,12 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   mozilla::UniquePtr<nsStyleGridTemplate> mGridTemplateColumns;
   mozilla::UniquePtr<nsStyleGridTemplate> mGridTemplateRows;
 
-  // nullptr for 'none'
-  RefPtr<mozilla::css::GridTemplateAreasValue> mGridTemplateAreas;
+  mozilla::StyleGridTemplateAreas mGridTemplateAreas;
 
-  nsStyleGridLine mGridColumnStart;
-  nsStyleGridLine mGridColumnEnd;
-  nsStyleGridLine mGridRowStart;
-  nsStyleGridLine mGridRowEnd;
+  mozilla::StyleGridLine mGridColumnStart;
+  mozilla::StyleGridLine mGridColumnEnd;
+  mozilla::StyleGridLine mGridRowStart;
+  mozilla::StyleGridLine mGridRowEnd;
   mozilla::NonNegativeLengthPercentageOrNormal mColumnGap;
   mozilla::NonNegativeLengthPercentageOrNormal mRowGap;
 
@@ -1252,69 +1159,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   }
 };
 
-struct nsStyleTextOverflowSide {
-  nsStyleTextOverflowSide() : mType(NS_STYLE_TEXT_OVERFLOW_CLIP) {}
-
-  static nsStyleTextOverflowSide Ellipsis() {
-    nsStyleTextOverflowSide side;
-    side.mType = NS_STYLE_TEXT_OVERFLOW_ELLIPSIS;
-    return side;
-  }
-
-  bool operator==(const nsStyleTextOverflowSide& aOther) const {
-    return mType == aOther.mType && (mType != NS_STYLE_TEXT_OVERFLOW_STRING ||
-                                     mString == aOther.mString);
-  }
-  bool operator!=(const nsStyleTextOverflowSide& aOther) const {
-    return !(*this == aOther);
-  }
-
-  nsString mString;
-  uint8_t mType;
-};
-
-struct nsStyleTextOverflow {
-  nsStyleTextOverflow() : mLogicalDirections(true) {}
-  bool operator==(const nsStyleTextOverflow& aOther) const {
-    return mLeft == aOther.mLeft && mRight == aOther.mRight;
-  }
-  bool operator!=(const nsStyleTextOverflow& aOther) const {
-    return !(*this == aOther);
-  }
-
-  // Returns the value to apply on the left side.
-  const nsStyleTextOverflowSide& GetLeft(uint8_t aDirection) const {
-    NS_ASSERTION(aDirection == NS_STYLE_DIRECTION_LTR ||
-                     aDirection == NS_STYLE_DIRECTION_RTL,
-                 "bad direction");
-    return !mLogicalDirections || aDirection == NS_STYLE_DIRECTION_LTR ? mLeft
-                                                                       : mRight;
-  }
-
-  // Returns the value to apply on the right side.
-  const nsStyleTextOverflowSide& GetRight(uint8_t aDirection) const {
-    NS_ASSERTION(aDirection == NS_STYLE_DIRECTION_LTR ||
-                     aDirection == NS_STYLE_DIRECTION_RTL,
-                 "bad direction");
-    return !mLogicalDirections || aDirection == NS_STYLE_DIRECTION_LTR ? mRight
-                                                                       : mLeft;
-  }
-
-  // Returns the first value that was specified.
-  const nsStyleTextOverflowSide* GetFirstValue() const {
-    return mLogicalDirections ? &mRight : &mLeft;
-  }
-
-  // Returns the second value, or null if there was only one value specified.
-  const nsStyleTextOverflowSide* GetSecondValue() const {
-    return mLogicalDirections ? nullptr : &mRight;
-  }
-
-  nsStyleTextOverflowSide mLeft;   // start side when mLogicalDirections is true
-  nsStyleTextOverflowSide mRight;  // end side when mLogicalDirections is true
-  bool mLogicalDirections;         // true when only one value was specified
-};
-
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
   explicit nsStyleTextReset(const mozilla::dom::Document&);
   nsStyleTextReset(const nsStyleTextReset& aOther);
@@ -1332,7 +1176,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
 
   nsChangeHint CalcDifference(const nsStyleTextReset& aNewData) const;
 
-  nsStyleTextOverflow mTextOverflow;  // enum, string
+  mozilla::StyleTextOverflow mTextOverflow;
 
   mozilla::StyleTextDecorationLine mTextDecorationLine;
   uint8_t mTextDecorationStyle;  // NS_STYLE_TEXT_DECORATION_STYLE_*
@@ -1340,6 +1184,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
   nscoord mInitialLetterSink;    // 0 means normal
   float mInitialLetterSize;      // 0.0f means normal
   mozilla::StyleColor mTextDecorationColor;
+  mozilla::StyleLengthOrAuto mTextDecorationWidth;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
@@ -1351,11 +1196,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
 
   nsChangeHint CalcDifference(const nsStyleText& aNewData) const;
 
+  mozilla::StyleRGBA mColor;
   mozilla::StyleTextTransform mTextTransform;
   uint8_t mTextAlign;      // NS_STYLE_TEXT_ALIGN_*
   uint8_t mTextAlignLast;  // NS_STYLE_TEXT_ALIGN_*
   mozilla::StyleTextJustify mTextJustify;
   mozilla::StyleWhiteSpace mWhiteSpace;
+  mozilla::StyleLineBreak mLineBreak = mozilla::StyleLineBreak::Auto;
 
  private:
   mozilla::StyleWordBreak mWordBreak = mozilla::StyleWordBreak::Normal;
@@ -1381,6 +1228,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   mozilla::StyleLetterSpacing mLetterSpacing;
   mozilla::StyleLineHeight mLineHeight;
   mozilla::LengthPercentage mTextIndent;
+
+  mozilla::StyleLengthOrAuto mTextUnderlineOffset;
+
   nscoord mWebkitTextStrokeWidth;  // coord
 
   mozilla::StyleArcSlice<mozilla::StyleSimpleShadow> mTextShadow;
@@ -1404,30 +1254,35 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   bool WhiteSpaceIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreSpace;
   }
 
   bool NewlineIsSignificantStyle() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine;
   }
 
   bool WhiteSpaceOrNewlineIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreSpace;
   }
 
   bool TabIsSignificant() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Pre ||
-           mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap;
+           mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces;
   }
 
   bool WhiteSpaceCanWrapStyle() const {
     return mWhiteSpace == mozilla::StyleWhiteSpace::Normal ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreWrap ||
+           mWhiteSpace == mozilla::StyleWhiteSpace::BreakSpaces ||
            mWhiteSpace == mozilla::StyleWhiteSpace::PreLine;
   }
 
@@ -1597,14 +1452,6 @@ struct StyleShapeSource final {
 
   StyleShapeSourceType GetType() const { return mType; }
 
-  const css::URLValue& URL() const {
-    MOZ_ASSERT(mType == StyleShapeSourceType::URL, "Wrong shape source type!");
-    MOZ_ASSERT(mShapeImage && mShapeImage->GetURLValue());
-    return *mShapeImage->GetURLValue();
-  }
-
-  void SetURL(const css::URLValue& aURLValue);
-
   const nsStyleImage& ShapeImage() const {
     MOZ_ASSERT(mType == StyleShapeSourceType::Image,
                "Wrong shape source type!");
@@ -1664,27 +1511,6 @@ struct StyleShapeSource final {
   StyleGeometryBox mReferenceBox = StyleGeometryBox::NoBox;
 };
 
-struct StyleMotion final {
-  bool operator==(const StyleMotion& aOther) const {
-    return mOffsetPath == aOther.mOffsetPath;
-  }
-
-  bool operator!=(const StyleMotion& aOther) const {
-    return !(*this == aOther);
-  }
-
-  const StyleShapeSource& OffsetPath() const { return mOffsetPath; }
-
-  bool HasPath() const {
-    // Bug 1186329: We have to check other acceptable types after supporting
-    // different values of offset-path. e.g. basic-shapes, ray.
-    return mOffsetPath.GetType() == StyleShapeSourceType::Path;
-  }
-
- private:
-  StyleShapeSource mOffsetPath;
-};
-
 }  // namespace mozilla
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
@@ -1697,11 +1523,30 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   void TriggerImageLoads(mozilla::dom::Document&, const nsStyleDisplay*);
   const static bool kHasTriggerImageLoads = true;
 
-  nsChangeHint CalcDifference(const nsStyleDisplay& aNewData) const;
+  nsChangeHint CalcDifference(const nsStyleDisplay& aNewData,
+                              const nsStylePosition& aOldPosition) const;
 
-  // We guarantee that if mBinding is non-null, so are mBinding->GetURI() and
-  // mBinding->mOriginPrincipal.
-  RefPtr<mozilla::css::URLValue> mBinding;
+  mozilla::StyleUrlOrNone mBinding;
+  nsStyleAutoArray<mozilla::StyleTransition> mTransitions;
+  // The number of elements in mTransitions that are not from repeating
+  // a list due to another property being longer.
+  uint32_t mTransitionTimingFunctionCount;
+  uint32_t mTransitionDurationCount;
+  uint32_t mTransitionDelayCount;
+  uint32_t mTransitionPropertyCount;
+  nsStyleAutoArray<mozilla::StyleAnimation> mAnimations;
+  // The number of elements in mAnimations that are not from repeating
+  // a list due to another property being longer.
+  uint32_t mAnimationTimingFunctionCount;
+  uint32_t mAnimationDurationCount;
+  uint32_t mAnimationDelayCount;
+  uint32_t mAnimationNameCount;
+  uint32_t mAnimationDirectionCount;
+  uint32_t mAnimationFillModeCount;
+  uint32_t mAnimationPlayStateCount;
+  uint32_t mAnimationIterationCountCount;
+
+  mozilla::StyleWillChange mWillChange;
   mozilla::StyleDisplay mDisplay;
   mozilla::StyleDisplay mOriginalDisplay;  // saved mDisplay for
                                            //         position:absolute/fixed
@@ -1713,9 +1558,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   uint8_t mPosition;  // NS_STYLE_POSITION_*
 
   mozilla::StyleFloat mFloat;
-  // Save mFloat for position:absolute/fixed; otherwise equal to mFloat.
-  mozilla::StyleFloat mOriginalFloat;
-
   mozilla::StyleClear mBreakType;
   mozilla::StyleBreakWithin mBreakInside;
   mozilla::StyleBreakBetween mBreakBefore;
@@ -1728,7 +1570,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleOrient mOrient;
   uint8_t mIsolation;  // NS_STYLE_ISOLATION_*
   uint8_t mTopLayer;   // NS_STYLE_TOP_LAYER_*
-  mozilla::StyleWillChange mWillChange;
 
   mozilla::StyleTouchAction mTouchAction;
   uint8_t mScrollBehavior;  // NS_STYLE_SCROLL_BEHAVIOR_*
@@ -1737,41 +1578,26 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   mozilla::StyleOverflowAnchor mOverflowAnchor;
   mozilla::StyleScrollSnapAlign mScrollSnapAlign;
   mozilla::StyleScrollSnapType mScrollSnapType;
-  nsStyleCoord mScrollSnapPointsX;
-  nsStyleCoord mScrollSnapPointsY;
-  mozilla::Position mScrollSnapDestination;
-  nsTArray<mozilla::Position> mScrollSnapCoordinate;
   uint32_t mLineClamp;
-
-  // mSpecifiedTransform is the list of transform functions as
-  // specified, or null to indicate there is no transform.  (inherit or
-  // initial are replaced by an actual list of transform functions, or
-  // null, as appropriate.)
-  uint8_t mBackfaceVisibility;
-  uint8_t mTransformStyle;
-  StyleGeometryBox mTransformBox;
 
   mozilla::StyleTransform mTransform;
   mozilla::StyleRotate mRotate;
   mozilla::StyleTranslate mTranslate;
   mozilla::StyleScale mScale;
 
-  mozilla::UniquePtr<mozilla::StyleMotion> mMotion;
+  uint8_t mBackfaceVisibility;
+  uint8_t mTransformStyle;
+  StyleGeometryBox mTransformBox;
+
+  mozilla::StyleOffsetPath mOffsetPath;
+  mozilla::LengthPercentage mOffsetDistance;
+  mozilla::StyleOffsetRotate mOffsetRotate;
 
   mozilla::StyleTransformOrigin mTransformOrigin;
   mozilla::StylePerspective mChildPerspective;
   mozilla::Position mPerspectiveOrigin;
 
   mozilla::StyleVerticalAlign mVerticalAlign;
-
-  nsStyleAutoArray<mozilla::StyleTransition> mTransitions;
-
-  // The number of elements in mTransitions that are not from repeating
-  // a list due to another property being longer.
-  uint32_t mTransitionTimingFunctionCount;
-  uint32_t mTransitionDurationCount;
-  uint32_t mTransitionDelayCount;
-  uint32_t mTransitionPropertyCount;
 
   nsCSSPropertyID GetTransitionProperty(uint32_t aIndex) const {
     return mTransitions[aIndex % mTransitionPropertyCount].GetProperty();
@@ -1793,19 +1619,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
                0.0f) +
            mTransitions[aIndex % mTransitionDelayCount].GetDelay();
   }
-
-  nsStyleAutoArray<mozilla::StyleAnimation> mAnimations;
-
-  // The number of elements in mAnimations that are not from repeating
-  // a list due to another property being longer.
-  uint32_t mAnimationTimingFunctionCount;
-  uint32_t mAnimationDurationCount;
-  uint32_t mAnimationDelayCount;
-  uint32_t mAnimationNameCount;
-  uint32_t mAnimationDirectionCount;
-  uint32_t mAnimationFillModeCount;
-  uint32_t mAnimationPlayStateCount;
-  uint32_t mAnimationIterationCountCount;
 
   nsAtom* GetAnimationName(uint32_t aIndex) const {
     return mAnimations[aIndex % mAnimationNameCount].GetName();
@@ -1864,8 +1677,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
            mozilla::StyleDisplay::RubyBase == mDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == mDisplay ||
            mozilla::StyleDisplay::RubyText == mDisplay ||
-           mozilla::StyleDisplay::RubyTextContainer == mDisplay ||
-           mozilla::StyleDisplay::Contents == mDisplay;
+           mozilla::StyleDisplay::RubyTextContainer == mDisplay;
   }
 
   bool IsBlockOutsideStyle() const {
@@ -1892,8 +1704,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
            mozilla::StyleDisplay::RubyBase == aDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == aDisplay ||
            mozilla::StyleDisplay::RubyText == aDisplay ||
-           mozilla::StyleDisplay::RubyTextContainer == aDisplay ||
-           mozilla::StyleDisplay::Contents == aDisplay;
+           mozilla::StyleDisplay::RubyTextContainer == aDisplay;
   }
 
   bool IsInlineOutsideStyle() const {
@@ -2002,7 +1813,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     return HasTransformProperty() || HasIndividualTransform() ||
            mTransformStyle == NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D ||
            (mWillChange.bits & mozilla::StyleWillChangeBits_TRANSFORM) ||
-           (mMotion && mMotion->HasPath());
+           !mOffsetPath.IsNone();
   }
 
   bool HasTransformProperty() const { return !mTransform._0.IsEmpty(); }
@@ -2497,10 +2308,10 @@ class nsStyleSVGPaint {
 
   void SetNone();
   void SetColor(mozilla::StyleColor aColor);
-  void SetPaintServer(mozilla::css::URLValue* aPaintServer,
+  void SetPaintServer(const mozilla::StyleComputedUrl& aPaintServer,
                       nsStyleSVGFallbackType aFallbackType,
                       mozilla::StyleColor aFallbackColor);
-  void SetPaintServer(mozilla::css::URLValue* aPaintServer) {
+  void SetPaintServer(const mozilla::StyleComputedUrl& aPaintServer) {
     SetPaintServer(aPaintServer, eStyleSVGFallbackType_NotSet,
                    mozilla::StyleColor::Black());
   }
@@ -2517,7 +2328,7 @@ class nsStyleSVGPaint {
     return mPaint.mColor.CalcColor(*aComputedStyle);
   }
 
-  mozilla::css::URLValue* GetPaintServer() const {
+  const mozilla::StyleComputedUrl& GetPaintServer() const {
     MOZ_ASSERT(mType == eStyleSVGPaintType_Server);
     return mPaint.mPaintServer;
   }
@@ -2542,7 +2353,7 @@ class nsStyleSVGPaint {
 
   union ColorOrPaintServer {
     mozilla::StyleColor mColor;
-    mozilla::css::URLValue* mPaintServer;
+    mozilla::StyleComputedUrl mPaintServer;
     explicit ColorOrPaintServer(mozilla::StyleColor c) : mColor(c) {}
     ~ColorOrPaintServer() {}  // Caller must call Reset().
   };
@@ -2563,9 +2374,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
 
   nsStyleSVGPaint mFill;
   nsStyleSVGPaint mStroke;
-  RefPtr<mozilla::css::URLValue> mMarkerEnd;
-  RefPtr<mozilla::css::URLValue> mMarkerMid;
-  RefPtr<mozilla::css::URLValue> mMarkerStart;
+  mozilla::StyleUrlOrNone mMarkerEnd;
+  mozilla::StyleUrlOrNone mMarkerMid;
+  mozilla::StyleUrlOrNone mMarkerStart;
   nsTArray<mozilla::NonNegativeLengthPercentage> mStrokeDasharray;
   mozilla::StyleMozContextProperties mMozContextProperties;
 
@@ -2612,7 +2423,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
     return mContextFlags & STROKE_WIDTH_CONTEXT;
   }
 
-  bool HasMarker() const { return mMarkerStart || mMarkerMid || mMarkerEnd; }
+  bool HasMarker() const {
+    return mMarkerStart.IsUrl() || mMarkerMid.IsUrl() || mMarkerEnd.IsUrl();
+  }
 
   /**
    * Returns true if the stroke is not "none" and the stroke-opacity is greater
@@ -2651,60 +2464,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   uint8_t mContextFlags;
 };
 
-struct nsStyleFilter {
-  nsStyleFilter();
-  nsStyleFilter(const nsStyleFilter& aSource);
-  ~nsStyleFilter();
-  void TriggerImageLoads(mozilla::dom::Document&, const nsStyleFilter*) {}
-  const static bool kHasTriggerImageLoads = false;
-
-  nsStyleFilter& operator=(const nsStyleFilter& aOther);
-
-  bool operator==(const nsStyleFilter& aOther) const;
-  bool operator!=(const nsStyleFilter& aOther) const {
-    return !(*this == aOther);
-  }
-
-  uint32_t GetType() const { return mType; }
-
-  const nsStyleCoord& GetFilterParameter() const {
-    NS_ASSERTION(mType != NS_STYLE_FILTER_DROP_SHADOW &&
-                     mType != NS_STYLE_FILTER_URL &&
-                     mType != NS_STYLE_FILTER_NONE,
-                 "wrong filter type");
-    return mFilterParameter;
-  }
-  void SetFilterParameter(const nsStyleCoord& aFilterParameter, int32_t aType);
-
-  mozilla::css::URLValue* GetURL() const {
-    MOZ_ASSERT(mType == NS_STYLE_FILTER_URL, "wrong filter type");
-    return mURL;
-  }
-
-  bool SetURL(mozilla::css::URLValue* aValue);
-
-  const mozilla::StyleSimpleShadow& GetDropShadow() const {
-    NS_ASSERTION(mType == NS_STYLE_FILTER_DROP_SHADOW, "wrong filter type");
-    return mDropShadow;
-  }
-  void SetDropShadow(const mozilla::StyleSimpleShadow&);
-
- private:
-  void ReleaseRef();
-
-  uint32_t mType;                 // NS_STYLE_FILTER_*
-  nsStyleCoord mFilterParameter;  // coord, percent, factor, angle
-  union {
-    mozilla::css::URLValue* mURL;
-    mozilla::StyleSimpleShadow mDropShadow;
-  };
-};
-
-template <>
-struct nsTArray_CopyChooser<nsStyleFilter> {
-  typedef nsTArray_CopyWithConstructors<nsStyleFilter> Type;
-};
-
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
   explicit nsStyleSVGReset(const mozilla::dom::Document&);
   nsStyleSVGReset(const nsStyleSVGReset& aSource);
@@ -2727,6 +2486,15 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVGReset {
   bool HasNonScalingStroke() const {
     return mVectorEffect == NS_STYLE_VECTOR_EFFECT_NON_SCALING_STROKE;
   }
+
+  // geometry properties
+  mozilla::LengthPercentage mX;
+  mozilla::LengthPercentage mY;
+  mozilla::LengthPercentage mCx;
+  mozilla::LengthPercentage mCy;
+  mozilla::NonNegativeLengthPercentageOrAuto mRx;
+  mozilla::NonNegativeLengthPercentageOrAuto mRy;
+  mozilla::NonNegativeLengthPercentage mR;
 
   nsStyleImageLayers mMask;
   mozilla::StyleShapeSource mClipPath;
@@ -2762,8 +2530,9 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
     return false;
   }
 
-  nsTArray<nsStyleFilter> mFilters;
+  mozilla::StyleOwnedSlice<mozilla::StyleFilter> mFilters;
   mozilla::StyleOwnedSlice<mozilla::StyleBoxShadow> mBoxShadow;
+  mozilla::StyleOwnedSlice<mozilla::StyleFilter> mBackdropFilters;
   nsRect mClip;  // offsets from UL border edge
   float mOpacity;
   uint8_t mClipFlags;     // bitfield of NS_STYLE_CLIP_* values

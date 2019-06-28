@@ -7,17 +7,19 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileUtils: "resource://gre/modules/FileUtils.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   RemoteSettings: "resource://services-settings/remote-settings.js",
+  RemoteSettingsClient: "resource://services-settings/RemoteSettingsClient.jsm",
   SearchTestUtils: "resource://testing-common/SearchTestUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
   TestUtils: "resource://testing-common/TestUtils.jsm",
+  SearchUtils: "resource://gre/modules/SearchUtils.jsm",
+  sinon: "resource://testing-common/Sinon.jsm",
 });
 
 var {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 var {HttpServer} = ChromeUtils.import("resource://testing-common/httpd.js");
 var {AddonTestUtils} = ChromeUtils.import("resource://testing-common/AddonTestUtils.jsm");
 
-const BROWSER_SEARCH_PREF = "browser.search.";
 const PREF_SEARCH_URL = "geoSpecificDefaults.url";
 const NS_APP_SEARCH_DIR = "SrchPlugns";
 
@@ -42,7 +44,7 @@ Services.prefs.setIntPref("browser.search.geoip.timeout", 3000);
 // But still disable geoip lookups - tests that need it will re-configure this.
 Services.prefs.setCharPref("browser.search.geoip.url", "");
 // Also disable region defaults - tests using it will also re-configure it.
-Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF).setCharPref("geoSpecificDefaults.url", "");
+Services.prefs.getDefaultBranch(SearchUtils.BROWSER_SEARCH_PREF).setCharPref("geoSpecificDefaults.url", "");
 
 AddonTestUtils.init(this, false);
 AddonTestUtils.createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "42", "42");
@@ -327,11 +329,11 @@ async function withGeoServer(testFn, {
   srv.start(-1);
 
   let url = `http://localhost:${srv.identity.primaryPort}/${path}?`;
-  let defaultBranch = Services.prefs.getDefaultBranch(BROWSER_SEARCH_PREF);
+  let defaultBranch = Services.prefs.getDefaultBranch(SearchUtils.BROWSER_SEARCH_PREF);
   let originalURL = defaultBranch.getCharPref(PREF_SEARCH_URL);
   defaultBranch.setCharPref(PREF_SEARCH_URL, url);
   // Set a bogus user value so that running the test ensures we ignore it.
-  Services.prefs.setCharPref(BROWSER_SEARCH_PREF + PREF_SEARCH_URL, "about:blank");
+  Services.prefs.setCharPref(SearchUtils.BROWSER_SEARCH_PREF + PREF_SEARCH_URL, "about:blank");
   Services.prefs.setCharPref("browser.search.geoip.url",
                              'data:application/json,{"country_code": "FR"}');
 
@@ -342,7 +344,7 @@ async function withGeoServer(testFn, {
   } finally {
     srv.stop(() => {});
     defaultBranch.setCharPref(PREF_SEARCH_URL, originalURL);
-    Services.prefs.clearUserPref(BROWSER_SEARCH_PREF + PREF_SEARCH_URL);
+    Services.prefs.clearUserPref(SearchUtils.BROWSER_SEARCH_PREF + PREF_SEARCH_URL);
     Services.prefs.clearUserPref("browser.search.geoip.url");
   }
 }
@@ -368,7 +370,7 @@ function checkRequest(requests, cohort = "") {
  *        {
  *          name: Engine name, used to wait for it to be loaded.
  *          xmlFileName: Name of the XML file in the "data" folder.
- *          details: Array containing the parameters of addEngineWithDetails,
+ *          details: Object containing the parameters of addEngineWithDetails,
  *                   except for the engine name.  Alternative to xmlFileName.
  *        }
  */
@@ -401,7 +403,7 @@ var addTestEngines = async function(aItems) {
       if (item.xmlFileName) {
         Services.search.addEngine(gDataUrl + item.xmlFileName, null, false);
       } else {
-        Services.search.addEngineWithDetails(item.name, ...item.details);
+        Services.search.addEngineWithDetails(item.name, item.details);
       }
     });
   }
@@ -463,21 +465,18 @@ function checkCountryResultTelemetry(aExpectedValue) {
  * Provides a basic set of remote settings for use in tests.
  */
 async function setupRemoteSettings() {
-  const collection = await RemoteSettings("hijack-blocklists").openCollection();
-  await collection.clear();
-  await collection.create({
-    "id": "submission-urls",
-    "matches": [
-      "ignore=true",
-    ],
-  }, { synced: true });
-  await collection.create({
-    "id": "load-paths",
-    "matches": [
+  const settings = await RemoteSettings("hijack-blocklists");
+  sinon.stub(settings, "get").returns([{
+    id: "load-paths",
+    matches: [
       "[other]addEngineWithDetails:searchignore@mozilla.com",
     ],
-  }, { synced: true });
-  await collection.db.saveLastModified(42);
+    _status: "synced",
+  }, {
+    id: "submission-urls",
+    matches: ["ignore=true"],
+    _status: "synced",
+  }]);
 }
 
 /**

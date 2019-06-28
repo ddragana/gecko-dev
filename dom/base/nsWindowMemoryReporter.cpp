@@ -332,6 +332,9 @@ static void CollectWindowReports(nsGlobalWindowInner* aWindow,
   REPORT_SIZE("/layout/style-sheets", mLayoutStyleSheetsSize,
               "Memory used by document style sheets within a window.");
 
+  REPORT_SIZE("/layout/svg-mapped-declarations", mLayoutSvgMappedDeclarations,
+              "Memory used by mapped declarations of SVG elements");
+
   REPORT_SIZE("/layout/shadow-dom/style-sheets",
               mLayoutShadowDomStyleSheetsSize,
               "Memory used by Shadow DOM style sheets within a window.");
@@ -345,6 +348,11 @@ static void CollectWindowReports(nsGlobalWindowInner* aWindow,
               "Memory used by layout's PresShell, along with any structures "
               "allocated in its arena and not measured elsewhere, "
               "within a window.");
+
+  REPORT_SIZE("/layout/display-list", mLayoutRetainedDisplayListSize,
+              "Memory used by the retained display list data, "
+              "along with any structures allocated in its arena and not "
+              "measured elsewhere, within a window.");
 
   REPORT_SIZE("/layout/style-sets/stylist/rule-tree",
               mLayoutStyleSetsStylistRuleTree,
@@ -416,12 +424,6 @@ static void CollectWindowReports(nsGlobalWindowInner* aWindow,
   REPORT_SIZE("/layout/line-boxes", mArenaSizes.mLineBoxes,
               "Memory used by line boxes within a window.");
 
-  REPORT_SIZE("/layout/rule-nodes", mArenaSizes.mRuleNodes,
-              "Memory used by CSS rule nodes within a window.");
-
-  REPORT_SIZE("/layout/style-contexts", mArenaSizes.mComputedStyles,
-              "Memory used by ComputedStyles within a window.");
-
   // There are many different kinds of style structs, but it is likely that
   // only a few matter. Implement a cutoff so we don't bloat about:memory with
   // many uninteresting entries.
@@ -448,7 +450,7 @@ static void CollectWindowReports(nsGlobalWindowInner* aWindow,
     aWindowTotalSizes->mArenaSizes.NS_ARENA_SIZES_FIELD(classname) += size; \
   }
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef FRAME_ID
 #undef ABSTRACT_FRAME_ID
 
@@ -645,19 +647,11 @@ nsWindowMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
          windowTotalSizes.mArenaSizes.mLineBoxes,
          "This is the sum of all windows' 'layout/line-boxes' numbers.");
 
-  REPORT("window-objects/layout/rule-nodes",
-         windowTotalSizes.mArenaSizes.mRuleNodes,
-         "This is the sum of all windows' 'layout/rule-nodes' numbers.");
-
-  REPORT("window-objects/layout/style-contexts",
-         windowTotalSizes.mArenaSizes.mComputedStyles,
-         "This is the sum of all windows' 'layout/style-contexts' numbers.");
-
   size_t frameTotal = 0;
 #define FRAME_ID(classname, ...) \
   frameTotal += windowTotalSizes.mArenaSizes.NS_ARENA_SIZES_FIELD(classname);
 #define ABSTRACT_FRAME_ID(...)
-#include "nsFrameIdList.h"
+#include "mozilla/FrameIdList.h"
 #undef FRAME_ID
 #undef ABSTRACT_FRAME_ID
 

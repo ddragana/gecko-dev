@@ -162,7 +162,7 @@ class UrlbarController {
       }
       // The first time we receive results try to connect to the heuristic
       // result.
-      this.speculativeConnect(queryContext, 0, "resultsadded");
+      this.speculativeConnect(queryContext.results[0], queryContext, "resultsadded");
     }
 
     this._notify("onQueryResults", queryContext);
@@ -285,17 +285,13 @@ class UrlbarController {
         event.preventDefault();
         break;
       case KeyEvent.DOM_VK_RETURN:
-        if (isMac &&
-            event.metaKey) {
-          // Prevent beep on Mac.
-          event.preventDefault();
-        }
         if (executeAction) {
           this.input.handleCommand(event);
         }
+        event.preventDefault();
         break;
       case KeyEvent.DOM_VK_TAB:
-        if (this.view.isOpen) {
+        if (this.view.isOpen && !event.ctrlKey && !event.altKey) {
           if (executeAction) {
             this.userSelectionBehavior = "tab";
             this.view.selectBy(1, { reverse: event.shiftKey });
@@ -356,20 +352,19 @@ class UrlbarController {
   /**
    * Tries to initialize a speculative connection on a result.
    * Speculative connections are only supported for a subset of all the results.
+   * @param {UrlbarResult} result Tthe result to speculative connect to.
    * @param {UrlbarQueryContext} context The queryContext
-   * @param {number} resultIndex index of the result to speculative connect to.
    * @param {string} reason Reason for the speculative connect request.
    * @note speculative connect to:
    *  - Search engine heuristic results
    *  - autofill results
    *  - http/https results
    */
-  speculativeConnect(context, resultIndex, reason) {
+  speculativeConnect(result, context, reason) {
     // Never speculative connect in private contexts.
     if (!this.input || context.isPrivate || context.results.length == 0) {
       return;
     }
-    let result = context.results[resultIndex];
     let {url} = UrlbarUtils.getUrlFromResult(result);
     if (!url) {
       return;
@@ -378,7 +373,7 @@ class UrlbarController {
     switch (reason) {
       case "resultsadded": {
         // We should connect to an heuristic result, if it exists.
-        if ((resultIndex == 0 && context.preselected) || result.autofill) {
+        if ((result == context.results[0] && context.preselected) || result.autofill) {
           if (result.type == UrlbarUtils.RESULT_TYPE.SEARCH) {
             // Speculative connect only if search suggestions are enabled.
             if (UrlbarPrefs.get("suggest.searches") &&
@@ -426,19 +421,17 @@ class UrlbarController {
    *
    * @param {Event} event
    *   The event which triggered the result to be selected.
-   * @param {number} resultIndex
-   *   The index of the result.
+   * @param {UrlbarResult} result
+   *   The selected result.
    */
-  recordSelectedResult(event, resultIndex) {
-    let result;
+  recordSelectedResult(event, result) {
+    let resultIndex = result ? result.uiIndex : -1;
     let selectedResult = -1;
-
     if (resultIndex >= 0) {
-      result = this.view.getResult(resultIndex);
       // Except for the history popup, the urlbar always has a selection.  The
       // first result at index 0 is the "heuristic" result that indicates what
       // will happen when you press the Enter key.  Treat it as no selection.
-      selectedResult = resultIndex > 0 || !result.heuristic ? resultIndex : -1;
+      selectedResult = (resultIndex > 0 || !result.heuristic) ? resultIndex : -1;
     }
     BrowserUsageTelemetry.recordUrlbarSelectedResultMethod(
       event, selectedResult, this._userSelectionBehavior);

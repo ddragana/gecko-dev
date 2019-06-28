@@ -118,7 +118,7 @@ class CycleCollectedJSContext
                                         JS::HandleObject aIncumbentGlobal,
                                         void* aData);
   static void PromiseRejectionTrackerCallback(
-      JSContext* aCx, JS::HandleObject aPromise,
+      JSContext* aCx, bool aMutedErrors, JS::HandleObject aPromise,
       JS::PromiseRejectionHandlingState state, void* aData);
 
   void AfterProcessMicrotasks();
@@ -298,6 +298,10 @@ class CycleCollectedJSContext
 
   std::queue<RefPtr<MicroTaskRunnable>> mPendingMicroTaskRunnables;
   std::queue<RefPtr<MicroTaskRunnable>> mDebuggerMicroTaskQueue;
+
+  // How many times the debugger has interrupted execution, possibly creating
+  // microtask checkpoints in places that they would not normally occur.
+  uint32_t mDebuggerRecursionDepth;
 
   uint32_t mMicroTaskRecursionDepth;
 

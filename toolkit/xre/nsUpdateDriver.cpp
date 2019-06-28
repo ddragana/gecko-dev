@@ -31,6 +31,7 @@
 #include "mozilla/Services.h"
 
 #ifdef XP_MACOSX
+#  include <sys/xattr.h>
 #  include "nsILocalFileMac.h"
 #  include "nsCommandLineServiceMac.h"
 #  include "MacLaunchHelper.h"
@@ -57,6 +58,7 @@ using namespace mozilla;
 
 static LazyLogModule sUpdateLog("updatedriver");
 #define LOG(args) MOZ_LOG(sUpdateLog, mozilla::LogLevel::Debug, args)
+#define LOG_ENABLED() MOZ_LOG_TEST(sUpdateLog, mozilla::LogLevel::Debug)
 
 #ifdef XP_WIN
 #  define UPDATER_BIN "updater.exe"
@@ -296,6 +298,11 @@ static bool CopyFileIntoUpdateDir(nsIFile* parentDir, const nsACString& leaf,
   if (NS_FAILED(rv)) return false;
   file->Remove(true);
 
+  // Destination path
+  nsCString targetFilePath;
+  rv = file->GetNativePath(targetFilePath);
+  if (NS_FAILED(rv)) return false;
+
   // Now, copy into the target location.
   rv = parentDir->Clone(getter_AddRefs(file));
   if (NS_FAILED(rv)) return false;
@@ -303,6 +310,26 @@ static bool CopyFileIntoUpdateDir(nsIFile* parentDir, const nsACString& leaf,
   if (NS_FAILED(rv)) return false;
   rv = file->CopyToNative(updateDir, EmptyCString());
   if (NS_FAILED(rv)) return false;
+
+  // Remove the quarantine attribute. Starting with macOS 10.15, if the
+  // updater is quarantined, it will trigger a GateKeeper dialog when
+  // launched and fail to run. Firefox is configured to quarantine all
+  // written files by default.
+  int remove_rv = removexattr(targetFilePath.get(), "com.apple.quarantine", 0);
+  LOG(("Removing quarantine from %s: rv = %d", targetFilePath.get(),
+       remove_rv));
+
+  // Log quarantine status
+  if (LOG_ENABLED()) {
+    bool isQuarantined;
+    // getxattr returns -1 on error or, on success, the size of the value
+    // associated with the attribute. The com.apple.quarantine attribute
+    // can be set with a zero-length value so check for >= 0.
+    isQuarantined = (getxattr(targetFilePath.get(), "com.apple.quarantine",
+                              nullptr, 0, 0, 0) >= 0);
+    LOG(("Destination file %s is%s quarantined", targetFilePath.get(),
+         isQuarantined ? "" : " not"));
+  }
 
   return true;
 }
@@ -744,19 +771,6 @@ nsresult ProcessUpdates(nsIFile* greDir, nsIFile* appDir, nsIFile* updRootDir,
   nsCOMPtr<nsIFile> statusFile;
   UpdateStatus status = GetUpdateStatus(updatesDir, statusFile);
   switch (status) {
-    case ePendingElevate: {
-      if (NS_IsMainThread()) {
-        // Only do this if we're called from the main thread.
-        nsCOMPtr<nsIUpdatePrompt> up =
-            do_GetService("@mozilla.org/updates/update-prompt;1");
-        if (up) {
-          up->ShowUpdateElevationRequired();
-        }
-        break;
-      }
-      // Intentional fallthrough to ePendingUpdate and ePendingService.
-      MOZ_FALLTHROUGH;
-    }
     case ePendingUpdate:
     case ePendingService: {
       ApplyUpdate(greDir, updatesDir, appDir, argc, argv, restart, false, pid);
@@ -768,6 +782,9 @@ nsresult ProcessUpdates(nsIFile* greDir, nsIFile* appDir, nsIFile* updRootDir,
       // application is used.
       ApplyUpdate(greDir, updatesDir, appDir, argc, argv, restart, true, pid);
       break;
+    case ePendingElevate:
+      // No action should be performed since the user hasn't opted into
+      // elevating for the update so continue application startup.
     case eNoUpdateAction:
       // We don't need to do any special processing here, we'll just continue to
       // startup the application.

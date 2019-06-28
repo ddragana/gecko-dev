@@ -50,10 +50,10 @@ add_test(function test_sockets() {
     .getService(Ci.nsISocketTransportService);
   let threadManager = Cc["@mozilla.org/thread-manager;1"].getService();
 
-  let transport = sts.createTransport(null, 0, "127.0.0.1",
+  let transport = sts.createTransport([], "127.0.0.1",
                                       gServerSocket.port, null);
   let listener = {
-    onTransportStatus: function(aTransport, aStatus, aProgress, aProgressMax) {
+    onTransportStatus(aTransport, aStatus, aProgress, aProgressMax) {
       if (aStatus == Ci.nsISocketTransport.STATUS_CONNECTED_TO) {
         gDashboard.requestSockets(function(data) {
           gServerSocket.close();
@@ -85,7 +85,7 @@ function run_test() {
   gHttpServer.start(-1);
 
   let uri = ioService.newURI("http://localhost:" + gHttpServer.identity.primaryPort);
-  let channel = NetUtil.newChannel({uri: uri, loadUsingSystemPrincipal: true});
+  let channel = NetUtil.newChannel({uri, loadUsingSystemPrincipal: true});
 
   channel.open();
 

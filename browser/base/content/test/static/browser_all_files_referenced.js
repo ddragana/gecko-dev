@@ -140,15 +140,10 @@ var whitelist = [
   // Bug 1348533
   {file: "chrome://mozapps/skin/downloads/buttons.png", platforms: ["macosx"]},
   {file: "chrome://mozapps/skin/downloads/downloadButtons.png", platforms: ["linux", "win"]},
-  // Bug 1348558
-  {file: "chrome://mozapps/skin/update/downloadButtons.png",
-   platforms: ["linux"]},
   // Bug 1348559
   {file: "chrome://pippki/content/resetpassword.xul"},
   // Bug 1337345
   {file: "resource://gre/modules/Manifest.jsm"},
-  // Bug 1548381
-  {file: "resource://gre/modules/PasswordGenerator.jsm"},
   // Bug 1351097
   {file: "resource://gre/modules/accessibility/AccessFu.jsm"},
   // Bug 1356043
@@ -174,6 +169,9 @@ var whitelist = [
    platforms: ["linux", "win"]},
   // Referenced by the webcompat system addon for localization
   {file: "resource://gre/localization/en-US/toolkit/about/aboutCompat.ftl"},
+
+  // Bug 1559554
+  {file: "chrome://browser/content/aboutlogins/aboutLoginsUtils.js"},
 ];
 
 if (!AppConstants.MOZ_NEW_NOTIFICATION_STORE) {
@@ -705,7 +703,7 @@ add_task(async function checkAllTheFiles() {
   }
 
   if (isDevtools) {
-    // chrome://devtools/skin/devtools-browser.css is included from browser.xul
+    // chrome://devtools/skin/devtools-browser.css is included from browser.xhtml
     gReferencesFromCode.set(AppConstants.BROWSER_CHROME_URL, null);
     // devtools' css is currently included from browser.css, see bug 1204810.
     gReferencesFromCode.set("chrome://browser/skin/browser.css", null);

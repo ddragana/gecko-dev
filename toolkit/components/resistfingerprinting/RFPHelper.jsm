@@ -247,7 +247,7 @@ class _RFPHelper {
     let navigatorBundle = Services.strings.createBundle(
       "chrome://browser/locale/browser.properties");
     let message = navigatorBundle.formatStringFromName(
-      "privacy.spoof_english", [brandShortName], 1);
+      "privacy.spoof_english", [brandShortName]);
     let response = Services.prompt.confirmEx(
       null, "", message, flags, null, null, null, null, {value: false});
 
@@ -370,11 +370,20 @@ class _RFPHelper {
         let containerWidth = browserContainer.clientWidth;
         let containerHeight = browserContainer.clientHeight;
 
+        // If the findbar or devtools are out, we need to subtract their height (plus 1
+        // for the separator) from the container height, because we need to adjust our
+        // letterboxing to account for it; however it is not included in that dimension
+        // (but rather is subtracted from the content height.)
+        let findBar = win.gFindBarInitialized ? win.gFindBar : undefined;
+        let findBarOffset = (findBar && !findBar.hidden) ? findBar.clientHeight + 1 : 0;
+        let devtools = browserContainer.getElementsByClassName("devtools-toolbox-bottom-iframe");
+        let devtoolsOffset = devtools.length ? devtools[0].clientHeight : 0;
+
         return {
           contentWidth,
           contentHeight,
           containerWidth,
-          containerHeight,
+          containerHeight: containerHeight - findBarOffset - devtoolsOffset,
         };
       });
 

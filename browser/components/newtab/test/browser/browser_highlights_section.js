@@ -31,7 +31,7 @@ test_highlights(
     is(found, 2, "there should be 2 highlights cards");
 
     found = content.document.querySelectorAll(".section-list .placeholder").length;
-    is(found, 6, "there should be 2 rows * 4 - 2 = 6 highlights placeholder");
+    is(found, 2, "there should be 1 row * 4 - 2 = 2 highlights placeholder");
 
     found = content.document.querySelectorAll(".card-context-icon.icon-bookmark-added").length;
     is(found, 2, "there should be 2 bookmark icons");
@@ -61,7 +61,7 @@ test_highlights(
     const contextMenu = content.document.querySelector(".card-outer .context-menu");
     ok(contextMenu && !contextMenu.hidden, "Should find a visible context menu");
 
-    const removeBookmarkBtn = contextMenu.querySelector("a .icon-bookmark-added");
+    const removeBookmarkBtn = contextMenu.querySelector("button .icon-bookmark-added");
     removeBookmarkBtn.click();
 
     await ContentTaskUtils.waitForCondition(() => content.document.querySelectorAll(".card-context-icon.icon-bookmark-added").length === 0,

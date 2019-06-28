@@ -14,6 +14,7 @@
 #include "mozilla/Variant.h"
 
 #include <stddef.h>
+#include <utility>
 
 #include "gc/Barrier.h"
 #include "gc/NurseryAwareHashMap.h"
@@ -33,7 +34,7 @@ namespace js {
 // (objects, scripts, etc.) to their representative objects in the Debugger API.
 class CrossCompartmentKey {
  public:
-  // [SMDOC]: Cross-compartment wrapper map entries for Debugger API objects
+  // [SMDOC] Cross-compartment wrapper map entries for Debugger API objects
   //
   // The Debugger API creates objects like Debugger.Object, Debugger.Script,
   // Debugger.Environment, etc. to refer to things in the debuggee. Each
@@ -67,6 +68,14 @@ class CrossCompartmentKey {
   // 3) the specific type of Mumble we're looking for. Since mozilla::Variant
   // distinguishes alternatives by type only, we include a distinct type in
   // WrappedType for each sort of Debugger.Mumble.
+  //
+  // But Debugger wrapper table entries are more than just wrapper entries with
+  // fancy keys. Whereas an ordinary cross-compartment wrapper ensures that the
+  // wrapper's zone is swept no later than the referent's (but possibly
+  // earlier), a debugger cross-compartment entry forces the debuggee's and
+  // debugger's zones to be swept together: they are placed in the same sweep
+  // group. This is necessary to make some of Debugger's nice GC properties work
+  // out.
 
   // Common structure for all Debugger.Mumble keys.
   template <typename Referent>
@@ -108,10 +117,25 @@ class CrossCompartmentKey {
         : Debuggee(debugger, referent) {}
   };
 
+  // Key under which we find debugger's Debugger.Frame for the generator call
+  // whose AbstractGeneratorObject is referent.
+  struct DebuggeeFrameGenerator : Debuggee<NativeObject> {
+    DebuggeeFrameGenerator(NativeObject* debugger, NativeObject* referent)
+        : Debuggee(debugger, referent) {}
+  };
+
+  // Key under which we find debugger's Debugger.Frame for the generator call
+  // whose AbstractGeneratorObject is referent.
+  struct DebuggeeFrameGeneratorScript : Debuggee<JSScript> {
+    DebuggeeFrameGeneratorScript(NativeObject* debugger, JSScript* referent)
+        : Debuggee(debugger, referent) {}
+  };
+
   using WrappedType =
       mozilla::Variant<JSObject*, JSString*, DebuggeeObject, DebuggeeJSScript,
                        DebuggeeWasmScript, DebuggeeLazyScript,
-                       DebuggeeEnvironment, DebuggeeSource>;
+                       DebuggeeEnvironment, DebuggeeSource,
+                       DebuggeeFrameGenerator, DebuggeeFrameGeneratorScript>;
 
   explicit CrossCompartmentKey(JSObject* obj) : wrapped(obj) {
     MOZ_RELEASE_ASSERT(obj);
@@ -126,10 +150,18 @@ class CrossCompartmentKey {
   // For most debuggee keys, we must let the caller choose the key type
   // themselves. But for JSScript and LazyScript, there is only one key type
   // that makes sense, so we provide an overloaded constructor.
-  explicit CrossCompartmentKey(DebuggeeObject&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeSource&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeEnvironment&& key) : wrapped(key) {}
-  explicit CrossCompartmentKey(DebuggeeWasmScript&& key) : wrapped(key) {}
+  explicit CrossCompartmentKey(DebuggeeObject&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeSource&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeEnvironment&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeWasmScript&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeFrameGenerator&& key)
+      : wrapped(std::move(key)) {}
+  explicit CrossCompartmentKey(DebuggeeFrameGeneratorScript&& key)
+      : wrapped(std::move(key)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, JSScript* referent)
       : wrapped(DebuggeeJSScript(debugger, referent)) {}
   explicit CrossCompartmentKey(NativeObject* debugger, LazyScript* referent)
@@ -579,6 +611,11 @@ class JS::Compartment {
   }
 
   void removeWrapper(js::WrapperMap::Ptr p) {
+    crossCompartmentWrappers.remove(p);
+  }
+
+  void removeWrapper(const js::CrossCompartmentKey& key) {
+    js::WrapperMap::Ptr p = crossCompartmentWrappers.lookup(key);
     crossCompartmentWrappers.remove(p);
   }
 

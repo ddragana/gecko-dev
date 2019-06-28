@@ -50,16 +50,12 @@ extern mozilla::LazyLogModule gUserInteractionPRLog;
 
 static LazyLogModule gBrowsingContextLog("BrowsingContext");
 
-template <template <typename> class PtrType>
-using BrowsingContextMap =
-    HashMap<uint64_t, PtrType<BrowsingContext>, DefaultHasher<uint64_t>,
-            InfallibleAllocPolicy>;
+typedef nsDataHashtable<nsUint64HashKey, BrowsingContext*> BrowsingContextMap;
 
-static StaticAutoPtr<BrowsingContextMap<WeakPtr>> sBrowsingContexts;
+static StaticAutoPtr<BrowsingContextMap> sBrowsingContexts;
 
 static void Register(BrowsingContext* aBrowsingContext) {
-  MOZ_ALWAYS_TRUE(
-      sBrowsingContexts->putNew(aBrowsingContext->Id(), aBrowsingContext));
+  sBrowsingContexts->Put(aBrowsingContext->Id(), aBrowsingContext);
 
   aBrowsingContext->Group()->Register(aBrowsingContext);
 }
@@ -75,7 +71,7 @@ BrowsingContext* BrowsingContext::Top() {
 /* static */
 void BrowsingContext::Init() {
   if (!sBrowsingContexts) {
-    sBrowsingContexts = new BrowsingContextMap<WeakPtr>();
+    sBrowsingContexts = new BrowsingContextMap();
     ClearOnShutdown(&sBrowsingContexts);
   }
 }
@@ -85,11 +81,7 @@ LogModule* BrowsingContext::GetLog() { return gBrowsingContextLog; }
 
 /* static */
 already_AddRefed<BrowsingContext> BrowsingContext::Get(uint64_t aId) {
-  if (BrowsingContextMap<WeakPtr>::Ptr abc = sBrowsingContexts->lookup(aId)) {
-    return do_AddRef(abc->value().get());
-  }
-
-  return nullptr;
+  return do_AddRef(sBrowsingContexts->Get(aId));
 }
 
 CanonicalBrowsingContext* BrowsingContext::Canonical() {
@@ -124,11 +116,13 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
   // using transactions to set them, as we haven't been attached yet.
   context->mName = aName;
   context->mOpenerId = aOpener ? aOpener->Id() : 0;
+  context->mCrossOriginPolicy = nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
+  context->mInheritedCrossOriginPolicy = nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
 
   BrowsingContext* inherit = aParent ? aParent : aOpener;
   if (inherit) {
     context->mOpenerPolicy = inherit->mOpenerPolicy;
-    context->mCrossOriginPolicy = inherit->mCrossOriginPolicy;
+    context->mInheritedCrossOriginPolicy = inherit->mCrossOriginPolicy;
   }
 
   Register(context);
@@ -319,6 +313,26 @@ void BrowsingContext::Detach(bool aFromIPC) {
   }
 }
 
+void BrowsingContext::PrepareForProcessChange() {
+  MOZ_LOG(GetLog(), LogLevel::Debug,
+          ("%s: Preparing 0x%08" PRIx64 " for a process change",
+           XRE_IsParentProcess() ? "Parent" : "Child", Id()));
+
+  MOZ_ASSERT(mIsInProcess, "Must currently be an in-process frame");
+  MOZ_ASSERT(!mClosed, "We're already closed?");
+
+  mIsInProcess = false;
+
+  // XXX: We should transplant our WindowProxy into a Cross-Process WindowProxy
+  // if mWindowProxy is non-nullptr. (bug 1510760)
+  mWindowProxy = nullptr;
+
+  // NOTE: For now, clear our nsDocShell reference, as we're primarily in a
+  // different process now. This may need to change in the future with
+  // Cross-Process BFCache.
+  mDocShell = nullptr;
+}
+
 void BrowsingContext::CacheChildren(bool aFromIPC) {
   MOZ_LOG(GetLog(), LogLevel::Debug,
           ("%s: Caching children of 0x%08" PRIx64 "",
@@ -349,19 +363,14 @@ void BrowsingContext::RestoreChildren(Children&& aChildren, bool aFromIPC) {
   if (!aFromIPC && XRE_IsContentProcess()) {
     auto cc = ContentChild::GetSingleton();
     MOZ_DIAGNOSTIC_ASSERT(cc);
-
-    nsTArray<BrowsingContextId> contexts(aChildren.Length());
-    for (BrowsingContext* child : aChildren) {
-      contexts.AppendElement(child->Id());
-    }
-    cc->SendRestoreBrowsingContextChildren(this, contexts);
+    cc->SendRestoreBrowsingContextChildren(this, aChildren);
   }
 }
 
 bool BrowsingContext::IsCached() { return Group()->IsContextCached(this); }
 
 bool BrowsingContext::HasOpener() const {
-  return sBrowsingContexts->has(mOpenerId);
+  return sBrowsingContexts->Contains(mOpenerId);
 }
 
 void BrowsingContext::GetChildren(Children& aChildren) {
@@ -528,7 +537,7 @@ BrowsingContext::~BrowsingContext() {
   MOZ_DIAGNOSTIC_ASSERT(!mGroup || !mGroup->IsContextCached(this));
 
   if (sBrowsingContexts) {
-    sBrowsingContexts->remove(Id());
+    sBrowsingContexts->Remove(Id());
   }
 }
 
@@ -569,6 +578,10 @@ bool BrowsingContext::GetUserGestureActivation() {
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowsingContext)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(BrowsingContext)
+  if (sBrowsingContexts) {
+    sBrowsingContexts->Remove(tmp->Id());
+  }
+
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocShell, mChildren, mParent, mGroup,
                                   mEmbedderElement)
   if (XRE_IsParentProcess()) {
@@ -814,9 +827,7 @@ void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext,
 }
 
 BrowsingContext::IPCInitializer BrowsingContext::GetIPCInitializer() {
-  MOZ_ASSERT(
-      !mozilla::Preferences::GetBool("fission.preserve_browsing_contexts", false) ||
-      IsContent());
+  // FIXME: We should assert that we're loaded in-content here. (bug 1553804)
 
   IPCInitializer init;
   init.mId = Id();
@@ -889,7 +900,7 @@ void BrowsingContext::DidSetIsActivatedByUserGesture(ContentParent* aSource) {
 
 namespace ipc {
 
-void IPDLParamTraits<dom::BrowsingContext>::Write(
+void IPDLParamTraits<dom::BrowsingContext*>::Write(
     IPC::Message* aMsg, IProtocol* aActor, dom::BrowsingContext* aParam) {
   uint64_t id = aParam ? aParam->Id() : 0;
   WriteIPDLParam(aMsg, aActor, id);
@@ -902,7 +913,7 @@ void IPDLParamTraits<dom::BrowsingContext>::Write(
   }
 }
 
-bool IPDLParamTraits<dom::BrowsingContext>::Read(
+bool IPDLParamTraits<dom::BrowsingContext*>::Read(
     const IPC::Message* aMsg, PickleIterator* aIter, IProtocol* aActor,
     RefPtr<dom::BrowsingContext>* aResult) {
   uint64_t id = 0;

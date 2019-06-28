@@ -4,7 +4,7 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = ["RemoteAgent"];
+var EXPORTED_SYMBOLS = ["RemoteAgent", "RemoteAgentFactory"];
 
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -63,7 +63,9 @@ class RemoteAgentClass {
       this.server.registerPathHandler(target.path, target);
     });
     this.targets.on("disconnect", (eventName, target) => {
-      // TODO(ato): removing a handler is currently not possible
+      // TODO: This removes the entry added by registerPathHandler, should rather expose
+      // an unregisterPathHandler method on nsHttpServer.
+      delete this.server._handler._overridePaths[target.path];
     });
   }
 
@@ -217,3 +219,8 @@ class RemoteAgentClass {
 }
 
 var RemoteAgent = new RemoteAgentClass();
+
+// This is used by the XPCOM codepath which expects a constructor
+var RemoteAgentFactory = function() {
+  return RemoteAgent;
+};

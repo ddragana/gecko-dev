@@ -4,6 +4,9 @@
 ChromeUtils.import("resource://gre/modules/CanonicalJSON.jsm", this);
 ChromeUtils.import("resource://gre/modules/osfile.jsm", this);
 ChromeUtils.import("resource://normandy/lib/NormandyApi.jsm", this);
+ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm", this);
+
+Cu.importGlobalProperties(["fetch"]);
 
 load("utils.js"); /* globals withMockApiServer, MockResponse, withScriptServer, withServer, makeMockApiServer */
 
@@ -11,14 +14,14 @@ add_task(withMockApiServer(async function test_get(serverUrl) {
   // Test that NormandyApi can fetch from the test server.
   const response = await NormandyApi.get(`${serverUrl}/api/v1/`);
   const data = await response.json();
-  equal(data["recipe-list"], "/api/v1/recipe/", "Expected data in response");
+  equal(data["recipe-signed"], "/api/v1/recipe/signed/", "Expected data in response");
 }));
 
 add_task(withMockApiServer(async function test_getApiUrl(serverUrl) {
   const apiBase = `${serverUrl}/api/v1`;
   // Test that NormandyApi can use the self-describing API's index
-  const recipeListUrl = await NormandyApi.getApiUrl("action-list");
-  equal(recipeListUrl, `${apiBase}/action/`, "Can retrieve action-list URL from API");
+  const recipeListUrl = await NormandyApi.getApiUrl("extension-list");
+  equal(recipeListUrl, `${apiBase}/extension/`, "Can retrieve extension-list URL from API");
 }));
 
 add_task(withMockApiServer(async function test_getApiUrlSlashes(serverUrl, preferences) {
@@ -134,16 +137,6 @@ add_task(withMockApiServer(async function test_classifyClient() {
   });
 }));
 
-add_task(withMockApiServer(async function test_fetchActions() {
-  const actions = await NormandyApi.fetchActions();
-  equal(actions.length, 4);
-  const actionNames = actions.map(a => a.name);
-  ok(actionNames.includes("console-log"));
-  ok(actionNames.includes("opt-out-study"));
-  ok(actionNames.includes("show-heartbeat"));
-  ok(actionNames.includes("preference-experiment"));
-}));
-
 add_task(withMockApiServer(async function test_fetchExtensionDetails() {
   const extensionDetails = await NormandyApi.fetchExtensionDetails(1);
   deepEqual(extensionDetails, {
@@ -184,30 +177,41 @@ add_task(withScriptServer("query_server.sjs", async function test_postData(serve
   );
 }));
 
-add_task(withMockApiServer(async function test_fetchImplementation_itWorksWithRealData() {
-  const [action] = await NormandyApi.fetchActions();
-  const implementation = await NormandyApi.fetchImplementation(action);
+// Test that no credentials are sent, even if the cookie store contains them.
+add_task(withScriptServer("cookie_server.sjs", async function test_sendsNoCredentials(serverUrl) {
+  // This test uses cookie_server.sjs, which responds to all requests with a
+  // response that sets a cookie.
 
-  const decoder = new TextDecoder();
-  const relativePath = `mock_api${action.implementation_url}`;
-  const file = do_get_file(relativePath);
-  const expected = decoder.decode(await OS.File.read(file.path));
+  // send a request, to store a cookie in the cookie store
+  await fetch(serverUrl);
 
-  equal(implementation, expected);
+  // A normal request should send that cookie
+  const cookieExpectedDeferred = PromiseUtils.defer();
+  function cookieExpectedObserver(aSubject, aTopic, aData) {
+    equal(aTopic, "http-on-modify-request", "Only the expected topic should be observed");
+    let httpChannel = aSubject.QueryInterface(Ci.nsIHttpChannel);
+    equal(httpChannel.getRequestHeader("Cookie"), "type=chocolate-chip", "The header should be sent");
+    Services.obs.removeObserver(cookieExpectedObserver, "http-on-modify-request");
+    cookieExpectedDeferred.resolve();
+  }
+  Services.obs.addObserver(cookieExpectedObserver, "http-on-modify-request");
+  await fetch(serverUrl);
+  await cookieExpectedDeferred.promise;
+
+  // A request through the NormandyApi method should not send that cookie
+  const cookieNotExpectedDeferred = PromiseUtils.defer();
+  function cookieNotExpectedObserver(aSubject, aTopic, aData) {
+    equal(aTopic, "http-on-modify-request", "Only the expected topic should be observed");
+    let httpChannel = aSubject.QueryInterface(Ci.nsIHttpChannel);
+    Assert.throws(
+      () => httpChannel.getRequestHeader("Cookie"),
+      /NS_ERROR_NOT_AVAILABLE/,
+      "The cookie header should not be sent"
+    );
+    Services.obs.removeObserver(cookieNotExpectedObserver, "http-on-modify-request");
+    cookieNotExpectedDeferred.resolve();
+  }
+  Services.obs.addObserver(cookieNotExpectedObserver, "http-on-modify-request");
+  await NormandyApi.get(serverUrl);
+  await cookieNotExpectedDeferred.promise;
 }));
-
-add_task(withScriptServer(
-  "echo_server.sjs",
-  async function test_fetchImplementationFail(serverUrl) {
-    const action = {
-      implementation_url: `${serverUrl}?status=500&body=servererror`,
-    };
-
-    try {
-      await NormandyApi.fetchImplementation(action);
-      ok(false, "fetchImplementation throws for non-200 response status codes");
-    } catch (err) {
-      // pass
-    }
-  },
-));

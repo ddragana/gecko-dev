@@ -65,6 +65,7 @@ class nsLookAndFeel final : public nsXPLookAndFeel {
   nscolor mButtonText = kBlack;
   nscolor mButtonHoverText = kBlack;
   nscolor mButtonHoverFace = kWhite;
+  nscolor mButtonActiveText = kBlack;
   nscolor mFrameOuterLightBorder = kBlack;
   nscolor mFrameInnerDarkBorder = kBlack;
   nscolor mOddCellBackground = kWhite;
@@ -94,6 +95,7 @@ class nsLookAndFeel final : public nsXPLookAndFeel {
   bool mCSDMinimizeButton = false;
   bool mCSDCloseButton = false;
   bool mCSDReversedPlacement = false;
+  bool mSystemUsesDarkTheme = false;
   bool mInitialized = false;
 
   void EnsureInit();

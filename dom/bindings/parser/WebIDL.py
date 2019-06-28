@@ -482,9 +482,6 @@ class IDLExposureMixins():
     def isExposedOnMainThread(self):
         return self.isExposedInWindow()
 
-    def isExposedOffMainThread(self):
-        return len(self.exposureSet - {'Window', 'FakeTestPrimaryGlobal'}) > 0
-
     def isExposedInAnyWorker(self):
         return len(self.getWorkerExposureSet()) > 0
 
@@ -1326,11 +1323,6 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
                     checkDuplicateNames(member, bindingAlias, "BindingAlias")
 
 
-        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
-            raise WebIDLError("[Pref] used on an interface that is not "
-                              "main-thread-only",
-                              [self.location])
-
         # Conditional exposure makes no sense for interfaces with no
         # interface object, unless they're navigator properties.
         # And SecureContext makes sense for interfaces with no interface object,
@@ -1809,7 +1801,9 @@ class IDLNamespace(IDLInterfaceOrNamespace):
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must not have arguments" % identifier,
                                       [attr.location])
-            elif identifier == "Pref" or identifier == "Func":
+            elif (identifier == "Pref" or
+                  identifier == "HeaderFile" or
+                  identifier == "Func"):
                 # Known extended attributes that take a string value
                 if not attr.hasValue():
                     raise WebIDLError("[%s] must have a value" % identifier,
@@ -3690,11 +3684,6 @@ class IDLInterfaceMember(IDLObjectWithIdentifier, IDLExposureMixins):
         IDLExposureMixins.finish(self, scope)
 
     def validate(self):
-        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
-            raise WebIDLError("[Pref] used on an interface member that is not "
-                              "main-thread-only",
-                              [self.location])
-
         if self.isAttr() or self.isMethod():
             if self.affects == "Everything" and self.dependsOn != "Everything":
                 raise WebIDLError("Interface member is flagged as affecting "
@@ -4578,7 +4567,9 @@ class IDLArgument(IDLObjectWithIdentifier):
             elif identifier == "TreatNonCallableAsNull":
                 self._allowTreatNonCallableAsNull = True
             elif (self.dictionaryMember and
-                  (identifier == "ChromeOnly" or identifier == "Func")):
+                  (identifier == "ChromeOnly" or
+                   identifier == "Func" or
+                   identifier == "Pref")):
                 if not self.optional:
                     raise WebIDLError("[%s] must not be used on a required "
                                       "dictionary member" % identifier,
@@ -5269,7 +5260,8 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
               identifier == "NeedsSubjectPrincipal" or
               identifier == "NeedsCallerType" or
               identifier == "StaticClassOverride" or
-              identifier == "NonEnumerable"):
+              identifier == "NonEnumerable" or
+              identifier == "Unexposed"):
             # Known attributes that we don't need to do anything with here
             pass
         else:

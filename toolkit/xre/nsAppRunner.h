@@ -57,6 +57,18 @@ nsresult AppInfoConstructor(nsISupports* aOuter, const nsID& aIID,
                             void** aResult);
 }  // namespace mozilla
 
+// Exported for gtests.
+void BuildCompatVersion(const char* aAppVersion, const char* aAppBuildID,
+                        const char* aToolkitBuildID, nsACString& aBuf);
+
+/**
+ * Compares the provided compatibility versions. Returns 0 if they match,
+ * < 0 if the new version is considered an upgrade from the old version and
+ * > 0 if the new version is considered a downgrade from the old version.
+ */
+int32_t CompareCompatVersions(const nsACString& aOldCompatVersion,
+                              const nsACString& aNewCompatVersion);
+
 /**
  * Create the nativeappsupport implementation.
  *

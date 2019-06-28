@@ -809,6 +809,7 @@ class SystemCairoClipper : public ClipExporter {
 
   void MoveTo(const Point& aPoint) override {
     cairo_move_to(mContext, aPoint.x / mScaleFactor, aPoint.y / mScaleFactor);
+    mBeginPoint = aPoint;
     mCurrentPoint = aPoint;
   }
 
@@ -842,15 +843,15 @@ class SystemCairoClipper : public ClipExporter {
                 aAntiClockwise);
   }
 
-  void Close() override { cairo_close_path(mContext); }
+  void Close() override {
+    cairo_close_path(mContext);
+    mCurrentPoint = mBeginPoint;
+  }
 
   void EndClip() override { cairo_clip(mContext); }
 
-  Point CurrentPoint() const override { return mCurrentPoint; }
-
  private:
   cairo_t* mContext;
-  Point mCurrentPoint;
   gint mScaleFactor;
 };
 
@@ -866,9 +867,8 @@ static void DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
   static auto sCairoSurfaceSetDeviceScalePtr =
       (void (*)(cairo_surface_t*, double, double))dlsym(
           RTLD_DEFAULT, "cairo_surface_set_device_scale");
-  // Support HiDPI widget styles on Wayland only for now.
-  bool useHiDPIWidgets = !isX11Display && (aScaleFactor != 1) &&
-                         (sCairoSurfaceSetDeviceScalePtr != nullptr);
+  bool useHiDPIWidgets =
+      (aScaleFactor != 1) && (sCairoSurfaceSetDeviceScalePtr != nullptr);
 
   Point drawOffsetScaled;
   Point drawOffsetOriginal;
@@ -1252,7 +1252,7 @@ bool nsNativeThemeGTK::CreateWebRenderCommandsForWidget(
       aBuilder.PushRect(
           bounds, bounds, true,
           wr::ToColorF(Color::FromABGR(LookAndFeel::GetColor(
-              LookAndFeel::eColorID_WindowBackground, NS_RGBA(0, 0, 0, 0)))));
+              LookAndFeel::ColorID::WindowBackground, NS_RGBA(0, 0, 0, 0)))));
       return true;
 
     default:
@@ -1596,8 +1596,9 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsPresContext* aPresContext,
     } break;
     case StyleAppearance::Checkbox:
     case StyleAppearance::Radio: {
-      const ToggleGTKMetrics* metrics =
-          GetToggleMetrics(aAppearance == StyleAppearance::Radio);
+      const ToggleGTKMetrics* metrics = GetToggleMetrics(
+          aAppearance == StyleAppearance::Radio ? MOZ_GTK_RADIOBUTTON
+                                                : MOZ_GTK_CHECKBUTTON);
       aResult->width = metrics->minSizeWithBorder.width;
       aResult->height = metrics->minSizeWithBorder.height;
     } break;

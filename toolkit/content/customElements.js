@@ -645,6 +645,7 @@ customElements.setElementCreationCallback("browser", () => {
 const isDummyDocument = document.documentURI == "chrome://extensions/content/dummy.xul";
 if (!isDummyDocument) {
   for (let script of [
+    "chrome://global/content/elements/dialog.js",
     "chrome://global/content/elements/general.js",
     "chrome://global/content/elements/button.js",
     "chrome://global/content/elements/checkbox.js",
@@ -659,6 +660,7 @@ if (!isDummyDocument) {
     "chrome://global/content/elements/textbox.js",
     "chrome://global/content/elements/tabbox.js",
     "chrome://global/content/elements/text.js",
+    "chrome://global/content/elements/toolbarbutton.js",
     "chrome://global/content/elements/tree.js",
     "chrome://global/content/elements/wizard.js",
   ]) {

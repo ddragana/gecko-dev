@@ -29,7 +29,7 @@ const BLACK_BOXED_URL = "http://example.com/blackboxme.js";
 const SOURCE_URL = "http://example.com/source.js";
 
 const testBlackBox = async function() {
-  const packet = await executeOnNextTickAndWaitForPause(evalCode, gClient);
+  const packet = await executeOnNextTickAndWaitForPause(evalCode, gThreadClient);
 
   const bpSource = await getSourceById(
     gThreadClient,
@@ -123,11 +123,12 @@ function evalCode() {
     "" + function runTest() { // line 1
       doStuff(                // line 2 - Break here
         function (n) {        // line 3 - Step through `doStuff` to here
-          debugger;           // line 4
-        }                     // line 5
-      );                      // line 6
-    } + "\n"                  // line 7
-    + "debugger;",            // line 8
+          (() => {})();       // line 4
+          debugger;           // line 5
+        }                     // line 6
+      );                      // line 7
+    } + "\n"                  // line 8
+    + "debugger;",            // line 9
     gDebuggee,
     "1.8",
     SOURCE_URL,
@@ -138,15 +139,15 @@ function evalCode() {
 
 const runTest = async function(onSteppedLocation, onDebuggerStatementFrames) {
   let packet = await executeOnNextTickAndWaitForPause(gDebuggee.runTest,
-                                                      gClient);
+                                                      gThreadClient);
   Assert.equal(packet.why.type, "breakpoint");
 
-  await stepIn(gClient, gThreadClient);
+  await stepIn(gThreadClient);
 
   const location = await getCurrentLocation();
   await onSteppedLocation(location);
 
-  packet = await resumeAndWaitForPause(gClient, gThreadClient);
+  packet = await resumeAndWaitForPause(gThreadClient);
   Assert.equal(packet.why.type, "debuggerStatement");
 
   const { frames } = await getFrames(gThreadClient, 0, 100);

@@ -20,6 +20,8 @@ class Page extends ContentProcessDomain {
 
   destructor() {
     this.disable();
+
+    super.destructor();
   }
 
   // commands
@@ -49,7 +51,7 @@ class Page extends ContentProcessDomain {
   }
 
   async navigate({url, referrer, transitionType, frameId} = {}) {
-    if (frameId) {
+    if (frameId && frameId != this.content.windowUtils.outerWindowID) {
       throw new UnsupportedError("frameId not supported");
     }
 

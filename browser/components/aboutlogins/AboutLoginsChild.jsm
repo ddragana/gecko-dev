@@ -8,8 +8,11 @@ var EXPORTED_SYMBOLS = ["AboutLoginsChild"];
 
 const {ActorChild} = ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
 const {LoginHelper} = ChromeUtils.import("resource://gre/modules/LoginHelper.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
 ChromeUtils.defineModuleGetter(this, "AppConstants",
                                "resource://gre/modules/AppConstants.jsm");
+const TELEMETRY_EVENT_CATEGORY = "pwmgr";
 
 class AboutLoginsChild extends ActorChild {
   handleEvent(event) {
@@ -31,12 +34,40 @@ class AboutLoginsChild extends ActorChild {
         });
         break;
       }
+      case "AboutLoginsCreateLogin": {
+        this.mm.sendAsyncMessage("AboutLogins:CreateLogin", {login: event.detail});
+        break;
+      }
       case "AboutLoginsDeleteLogin": {
         this.mm.sendAsyncMessage("AboutLogins:DeleteLogin", {login: event.detail});
         break;
       }
+      case "AboutLoginsOpenFeedback": {
+        this.mm.sendAsyncMessage("AboutLogins:OpenFeedback");
+        break;
+      }
+      case "AboutLoginsImport": {
+        this.mm.sendAsyncMessage("AboutLogins:Import");
+        break;
+      }
+      case "AboutLoginsOpenPreferences": {
+        this.mm.sendAsyncMessage("AboutLogins:OpenPreferences");
+        break;
+      }
       case "AboutLoginsOpenSite": {
         this.mm.sendAsyncMessage("AboutLogins:OpenSite", {login: event.detail});
+        break;
+      }
+      case "AboutLoginsRecordTelemetryEvent": {
+        let {method, object} = event.detail;
+        try {
+          Services.telemetry.recordEvent(
+            TELEMETRY_EVENT_CATEGORY,
+            method,
+            object);
+        } catch (ex) {
+          Cu.reportError("AboutLoginsChild: error recording telemetry event: " + ex.message);
+        }
         break;
       }
       case "AboutLoginsUpdateLogin": {

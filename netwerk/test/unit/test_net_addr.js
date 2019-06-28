@@ -30,7 +30,7 @@ function TestServer() {
 }
 
 TestServer.prototype = {
-  onSocketAccepted: function(socket, trans) {
+  onSocketAccepted(socket, trans) {
     info('server: got client connection');
 
     // one connection at a time.
@@ -56,12 +56,12 @@ TestServer.prototype = {
     this.reset();
   } ,
   
-  onStopListening: function(socket) {} ,
+  onStopListening(socket) {} ,
 
   /**
    * Called to close a connection and clean up properties.
    */
-  reset: function() {
+  reset() {
     if (this.input)
       try { this.input.close(); } catch(ignore) {}
     if (this.output)
@@ -77,7 +77,7 @@ TestServer.prototype = {
   /**
    * Cleanup for TestServer and this test case.
    */
-  stop: function() {
+  stop() {
     this.reset();
     try { this.listener.close(); } catch(ignore) {}
   }
@@ -166,7 +166,7 @@ function testIpv4() {
   };
   do_timeout(connectTimeout, function(){ serv.timeoutCallback('testIpv4'); });*/
 
-  testDataStore.transport = sts.createTransport(null, 0, '127.0.0.1', serv.port, null);
+  testDataStore.transport = sts.createTransport([], '127.0.0.1', serv.port, null);
   /*
    * Need to hold |output| so that the output stream doesn't close itself and
    * the associated connection.

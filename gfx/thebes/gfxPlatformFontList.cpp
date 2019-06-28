@@ -9,7 +9,6 @@
 #include "mozilla/intl/OSPreferences.h"
 
 #include "gfxPlatformFontList.h"
-#include "gfxPrefs.h"
 #include "gfxTextRun.h"
 #include "gfxUserFontSet.h"
 #include "SharedFontList-impl.h"
@@ -26,6 +25,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BlobImpl.h"
@@ -39,7 +39,6 @@
 #include "mozilla/Unused.h"
 
 #include "base/eintr_wrapper.h"
-#include "base/file_util.h"
 
 #include <locale.h>
 
@@ -419,7 +418,7 @@ nsresult gfxPlatformFontList::InitFontList() {
 
   // Try to initialize the cross-process shared font list if enabled by prefs,
   // but not if we're running in Safe Mode.
-  if (gfxPrefs::SharedFontList() && !gfxPlatform::InSafeMode()) {
+  if (StaticPrefs::gfx_e10s_font_list_shared() && !gfxPlatform::InSafeMode()) {
     for (auto i = mFontEntries.Iter(); !i.Done(); i.Next()) {
       i.Data()->mShmemCharacterMap = nullptr;
       i.Data()->mShmemFace = nullptr;
@@ -1756,8 +1755,8 @@ bool gfxPlatformFontList::LoadFontInfo() {
   uint32_t i, endIndex = mNumFamilies;
   fontlist::FontList* list = SharedFontList();
   bool loadCmaps =
-    !list && (!UsesSystemFallback() ||
-              gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback());
+      !list && (!UsesSystemFallback() ||
+                gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback());
 
   // for each font family, load in various font info
   for (i = mStartIndex; i < endIndex; i++) {

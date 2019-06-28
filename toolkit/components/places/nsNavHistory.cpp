@@ -2025,7 +2025,8 @@ nsNavHistory::RemoveObserver(nsINavHistoryObserver* aObserver) {
 }
 
 NS_IMETHODIMP
-nsNavHistory::GetObservers(nsTArray<RefPtr<nsINavHistoryObserver>>& aObservers) {
+nsNavHistory::GetObservers(
+    nsTArray<RefPtr<nsINavHistoryObserver>>& aObservers) {
   aObservers.Clear();
 
   // Clear any cached value, cause it's very likely the consumer has made
@@ -2300,13 +2301,14 @@ nsNavHistory::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   else if (strcmp(aTopic, TOPIC_IDLE_DAILY) == 0) {
-    (void)FixAndDecayFrecency();
+    (void)DecayFrecency();
   }
 
   return NS_OK;
 }
 
-nsresult nsNavHistory::FixAndDecayFrecency() {
+NS_IMETHODIMP
+nsNavHistory::DecayFrecency() {
   float decayRate =
       Preferences::GetFloat(PREF_FREC_DECAY_RATE, PREF_FREC_DECAY_RATE_DEF);
   if (decayRate > 1.0f) {
@@ -3287,11 +3289,10 @@ void nsNavHistory::GetAgeInDaysString(int32_t aInt, const char* aName,
                                       nsACString& aResult) {
   nsIStringBundle* bundle = GetBundle();
   if (bundle) {
-    nsAutoString intString;
-    intString.AppendInt(aInt);
-    const char16_t* strings[1] = {intString.get()};
+    AutoTArray<nsString, 1> strings;
+    strings.AppendElement()->AppendInt(aInt);
     nsAutoString value;
-    nsresult rv = bundle->FormatStringFromName(aName, strings, 1, value);
+    nsresult rv = bundle->FormatStringFromName(aName, strings, value);
     if (NS_SUCCEEDED(rv)) {
       CopyUTF16toUTF8(value, aResult);
       return;
@@ -3439,11 +3440,12 @@ nsresult nsNavHistory::UpdateFrecency(int64_t aPlaceId) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  mozIStorageBaseStatement* stmts[] = {updateFrecencyStmt.get(),
-                                       updateHiddenStmt.get()};
+  nsTArray<RefPtr<mozIStorageBaseStatement>> stmts = {
+      updateFrecencyStmt.forget(),
+      updateHiddenStmt.forget(),
+  };
   nsCOMPtr<mozIStoragePendingStatement> ps;
-  rv = conn->ExecuteAsync(stmts, ArrayLength(stmts), nullptr,
-                          getter_AddRefs(ps));
+  rv = conn->ExecuteAsync(stmts, nullptr, getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Trigger frecency updates for all affected origins.

@@ -74,11 +74,6 @@ const startupPhases = {
   // Anything done before or during app-startup must have a compelling reason
   // to run before we have even selected the user profile.
   "before profile selection": [
-    { // bug 1541226
-      path: "UAppData:",
-      condition: WIN,
-      stat: 3,
-    },
     { // bug 1541200
       path: "UAppData:Crash Reports/InstallTime20*",
       condition: AppConstants.MOZ_CRASHREPORTER,
@@ -99,11 +94,6 @@ const startupPhases = {
       ignoreIfUnused: true, // only if we ever crashed on this machine
       read: 1,
       close: 1,
-    },
-    { // bug 1541226
-      path: "DefProfLRt.parent:",
-      condition: WIN,
-      stat: 1,
     },
     { // At least the read seems unavoidable for a regular startup.
       path: "UAppData:profiles.ini",
@@ -130,7 +120,7 @@ const startupPhases = {
     { // bug 1541226, bug 1363586, bug 1541593
       path: "ProfD:",
       condition: WIN,
-      stat: 3,
+      stat: 1,
     },
     {
       path: "ProfLD:.startup-incomplete",
@@ -188,12 +178,6 @@ const startupPhases = {
       condition: WIN,
       stat: 1,
     },
-    { // bug 1544037
-      path: "ProfLDS:startupCache/startupCache." +
-             (Services.appinfo.is64Bit ? 8 : 4) + ".little",
-      condition: WIN,
-      stat: 1,
-    },
     { // bug 1541601
       path: "PrfDef:channel-prefs.js",
       stat: 1,
@@ -231,7 +215,7 @@ const startupPhases = {
     { // bug 1541226
       path: "ProfD:",
       condition: WIN,
-      stat: 2,
+      stat: 1,
     },
     {
       path: "XCurProcD:blocklist.xml",
@@ -294,26 +278,6 @@ const startupPhases = {
       condition: LINUX,
       read: 3,
       close: 3,
-    },
-    {
-      path: "UChrm:userChrome.css",
-      condition: WIN,
-      stat: 1,
-    },
-    { // bug 1541233
-      path: "UChrm:userContent.css",
-      condition: WIN,
-      stat: 1,
-    },
-    { // bug 1541246
-      path: "XREUSysExt:",
-      condition: WIN,
-      stat: 1,
-    },
-    { // bug 1541246
-      path: "XRESysExtDev:",
-      condition: WIN,
-      stat: 1,
     },
     { // bug 1541246
       path: "ProfD:extensions",
@@ -546,6 +510,7 @@ const startupPhases = {
     { // bug 1003968
       path: "XREAppDist:searchplugins",
       condition: WIN,
+      ignoreIfUnused: true, // with WebRender enabled this may happen during "before becoming idle"
       stat: 1,
     },
     {
@@ -658,6 +623,12 @@ const startupPhases = {
       path: "XCurProcD:omni.ja",
       condition: WIN,
       stat: 7,
+    },
+    { // bug 1003968
+      path: "XREAppDist:searchplugins",
+      condition: WIN,
+      ignoreIfUnused: true, // with WebRender enabled this may happen during "before handling user events"
+      stat: 1,
     },
   ],
 };
@@ -831,7 +802,7 @@ add_task(async function() {
     });
   }
 
-  let tmpPath = expandWhitelistPath(MAC ? "TmpD:" : "/dev/shm").toLowerCase();
+  let tmpPath = expandWhitelistPath("TmpD:").toLowerCase();
   let shouldPass = true;
   for (let phase in phases) {
     let whitelist = startupPhases[phase];
@@ -861,15 +832,22 @@ add_task(async function() {
         continue;
       }
 
-      if (!WIN) {
-        if (filename == "/dev/urandom") {
-          continue;
-        }
+      if (!WIN && filename == "/dev/urandom") {
+        continue;
+      }
 
-        // Ignore I/O due to IPC. This doesn't really touch the disk.
-        if (filename.startsWith(tmpPath + "/org.chromium.")) {
-          continue;
-        }
+      // /dev/shm is always tmpfs (a memory filesystem); this isn't
+      // really I/O any more than mmap/munmap are.
+      if (LINUX && filename.startsWith("/dev/shm/")) {
+        continue;
+      }
+
+      // Shared memory uses temporary files on MacOS <= 10.11 to avoid
+      // a kernel security bug that will never be patched (see
+      // https://crbug.com/project-zero/1671 for details).  This can
+      // be removed when we no longer support those OS versions.
+      if (MAC && filename.startsWith(tmpPath + "/org.mozilla.ipc.")) {
+        continue;
       }
 
       let expected = false;
@@ -920,7 +898,7 @@ add_task(async function() {
   if (shouldPass) {
     ok(shouldPass, "No unexpected main thread I/O during startup");
   } else {
-    const filename = "startup-mainthreadio-profile.json";
+    const filename = "profile_startup_mainthreadio.json";
     let path = Cc["@mozilla.org/process/environment;1"]
                  .getService(Ci.nsIEnvironment)
                  .get("MOZ_UPLOAD_DIR");
@@ -929,7 +907,7 @@ add_task(async function() {
     await OS.File.writeAtomic(profilePath,
                               encoder.encode(JSON.stringify(startupRecorder.data.profile)));
     ok(false,
-       "Unexpected main thread I/O behavior during startup; profile uploaded in " +
-       filename);
+       "Unexpected main thread I/O behavior during startup; open the " +
+       `${filename} artifact in the Firefox Profiler to see what happened`);
   }
 });

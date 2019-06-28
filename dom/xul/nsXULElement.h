@@ -46,7 +46,6 @@ namespace css {
 class StyleRule;
 }  // namespace css
 namespace dom {
-class BoxObject;
 class HTMLIFrameElement;
 class PrototypeDocumentContentSink;
 enum class CallerType : uint32_t;
@@ -328,9 +327,8 @@ class nsXULElement : public nsStyledElement {
   virtual nsresult PreHandleEvent(
       mozilla::EventChainVisitor& aVisitor) override;
   // nsIContent
-  virtual nsresult BindToTree(Document* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent) override;
-  virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
+  virtual nsresult BindToTree(BindContext&, nsINode& aParent) override;
+  virtual void UnbindFromTree(bool aNullParent) override;
   virtual void DestroyContent() override;
   virtual void DoneAddingChildren(bool aHaveNotified) override;
 
@@ -350,7 +348,7 @@ class nsXULElement : public nsStyledElement {
                                 bool aIsTrustedEvent) override;
   void ClickWithInputSource(uint16_t aInputSource, bool aIsTrustedEvent);
 
-  nsIContent* GetBindingParent() const final { return mBindingParent; }
+  Element* GetBindingParent() const final { return mBindingParent; }
 
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
   virtual bool IsFocusableInternal(int32_t* aTabIndex,
@@ -369,7 +367,7 @@ class nsXULElement : public nsStyledElement {
   // This function should ONLY be used by BindToTree implementations.
   // The function exists solely because XUL elements store the binding
   // parent as a member instead of in the slots, as Element does.
-  void SetXULBindingParent(nsIContent* aBindingParent) {
+  void SetXULBindingParent(Element* aBindingParent) {
     mBindingParent = aBindingParent;
   }
 
@@ -511,10 +509,6 @@ class nsXULElement : public nsStyledElement {
     SetXULBoolAttr(nsGkAtoms::allowevents, aAllowEvents);
   }
   nsIControllers* GetControllers(mozilla::ErrorResult& rv);
-  // Note: this can only fail if the do_CreateInstance for the boxobject
-  // contact fails for some reason.
-  already_AddRefed<mozilla::dom::BoxObject> GetBoxObject(
-      mozilla::ErrorResult& rv);
   void Click(mozilla::dom::CallerType aCallerType);
   MOZ_CAN_RUN_SCRIPT_BOUNDARY void DoCommand();
   // Style() inherited from nsStyledElement
@@ -542,7 +536,7 @@ class nsXULElement : public nsStyledElement {
    * The nearest enclosing content node with a binding
    * that created us.
    */
-  nsCOMPtr<nsIContent> mBindingParent;
+  RefPtr<Element> mBindingParent;
 
   /**
    * Abandon our prototype linkage, and copy all attributes locally

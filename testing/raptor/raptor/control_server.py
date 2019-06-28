@@ -14,9 +14,9 @@ import socket
 import threading
 import time
 
-from mozlog import get_proxy_logger
+from logger.logger import RaptorLogger
 
-LOG = get_proxy_logger(component='raptor-control-server')
+LOG = RaptorLogger(component='raptor-control-server')
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -116,9 +116,9 @@ def MakeCustomHandlerClass(results_handler, shutdown_browser, write_raw_gecko_pr
             head, tail = os.path.split(self.path)
 
             if tail.startswith('raptor') and tail.endswith('.json'):
-                LOG.info('reading test settings from ' + tail)
+                LOG.info('reading test settings from json/' + tail)
                 try:
-                    with open(tail) as json_settings:
+                    with open("json/{}".format(tail)) as json_settings:
                         self.send_header('Access-Control-Allow-Origin', '*')
                         self.send_header('Content-type', 'application/json')
                         self.end_headers()
@@ -187,9 +187,8 @@ def MakeCustomHandlerClass(results_handler, shutdown_browser, write_raw_gecko_pr
                 self.results_handler.add_page_timeout(str(data['data'][0]),
                                                       str(data['data'][1]),
                                                       dict(data['data'][2]))
-            elif data['type'] == 'webext_status' and data['data'] == "__raptor_shutdownBrowser":
-                LOG.info("received " + data['type'] + ": " + str(data['data']))
-                # webext is telling us it's done, and time to shutdown the browser
+            elif data['type'] == "webext_shutdownBrowser":
+                LOG.info("received request to shutdown the browser")
                 self.shutdown_browser()
             elif data['type'] == 'webext_screenshot':
                 LOG.info("received " + data['type'])

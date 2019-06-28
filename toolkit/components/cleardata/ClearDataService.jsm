@@ -8,6 +8,7 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
   Downloads: "resource://gre/modules/Downloads.jsm",
   OfflineAppCacheHelper: "resource://gre/modules/offlineAppCache.jsm",
@@ -18,6 +19,9 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 XPCOMUtils.defineLazyServiceGetter(this, "sas",
                                    "@mozilla.org/storage/activity-service;1",
                                    "nsIStorageActivityService");
+XPCOMUtils.defineLazyServiceGetter(this, "TrackingDBService",
+                                   "@mozilla.org/tracking-db-service;1",
+                                   "nsITrackingDBService");
 
 // A Cleaner is an object with 3 methods. These methods must return a Promise
 // object. Here a description of these methods:
@@ -79,6 +83,26 @@ const CookieCleaner = {
     });
   },
 
+};
+
+const CertCleaner = {
+  deleteByHost(aHost, aOriginAttributes) {
+    let overrideService = Cc["@mozilla.org/security/certoverride;1"]
+                            .getService(Ci.nsICertOverrideService);
+    return new Promise(aResolve => {
+      overrideService.clearValidityOverride(aHost, -1);
+      aResolve();
+    });
+  },
+
+  deleteAll() {
+    let overrideService = Cc["@mozilla.org/security/certoverride;1"]
+                            .getService(Ci.nsICertOverrideService);
+    return new Promise(aResolve => {
+      overrideService.clearAllOverrides();
+      aResolve();
+    });
+  },
 };
 
 const NetworkCacheCleaner = {
@@ -599,10 +623,16 @@ const StorageAccessCleaner = {
 
 const HistoryCleaner = {
   deleteByHost(aHost, aOriginAttributes) {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.removeByFilter({ host: "." + aHost });
   },
 
   deleteByRange(aFrom, aTo) {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.removeVisitsByFilter({
       beginDate: new Date(aFrom / 1000),
       endDate: new Date(aTo / 1000),
@@ -610,6 +640,9 @@ const HistoryCleaner = {
   },
 
   deleteAll() {
+    if (!AppConstants.MOZ_PLACES) {
+      return Promise.resolve();
+    }
     return PlacesUtils.history.clear();
   },
 };
@@ -816,8 +849,21 @@ const ReportsCleaner = {
   },
 };
 
+const ContentBlockingCleaner = {
+  deleteAll() {
+    return TrackingDBService.clearAll();
+  },
+
+  deleteByRange(aFrom, aTo) {
+    return TrackingDBService.clearSince(aFrom);
+  },
+};
+
 // Here the map of Flags-Cleaner.
 const FLAGS_MAP = [
+  { flag: Ci.nsIClearDataService.CLEAR_CERT_EXCEPTIONS,
+    cleaner: CertCleaner },
+
  { flag: Ci.nsIClearDataService.CLEAR_COOKIES,
    cleaner: CookieCleaner },
 
@@ -880,6 +926,9 @@ const FLAGS_MAP = [
 
  { flag: Ci.nsIClearDataService.CLEAR_STORAGE_ACCESS,
    cleaner: StorageAccessCleaner },
+
+ { flag: Ci.nsIClearDataService.CLEAR_CONTENT_BLOCKING_RECORDS,
+   cleaner: ContentBlockingCleaner},
 ];
 
 this.ClearDataService = function() {

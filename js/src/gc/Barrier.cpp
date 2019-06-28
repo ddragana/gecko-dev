@@ -8,7 +8,6 @@
 
 #include "builtin/TypedObject.h"
 #include "gc/Policy.h"
-#include "gc/Zone.h"
 #include "js/HashTable.h"
 #include "js/Value.h"
 #include "vm/BigIntType.h"  // JS::BigInt
@@ -171,22 +170,16 @@ template <typename T>
   return keyId == zone->getUniqueIdInfallible(l);
 }
 
-#ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
-
+#if !MOZ_IS_GCC
 template struct JS_PUBLIC_API MovableCellHasher<JSObject*>;
+#endif
+
 template struct JS_PUBLIC_API MovableCellHasher<GlobalObject*>;
 template struct JS_PUBLIC_API MovableCellHasher<SavedFrame*>;
 template struct JS_PUBLIC_API MovableCellHasher<EnvironmentObject*>;
 template struct JS_PUBLIC_API MovableCellHasher<WasmInstanceObject*>;
 template struct JS_PUBLIC_API MovableCellHasher<JSScript*>;
 template struct JS_PUBLIC_API MovableCellHasher<LazyScript*>;
-
-#ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#  pragma GCC diagnostic pop
-#endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
 
 }  // namespace js
 

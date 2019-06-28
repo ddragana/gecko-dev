@@ -18,7 +18,6 @@
 #include "gfxFontConstants.h"
 #include "gfxTextRun.h"
 #include "nsCocoaFeatures.h"
-
 #include "cairo-quartz.h"
 
 using namespace mozilla;
@@ -199,7 +198,8 @@ bool gfxMacFont::ShapeText(DrawTarget* aDrawTarget, const char16_t* aText,
   // Currently, we don't support vertical shaping via CoreText,
   // so we ignore RequiresAATLayout if vertical is requested.
   auto macFontEntry = static_cast<MacOSFontEntry*>(GetFontEntry());
-  if (macFontEntry->RequiresAATLayout() && !aVertical) {
+  if (macFontEntry->RequiresAATLayout() && !aVertical &&
+      StaticPrefs::gfx_font_rendering_coretext_enabled()) {
     if (!mCoreTextShaper) {
       mCoreTextShaper = MakeUnique<gfxCoreTextShaper>(this);
     }
@@ -208,22 +208,20 @@ bool gfxMacFont::ShapeText(DrawTarget* aDrawTarget, const char16_t* aText,
                                    aShapedText)) {
       PostShapingFixup(aDrawTarget, aText, aOffset, aLength, aVertical,
                        aShapedText);
-
-      if (macFontEntry->HasTrackingTable()) {
+      if (GetFontEntry()->HasTrackingTable()) {
         // Convert font size from device pixels back to CSS px
         // to use in selecting tracking value
         float trackSize = GetAdjustedSize() *
                           aShapedText->GetAppUnitsPerDevUnit() /
                           AppUnitsPerCSSPixel();
         float tracking =
-            macFontEntry->TrackingForCSSPx(trackSize) * mFUnitsConvFactor;
+            GetFontEntry()->TrackingForCSSPx(trackSize) * mFUnitsConvFactor;
         // Applying tracking is a lot like the adjustment we do for
         // synthetic bold: we want to apply between clusters, not to
         // non-spacing glyphs within a cluster. So we can reuse that
         // helper here.
         aShapedText->AdjustAdvancesForSyntheticBold(tracking, aOffset, aLength);
       }
-
       return true;
     }
   }

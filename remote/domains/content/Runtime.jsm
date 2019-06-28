@@ -29,6 +29,8 @@ class Runtime extends ContentProcessDomain {
 
   destructor() {
     this.disable();
+
+    super.destructor();
   }
 
   // commands
@@ -68,6 +70,16 @@ class Runtime extends ContentProcessDomain {
         `But was: ${typeof(request.expression)}`);
     }
     return context.evaluate(request.expression);
+  }
+
+  getRemoteObject(objectId) {
+    for (const ctx of this.contexts.values()) {
+      const obj = ctx.getRemoteObject(objectId);
+      if (typeof(obj) != "undefined") {
+        return obj;
+      }
+    }
+    return null;
   }
 
   releaseObject({ objectId }) {
@@ -117,6 +129,16 @@ class Runtime extends ContentProcessDomain {
       throw new Error("Expect 'awaitPromise' to be a boolean");
     }
     return context.callFunctionOn(request.functionDeclaration, request.arguments, request.returnByValue, request.awaitPromise, request.objectId);
+  }
+
+  getProperties({ objectId, ownProperties }) {
+    for (const ctx of this.contexts.values()) {
+      const obj = ctx.getRemoteObject(objectId);
+      if (typeof(obj) != "undefined") {
+        return ctx.getProperties({ objectId, ownProperties });
+      }
+    }
+    return null;
   }
 
   get _debugger() {

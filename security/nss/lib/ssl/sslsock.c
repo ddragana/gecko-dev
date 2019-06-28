@@ -277,6 +277,8 @@ ssl_DupSocket(sslSocket *os)
         goto loser;
     }
     ss->vrange = os->vrange;
+    ss->now = os->now;
+    ss->nowArg = os->nowArg;
 
     ss->peerID = !os->peerID ? NULL : PORT_Strdup(os->peerID);
     ss->url = !os->url ? NULL : PORT_Strdup(os->url);
@@ -370,6 +372,13 @@ ssl_DupSocket(sslSocket *os)
                 goto loser;
             }
         }
+        if (os->antiReplay) {
+            ss->antiReplay = tls13_RefAntiReplayContext(os->antiReplay);
+            PORT_Assert(ss->antiReplay); /* Can't fail. */
+            if (!ss->antiReplay) {
+                goto loser;
+            }
+        }
 
         /* Create security data */
         rv = ssl_CopySecurityInfo(ss, os);
@@ -458,6 +467,7 @@ ssl_DestroySocketContents(sslSocket *ss)
     ssl_ClearPRCList(&ss->ssl3.hs.dtlsRcvdHandshake, NULL);
 
     tls13_DestroyESNIKeys(ss->esniKeys);
+    tls13_ReleaseAntiReplayContext(ss->antiReplay);
 }
 
 /*
@@ -2215,6 +2225,8 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
 
     ss->opt = sm->opt;
     ss->vrange = sm->vrange;
+    ss->now = sm->now;
+    ss->nowArg = sm->nowArg;
     PORT_Memcpy(ss->cipherSuites, sm->cipherSuites, sizeof sm->cipherSuites);
     PORT_Memcpy(ss->ssl3.dtlsSRTPCiphers, sm->ssl3.dtlsSRTPCiphers,
                 sizeof(PRUint16) * sm->ssl3.dtlsSRTPCipherCount);
@@ -2284,6 +2296,29 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
         }
         ss->ssl3.ca_list = CERT_DupDistNames(sm->ssl3.ca_list);
         if (!ss->ssl3.ca_list) {
+            return NULL;
+        }
+    }
+
+    /* Copy ESNI. */
+    tls13_DestroyESNIKeys(ss->esniKeys);
+    ss->esniKeys = NULL;
+    if (sm->esniKeys) {
+        ss->esniKeys = tls13_CopyESNIKeys(sm->esniKeys);
+        if (!ss->esniKeys) {
+            return NULL;
+        }
+    }
+
+    /* Copy anti-replay context. */
+    if (ss->antiReplay) {
+        tls13_ReleaseAntiReplayContext(ss->antiReplay);
+        ss->antiReplay = NULL;
+    }
+    if (sm->antiReplay) {
+        ss->antiReplay = tls13_RefAntiReplayContext(sm->antiReplay);
+        PORT_Assert(ss->antiReplay);
+        if (!ss->antiReplay) {
             return NULL;
         }
     }
@@ -3902,6 +3937,15 @@ ssl_FreeEphemeralKeyPairs(sslSocket *ss)
     }
 }
 
+PRTime
+ssl_Time(const sslSocket *ss)
+{
+    if (!ss->now) {
+        return PR_Now();
+    }
+    return ss->now(ss->nowArg);
+}
+
 /*
 ** Create a newsocket structure for a file descriptor.
 */
@@ -3917,7 +3961,7 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
         makeLocks = PR_TRUE;
 
     /* Make a new socket and get it ready */
-    ss = (sslSocket *)PORT_ZAlloc(sizeof(sslSocket));
+    ss = PORT_ZNew(sslSocket);
     if (!ss) {
         return NULL;
     }
@@ -3975,6 +4019,7 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
     dtls_InitTimers(ss);
 
     ss->esniKeys = NULL;
+    ss->antiReplay = NULL;
 
     if (makeLocks) {
         rv = ssl_MakeLocks(ss);
@@ -4043,6 +4088,7 @@ struct {
 #ifndef SSL_DISABLE_EXPERIMENTAL_API
     EXP(AeadDecrypt),
     EXP(AeadEncrypt),
+    EXP(CreateAntiReplayContext),
     EXP(DestroyAead),
     EXP(DestroyResumptionTokenInfo),
     EXP(EnableESNI),
@@ -4059,14 +4105,16 @@ struct {
     EXP(MakeAead),
     EXP(RecordLayerData),
     EXP(RecordLayerWriteCallback),
+    EXP(ReleaseAntiReplayContext),
     EXP(SecretCallback),
     EXP(SendCertificateRequest),
     EXP(SendSessionTicket),
+    EXP(SetAntiReplayContext),
     EXP(SetESNIKeyPair),
     EXP(SetMaxEarlyDataSize),
     EXP(SetResumptionTokenCallback),
     EXP(SetResumptionToken),
-    EXP(SetupAntiReplay),
+    EXP(SetTimeFunc),
 #endif
     { "", NULL }
 };
@@ -4100,6 +4148,21 @@ ssl_ClearPRCList(PRCList *list, void (*f)(void *))
         }
         PORT_Free(cursor);
     }
+}
+
+SECStatus
+SSLExp_SetTimeFunc(PRFileDesc *fd, SSLTimeFunc f, void *arg)
+{
+    sslSocket *ss = ssl_FindSocket(fd);
+
+    if (!ss) {
+        SSL_DBG(("%d: SSL[%d]: bad socket in SSL_SetTimeFunc",
+                 SSL_GETPID(), fd));
+        return SECFailure;
+    }
+    ss->now = f;
+    ss->nowArg = arg;
+    return SECSuccess;
 }
 
 /* Experimental APIs for session cache handling. */
@@ -4185,7 +4248,7 @@ SSLExp_SetResumptionToken(PRFileDesc *fd, const PRUint8 *token,
     /* Use the sid->cached as marker that this is from an external cache and
      * we don't have to look up anything in the NSS internal cache. */
     sid->cached = in_external_cache;
-    sid->lastAccessTime = ssl_TimeSec();
+    sid->lastAccessTime = ssl_Time(ss);
 
     ss->sec.ci.sid = sid;
 

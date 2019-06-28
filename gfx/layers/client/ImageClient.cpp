@@ -34,6 +34,11 @@
 #include "nsISupportsImpl.h"                  // for Image::Release, etc
 #include "nsRect.h"                           // for mozilla::gfx::IntRect
 
+#ifdef XP_WIN
+#  include "mozilla/WindowsVersion.h"
+#  include "mozilla/layers/D3D11YCbCrImage.h"
+#endif
+
 namespace mozilla {
 namespace layers {
 
@@ -91,7 +96,8 @@ void ImageClientSingle::FlushAllImages() {
 
 /* static */
 already_AddRefed<TextureClient> ImageClient::CreateTextureClientForImage(
-    Image* aImage, KnowsCompositor* aForwarder) {
+    Image* aImage, KnowsCompositor* aKnowsCompositor,
+    ImageContainer* aContainer) {
   RefPtr<TextureClient> texture;
   if (aImage->GetFormat() == ImageFormat::PLANAR_YCBCR) {
     PlanarYCbCrImage* ycbcr = static_cast<PlanarYCbCrImage*>(aImage);
@@ -99,8 +105,28 @@ already_AddRefed<TextureClient> ImageClient::CreateTextureClientForImage(
     if (!data) {
       return nullptr;
     }
+
+#if XP_WIN
+    // We disable this code path on Windows version earlier of Windows 8 due to
+    // intermittent crashes with old drivers. See bug 1405110.
+    // DXGIYCbCrTextureData can only handle YCbCr images using 3 non-interleaved
+    // planes non-zero mSkip value indicates that one of the plane would be
+    // interleaved.
+    if (IsWin8OrLater() && XRE_IsContentProcess() && aKnowsCompositor &&
+        aKnowsCompositor->SupportsD3D11() &&
+        aKnowsCompositor->GetTextureForwarder() &&
+        aKnowsCompositor->GetTextureForwarder()->UsesImageBridge() &&
+        aContainer && data->mYSkip == 0 && data->mCbSkip == 0 &&
+        data->mCrSkip == 0) {
+      texture = D3D11YCbCrImage::CreateAndCopyDataToDXGIYCbCrTextureData(
+          aKnowsCompositor, aContainer, *data);
+      if (texture) {
+        return texture.forget();
+      }
+    }
+#endif
     texture = TextureClient::CreateForYCbCr(
-        aForwarder, data->mYSize, data->mYStride, data->mCbCrSize,
+        aKnowsCompositor, data->mYSize, data->mYStride, data->mCbCrSize,
         data->mCbCrStride, data->mStereoMode, data->mColorDepth,
         data->mYUVColorSpace, TextureFlags::DEFAULT);
     if (!texture) {
@@ -124,13 +150,13 @@ already_AddRefed<TextureClient> ImageClient::CreateTextureClientForImage(
     texture = AndroidSurfaceTextureData::CreateTextureClient(
         typedImage->GetHandle(), size, typedImage->GetContinuous(),
         typedImage->GetOriginPos(), typedImage->GetHasAlpha(),
-        aForwarder->GetTextureForwarder(), TextureFlags::DEFAULT);
+        aKnowsCompositor->GetTextureForwarder(), TextureFlags::DEFAULT);
 #endif
   } else {
     RefPtr<gfx::SourceSurface> surface = aImage->GetAsSourceSurface();
     MOZ_ASSERT(surface);
     texture = TextureClient::CreateForDrawing(
-        aForwarder, surface->GetFormat(), aImage->GetSize(),
+        aKnowsCompositor, surface->GetFormat(), aImage->GetSize(),
         BackendSelector::Content, TextureFlags::DEFAULT);
     if (!texture) {
       return nullptr;
@@ -220,7 +246,7 @@ bool ImageClientSingle::UpdateImage(ImageContainer* aContainer,
       // Slow path, we should not be hitting it very often and if we do it means
       // we are using an Image class that is not backed by textureClient and we
       // should fix it.
-      texture = CreateTextureClientForImage(image, GetForwarder());
+      texture = CreateTextureClientForImage(image, GetForwarder(), aContainer);
     }
 
     if (!texture) {

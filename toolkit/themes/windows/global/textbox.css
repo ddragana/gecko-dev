@@ -95,19 +95,10 @@ textbox:not([searchbutton]) > .textbox-search-sign {
 
 .textbox-search-clear {
   list-style-image: url(chrome://global/skin/icons/searchfield-cancel.svg);
-  -moz-image-region: rect(0, 14px, 14px, 0);
 }
 
 .textbox-search-clear:not([disabled]) {
   cursor: default;
-}
-
-.textbox-search-clear:not([disabled]):hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-.textbox-search-clear:not([disabled]):hover:active {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
 /* ::::: textboxes inside toolbarpaletteitems ::::: */

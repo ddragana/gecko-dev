@@ -50,7 +50,7 @@ var gIdentityHandler = {
    * RegExp used to decide if an about url should be shown as being part of
    * the browser UI.
    */
-  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|license|permissions|preferences|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
+  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|downloads|license|logins|preferences|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
 
   get _isBroken() {
     return this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
@@ -325,8 +325,7 @@ var gIdentityHandler = {
   },
 
   enableMixedContentProtection() {
-    gBrowser.selectedBrowser.messageManager.sendAsyncMessage(
-      "MixedContent:ReenableProtection", {});
+    gBrowser.selectedBrowser.sendMessageToActor("MixedContent:ReenableProtection", {}, "BrowserTab");
     BrowserReload();
     PanelMultiView.hidePopup(this._identityPopup);
   },
@@ -643,7 +642,8 @@ var gIdentityHandler = {
     // show permission icons
     let permissions = SitePermissions.getAllForBrowser(gBrowser.selectedBrowser);
     for (let permission of permissions) {
-      if (permission.state == SitePermissions.BLOCK) {
+      if (permission.state == SitePermissions.BLOCK ||
+          permission.state == SitePermissions.AUTOPLAY_BLOCKED_ALL) {
         let icon = permissionAnchors[permission.id];
         if (icon) {
           icon.setAttribute("showing", "true");
@@ -868,10 +868,8 @@ var gIdentityHandler = {
    * Click handler for the identity-box element in primary chrome.
    */
   handleIdentityButtonEvent(event) {
-    // For Nightly users, show the WIP protections panel if the tracking
-    // protection icon was clicked.
-    if (this._protectionsPanelEnabled &&
-        event.originalTarget.id == "tracking-protection-icon-animatable-image") {
+    // For Nightly users, show the WIP protections panel if the meta key was held.
+    if (this._protectionsPanelEnabled && event.altKey) {
       gProtectionsHandler.handleProtectionsButtonEvent(event);
       return;
     }
@@ -895,6 +893,30 @@ var gIdentityHandler = {
       return;
     }
 
+    // If we are in DOM full-screen, exit it before showing the identity popup
+    if (document.fullscreen) {
+      // Open the identity popup after DOM full-screen exit
+      // We need to wait for the exit event and after that wait for the fullscreen exit transition to complete
+      // If we call _openPopup before the full-screen transition ends it can get cancelled
+      // Only waiting for painted is not sufficient because we could still be in the full-screen enter transition.
+      let exitedEventReceived = false;
+      window.messageManager.addMessageListener("DOMFullscreen:Painted", function listener() {
+        if (!exitedEventReceived) {
+          return;
+        }
+        window.messageManager.removeMessageListener("DOMFullscreen:Painted", listener);
+        gIdentityHandler._openPopup(event);
+      });
+      window.addEventListener("MozDOMFullscreen:Exited", () => {
+        exitedEventReceived = true;
+      }, { once: true });
+      document.exitFullscreen();
+      return;
+    }
+    this._openPopup(event);
+  },
+
+  _openPopup(event) {
     // Make sure that the display:none style we set in xul is removed now that
     // the popup is actually needed
     this._identityPopup.hidden = false;
@@ -977,7 +999,7 @@ var gIdentityHandler = {
     let ctx = canvas.getContext("2d");
     ctx.font = `${14 * scale}px sans-serif`;
     ctx.fillText(`${value}`, 20 * scale, 14 * scale);
-    let tabIcon = document.getAnonymousElementByAttribute(gBrowser.selectedTab, "anonid", "tab-icon-image");
+    let tabIcon = gBrowser.selectedTab.iconImage;
     let image = new Image();
     image.src = tabIcon.src;
     ctx.drawImage(image, 0, 0, 16 * scale, 16 * scale);
@@ -1083,12 +1105,7 @@ var gIdentityHandler = {
     container.setAttribute("role", "group");
 
     let img = document.createXULElement("image");
-    img.classList.add("identity-popup-permission-icon");
-    if (aPermission.id == "plugin:flash") {
-      img.classList.add("plugin-icon");
-    } else {
-      img.classList.add(aPermission.id + "-icon");
-    }
+    img.classList.add("identity-popup-permission-icon", aPermission.id + "-icon");
     if (aPermission.state == SitePermissions.BLOCK)
       img.classList.add("blocked-permission-icon");
 
@@ -1143,7 +1160,8 @@ var gIdentityHandler = {
         } else {
           menuitem.setAttribute("value", state);
         }
-        menuitem.setAttribute("label", SitePermissions.getMultichoiceStateLabel(state));
+
+        menuitem.setAttribute("label", SitePermissions.getMultichoiceStateLabel(aPermission.id, state));
         menupopup.appendChild(menuitem);
       }
 
@@ -1157,9 +1175,9 @@ var gIdentityHandler = {
 
       // Avoiding listening to the "select" event on purpose. See Bug 1404262.
       menulist.addEventListener("command", () => {
-        SitePermissions.set(gBrowser.currentURI,
-                            aPermission.id,
-                            menulist.selectedItem.value);
+        SitePermissions.setForPrincipal(gBrowser.contentPrincipal,
+                                        aPermission.id,
+                                        menulist.selectedItem.value);
       });
 
       container.appendChild(img);
@@ -1213,16 +1231,16 @@ var gIdentityHandler = {
           // If we set persistent permissions or the sharing has
           // started due to existing persistent permissions, we need
           // to handle removing these even for frames with different hostnames.
-          let uris = browser._devicePermissionURIs || [];
-          for (let uri of uris) {
+          let principals = browser._devicePermissionPrincipals || [];
+          for (let principal of principals) {
             // It's not possible to stop sharing one of camera/microphone
             // without the other.
             for (let id of ["camera", "microphone"]) {
               if (this._sharingState[id]) {
-                let perm = SitePermissions.get(uri, id);
+                let perm = SitePermissions.getForPrincipal(principal, id);
                 if (perm.state == SitePermissions.ALLOW &&
                     perm.scope == SitePermissions.SCOPE_PERSISTENT) {
-                  SitePermissions.remove(uri, id);
+                  SitePermissions.removeFromPrincipal(principal, id);
                 }
               }
             }
@@ -1231,7 +1249,7 @@ var gIdentityHandler = {
         browser.messageManager.sendAsyncMessage("webrtc:StopSharing", windowId);
         webrtcUI.forgetActivePermissionsFromBrowser(gBrowser.selectedBrowser);
       }
-      SitePermissions.remove(gBrowser.currentURI, aPermission.id, browser);
+      SitePermissions.removeFromPrincipal(gBrowser.contentPrincipal, aPermission.id, browser);
 
       this._permissionReloadHint.removeAttribute("hidden");
       PanelView.forNode(this._identityPopupMainView)

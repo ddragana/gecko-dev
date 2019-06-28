@@ -6,6 +6,8 @@ const AUTOPLAY_PAGE = getRootDirectory(gTestPath).replace("chrome://mochitests/c
 
 const SLOW_AUTOPLAY_PAGE = getRootDirectory(gTestPath).replace("chrome://mochitests/content", "https://example.com") + "browser_autoplay_blocked_slow.sjs";
 
+const MUTED_AUTOPLAY_PAGE = getRootDirectory(gTestPath).replace("chrome://mochitests/content", "https://example.com") + "browser_autoplay_muted.html";
+
 const AUTOPLAY_PREF = "media.autoplay.default";
 const AUTOPLAY_PERM = "autoplay-media";
 
@@ -34,9 +36,13 @@ function sleep(ms) {
 async function blockedIconShown() {
   await TestUtils.waitForCondition(() => {
     return BrowserTestUtils.is_visible(autoplayBlockedIcon());
-  });
+  }, "Blocked icon is shown");
+}
 
-  ok(BrowserTestUtils.is_visible(autoplayBlockedIcon()), "Blocked icon is shown");
+async function blockedIconHidden() {
+  await TestUtils.waitForCondition(() => {
+    return BrowserTestUtils.is_hidden(autoplayBlockedIcon());
+  }, "Blocked icon is hidden");
 }
 
 add_task(async function setup() {
@@ -76,15 +82,15 @@ add_task(async function testMainViewVisible() {
     is(labels[0].textContent, labelText, "Correct value");
 
     let menulist = document.getElementById("identity-popup-popup-menulist");
-    Assert.equal(menulist.label, "Block");
+    Assert.equal(menulist.label, "Block Audio");
 
     await EventUtils.synthesizeMouseAtCenter(menulist, { type: "mousedown" });
-    await BrowserTestUtils.waitForCondition(() => {
-      return menulist.getElementsByTagName("menuitem")[0].label === "Allow";
+    await TestUtils.waitForCondition(() => {
+      return menulist.getElementsByTagName("menuitem")[0].label === "Allow Audio and Video";
     });
 
     let menuitem = menulist.getElementsByTagName("menuitem")[0];
-    Assert.equal(menuitem.getAttribute("label"), "Allow");
+    Assert.equal(menuitem.getAttribute("label"), "Allow Audio and Video");
 
     menuitem.click();
     menulist.menupopup.hidePopup();
@@ -133,9 +139,7 @@ add_task(async function testBFCache() {
     await blockedIconShown();
 
     gBrowser.goBack();
-    await TestUtils.waitForCondition(() => {
-      return BrowserTestUtils.is_hidden(autoplayBlockedIcon());
-    });
+    await blockedIconHidden();
 
     // Not sure why using `gBrowser.goForward()` doesn't trigger document's
     // visibility changes in some debug build on try server, which makes us not
@@ -153,14 +157,13 @@ add_task(async function testChangingBlockingSettingDuringNavigation() {
   Services.prefs.setIntPref(AUTOPLAY_PREF, Ci.nsIAutoplay.BLOCKED);
 
   await BrowserTestUtils.withNewTab("about:home", async function(browser) {
+    await blockedIconHidden();
     await BrowserTestUtils.loadURI(browser, AUTOPLAY_PAGE);
     await blockedIconShown();
     Services.prefs.setIntPref(AUTOPLAY_PREF, Ci.nsIAutoplay.ALLOWED);
 
     gBrowser.goBack();
-    await TestUtils.waitForCondition(() => {
-      return BrowserTestUtils.is_hidden(autoplayBlockedIcon());
-    });
+    await blockedIconHidden();
 
     gBrowser.goForward();
 
@@ -184,14 +187,38 @@ add_task(async function testSlowLoadingPage() {
 
   await BrowserTestUtils.switchTab(gBrowser, tab1);
   // Wait until the blocked icon is hidden by switching tabs
-  await TestUtils.waitForCondition(() => {
-    return BrowserTestUtils.is_hidden(autoplayBlockedIcon());
-  });
+  await blockedIconHidden();
   await BrowserTestUtils.switchTab(gBrowser, tab2);
   await blockedIconShown();
 
   BrowserTestUtils.removeTab(tab1);
   BrowserTestUtils.removeTab(tab2);
 
+  Services.perms.removeAll();
+});
+
+add_task(async function testBlockedAll() {
+  Services.prefs.setIntPref(AUTOPLAY_PREF, Ci.nsIAutoplay.BLOCKED_ALL);
+
+  await BrowserTestUtils.withNewTab("about:home", async function(browser) {
+    await blockedIconHidden();
+    await BrowserTestUtils.loadURI(browser, MUTED_AUTOPLAY_PAGE);
+    await blockedIconShown();
+
+    await openIdentityPopup();
+
+    let menulist = document.getElementById("identity-popup-popup-menulist");
+    await EventUtils.synthesizeMouseAtCenter(menulist, { type: "mousedown" });
+    await TestUtils.waitForCondition(() => {
+      return menulist.getElementsByTagName("menuitem")[1].label === "Block Audio";
+    });
+
+    let menuitem = menulist.getElementsByTagName("menuitem")[0];
+    menuitem.click();
+    menulist.menupopup.hidePopup();
+    await closeIdentityPopup();
+    gBrowser.reload();
+    await blockedIconHidden();
+  });
   Services.perms.removeAll();
 });

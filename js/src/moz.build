@@ -146,6 +146,7 @@ EXPORTS.js += [
     '../public/LocaleSensitive.h',
     '../public/MemoryFunctions.h',
     '../public/MemoryMetrics.h',
+    '../public/Modules.h',
     '../public/OffThreadScriptCompilation.h',
     '../public/Principals.h',
     '../public/Printf.h',
@@ -304,6 +305,7 @@ UNIFIED_SOURCES += [
     'vm/JSScript.cpp',
     'vm/List.cpp',
     'vm/MemoryMetrics.cpp',
+    'vm/Modules.cpp',
     'vm/NativeObject.cpp',
     'vm/ObjectGroup.cpp',
     'vm/OffThreadScriptCompilation.cpp',
@@ -359,11 +361,6 @@ SOURCES += [
     'vm/Interpreter.cpp',
     'vm/ProfilingStack.cpp',
 ]
-
-if CONFIG['JS_POSIX_NSPR']:
-    UNIFIED_SOURCES += [
-        'vm/PosixNSPR.cpp',
-    ]
 
 if CONFIG['MOZ_INSTRUMENTS']:
     SOURCES += [
@@ -424,6 +421,7 @@ DIRS += [
     'gc',
     'jit',
     'wasm',
+    'zydis',
 ]
 
 FINAL_LIBRARY = 'js'

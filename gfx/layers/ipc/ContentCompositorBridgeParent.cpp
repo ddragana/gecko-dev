@@ -13,6 +13,7 @@
 #include "base/message_loop.h"        // for MessageLoop
 #include "base/task.h"                // for CancelableTask, etc
 #include "base/thread.h"              // for Thread
+#include "gfxUtils.h"
 #ifdef XP_WIN
 #  include "mozilla/gfx/DeviceManagerDx.h"  // for DeviceManagerDx
 #endif
@@ -21,6 +22,7 @@
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
 #include "mozilla/layers/APZUpdater.h"             // for APZUpdater
 #include "mozilla/layers/AsyncCompositionManager.h"
+#include "mozilla/layers/CanvasParent.h"
 #include "mozilla/layers/CompositorOptions.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/LayerManagerComposite.h"
@@ -35,7 +37,10 @@
 #include "nsXULAppAPI.h"       // for XRE_GetIOMessageLoop
 #include "mozilla/Unused.h"
 #include "mozilla/StaticPtr.h"
-#include "gfxUtils.h"
+#include "mozilla/Telemetry.h"
+#ifdef MOZ_GECKO_PROFILER
+#  include "ProfilerMarkerPayload.h"
+#endif
 
 using namespace std;
 
@@ -306,12 +311,12 @@ mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvCheckContentOnlyTDR(
     const uint32_t& sequenceNum, bool* isContentOnlyTDR) {
   *isContentOnlyTDR = false;
 #ifdef XP_WIN
-  ContentDeviceData compositor;
+  gfx::ContentDeviceData compositor;
 
-  DeviceManagerDx* dm = DeviceManagerDx::Get();
+  gfx::DeviceManagerDx* dm = gfx::DeviceManagerDx::Get();
 
   // Check that the D3D11 device sequence numbers match.
-  D3D11DeviceStatus status;
+  gfx::D3D11DeviceStatus status;
   dm->ExportDeviceInfo(&status);
 
   if (sequenceNum == status.sequenceNumber() && !dm->HasDeviceReset()) {
@@ -392,7 +397,7 @@ void ContentCompositorBridgeParent::ShadowLayersUpdated(
       static_cast<uint32_t>(
           (endTime - aInfo.transactionStart()).ToMilliseconds()));
 
-  RegisterPayload(aLayerTree, aInfo.payload());
+  RegisterPayloads(aLayerTree, aInfo.payload());
 
   aLayerTree->SetPendingTransactionId(
       aInfo.id(), aInfo.vsyncId(), aInfo.vsyncStart(), aInfo.refreshStart(),
@@ -610,6 +615,22 @@ bool ContentCompositorBridgeParent::DeallocPTextureParent(
   return TextureHost::DestroyIPDLActor(actor);
 }
 
+mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvInitPCanvasParent(
+    Endpoint<PCanvasParent>&& aEndpoint) {
+  MOZ_RELEASE_ASSERT(!mCanvasParent,
+                     "Canvas Parent should only be created once per "
+                     "CrossProcessCompositorBridgeParent.");
+
+  mCanvasParent = CanvasParent::Create(std::move(aEndpoint));
+  return IPC_OK();
+}
+
+UniquePtr<SurfaceDescriptor>
+ContentCompositorBridgeParent::LookupSurfaceDescriptorForClientDrawTarget(
+    const uintptr_t aDrawTarget) {
+  return mCanvasParent->LookupSurfaceDescriptorForClientDrawTarget(aDrawTarget);
+}
+
 bool ContentCompositorBridgeParent::IsSameProcess() const {
   return OtherPid() == base::GetCurrentProcId();
 }
@@ -628,9 +649,9 @@ void ContentCompositorBridgeParent::UpdatePaintTime(
   state->mParent->UpdatePaintTime(aLayerTree, aPaintTime);
 }
 
-void ContentCompositorBridgeParent::RegisterPayload(
+void ContentCompositorBridgeParent::RegisterPayloads(
     LayerTransactionParent* aLayerTree,
-    const InfallibleTArray<CompositionPayload>& aPayload) {
+    const nsTArray<CompositionPayload>& aPayload) {
   LayersId id = aLayerTree->GetId();
   MOZ_ASSERT(id.IsValid());
 
@@ -640,7 +661,7 @@ void ContentCompositorBridgeParent::RegisterPayload(
     return;
   }
 
-  state->mParent->RegisterPayload(aLayerTree, aPayload);
+  state->mParent->RegisterPayloads(aLayerTree, aPayload);
 }
 
 void ContentCompositorBridgeParent::ObserveLayersUpdate(

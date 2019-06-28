@@ -80,16 +80,14 @@ var UITour = {
     ["accountStatus", {
       query: (aDocument) => {
         // If the user is logged in, use the avatar element.
-        let fxAFooter = aDocument.getElementById("appMenu-fxa-container");
+        let fxAFooter = aDocument.getElementById("appMenu-fxa-status");
         if (fxAFooter.getAttribute("fxastatus")) {
           return aDocument.getElementById("appMenu-fxa-avatar");
         }
 
         // Otherwise use the sync setup icon.
         let statusButton = aDocument.getElementById("appMenu-fxa-label");
-        return aDocument.getAnonymousElementByAttribute(statusButton,
-                                                        "class",
-                                                        "toolbarbutton-icon");
+        return statusButton.icon;
       },
       // This is a fake widgetName starting with the "appMenu-" prefix so we know
       // to automatically open the appMenu when annotating this target.
@@ -174,9 +172,7 @@ var UITour = {
     ["selectedTabIcon", {
       query: (aDocument) => {
         let selectedtab = aDocument.defaultView.gBrowser.selectedTab;
-        let element = aDocument.getAnonymousElementByAttribute(selectedtab,
-                                                               "anonid",
-                                                               "tab-icon-image");
+        let element = selectedtab.iconImage;
         if (!element || !UITour.isElementVisible(element)) {
           return null;
         }

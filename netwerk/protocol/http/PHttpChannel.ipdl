@@ -129,7 +129,8 @@ child:
                        bool                deliveringAltData,
                        bool                applyConversion,
                        bool                isResolvedByTRR,
-                       ResourceTimingStruct timing);
+                       ResourceTimingStruct timing,
+                       bool                allRedirectsSameOrigin);
 
   // Used to cancel child channel if we hit errors during creating and
   // AsyncOpen of nsHttpChannel on the parent.
@@ -145,7 +146,8 @@ child:
                        nsHttpResponseHead responseHead,
                        nsCString          securityInfoSerialization,
                        uint64_t           channelId,
-                       NetAddr            oldPeerAddr);
+                       NetAddr            oldPeerAddr,
+                       ResourceTimingStruct timing);
 
   // Called if redirect successful so that child can complete setup.
   async Redirect3Complete();

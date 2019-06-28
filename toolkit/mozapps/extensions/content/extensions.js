@@ -12,7 +12,6 @@
 const {DeferredTask} = ChromeUtils.import("resource://gre/modules/DeferredTask.jsm");
 const {AddonManager} = ChromeUtils.import("resource://gre/modules/AddonManager.jsm");
 const {AddonRepository} = ChromeUtils.import("resource://gre/modules/addons/AddonRepository.jsm");
-const {AddonSettings} = ChromeUtils.import("resource://gre/modules/addons/AddonSettings.jsm");
 
 ChromeUtils.defineModuleGetter(this, "AMTelemetry",
                                "resource://gre/modules/AddonManager.jsm");
@@ -30,8 +29,6 @@ ChromeUtils.defineModuleGetter(this, "ClientID",
 ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
                                "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-XPCOMUtils.defineLazyPreferenceGetter(this, "WEBEXT_PERMISSION_PROMPTS",
-                                      "extensions.webextPermissionPrompts", false);
 XPCOMUtils.defineLazyPreferenceGetter(this, "XPINSTALL_ENABLED",
                                       "xpinstall.enabled", true);
 
@@ -99,12 +96,6 @@ XPCOMUtils.defineLazyPreferenceGetter(this, "legacyExtensionsEnabled",
 
 document.addEventListener("load", initialize, true);
 window.addEventListener("unload", shutdown);
-
-function promiseEvent(event, target, capture = false) {
-  return new Promise(resolve => {
-    target.addEventListener(event, resolve, {capture, once: true});
-  });
-}
 
 var gPendingInitializations = 1;
 Object.defineProperty(this, "gIsInitializing", {
@@ -309,19 +300,6 @@ function loadView(aViewId) {
   } else {
     gViewController.loadView(aViewId);
   }
-}
-
-function isCorrectlySigned(aAddon) {
-  // Add-ons without an "isCorrectlySigned" property are correctly signed as
-  // they aren't the correct type for signing.
-  return aAddon.isCorrectlySigned !== false;
-}
-
-function isDisabledUnsigned(addon) {
-  let signingRequired = (addon.type == "locale") ?
-                        AddonSettings.LANGPACKS_REQUIRE_SIGNING :
-                        AddonSettings.REQUIRE_SIGNING;
-  return signingRequired && !isCorrectlySigned(addon);
 }
 
 function isLegacyExtension(addon) {
@@ -855,7 +833,6 @@ var gViewController = {
     gHistory.replaceState(state);
 
     this.loadViewInternal(aViewId, null, state);
-    this.initialViewSelected = true;
     notifyInitialized();
   },
 
@@ -913,7 +890,7 @@ var gViewController = {
     let headingLabel;
     if (view.type == "discover") {
       headingLabel = gStrings.ext.formatStringFromName(
-        "listHeading.discover", [gStrings.brandShortName], 1);
+        "listHeading.discover", [gStrings.brandShortName]);
     } else {
       try {
         headingLabel = gStrings.ext.GetStringFromName(`listHeading.${view.param}`);
@@ -925,13 +902,14 @@ var gViewController = {
     headingName.textContent = headingLabel;
     setSearchLabel(view.param);
 
-
     if (aViewId == aPreviousView)
       this.currentViewObj.refresh(view.param, ++this.currentViewRequest, aState);
     else
       this.currentViewObj.show(view.param, ++this.currentViewRequest, aState);
 
     this.backButton.hidden = this.currentViewObj.isRoot || !gHistory.canGoBack;
+
+    this.initialViewSelected = true;
   },
 
   // Moves back in the document history and removes the current history entry
@@ -1230,42 +1208,15 @@ var gViewController = {
                 hasPermission(aAddon, "enable"));
       },
       doCommand(aAddon) {
-        if (aAddon.isWebExtension && !aAddon.seen && WEBEXT_PERMISSION_PROMPTS) {
-          let perms = aAddon.userPermissions;
-          if (perms.origins.length > 0 || perms.permissions.length > 0) {
-            const target = getBrowserElement();
-
-            let subject = {
-              wrappedJSObject: {
-                target,
-                info: {
-                  type: "sideload",
-                  addon: aAddon,
-                  icon: aAddon.iconURL,
-                  permissions: perms,
-                  resolve() {
-                    aAddon.markAsSeen();
-                    aAddon.enable().then(() => {
-                      // The user has just enabled a sideloaded extension, if the permission
-                      // can be changed for the extension, show the post-install panel to
-                      // give the user that opportunity.
-                      if (aAddon.permissions & AddonManager.PERM_CAN_CHANGE_PRIVATEBROWSING_ACCESS) {
-                        Services.obs.notifyObservers({
-                          addon: aAddon, target,
-                        }, "webextension-install-notify");
-                      }
-                    });
-                  },
-                  reject() {},
-                },
-              },
-            };
-            Services.obs.notifyObservers(subject, "webextension-permission-prompt");
-            return;
-          }
+        if (shouldShowPermissionsPrompt(aAddon)) {
+          showPermissionsPrompt(aAddon).then(() => {
+            // Record telemetry if the addon has been enabled.
+            recordActionTelemetry({action: "enable", addon: aAddon});
+          });
+        } else {
+          aAddon.enable();
+          recordActionTelemetry({action: "enable", addon: aAddon});
         }
-        aAddon.enable();
-        recordActionTelemetry({action: "enable", addon: aAddon});
       },
       getTooltip(aAddon) {
         if (!aAddon)
@@ -2156,7 +2107,11 @@ var gDiscoverView = {
         return;
       }
 
-      this._browser.addProgressListener(this);
+      this._browser.addProgressListener(
+        this,
+        Ci.nsIWebProgress.NOTIFY_STATE_ALL |
+        Ci.nsIWebProgress.NOTIFY_SECURITY |
+        Ci.nsIWebProgress.NOTIFY_LOCATION);
 
       if (this.loaded) {
         this._loadURL(this.homepageURL.spec, false, notifyInitialized,
@@ -2325,8 +2280,6 @@ var gDiscoverView = {
     aRequest.cancel(Cr.NS_BINDING_ABORTED);
   },
 
-  onContentBlockingEvent(aWebProgress, aRequest, aEvent) {},
-
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
     let transferStart = Ci.nsIWebProgressListener.STATE_IS_DOCUMENT |
                         Ci.nsIWebProgressListener.STATE_IS_REQUEST |
@@ -2370,9 +2323,6 @@ var gDiscoverView = {
     for (let listener of listeners)
       listener();
   },
-
-  onProgressChange() { },
-  onStatusChange() { },
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIWebProgressListener,
                                           Ci.nsISupportsWeakReference]),
@@ -2609,7 +2559,7 @@ var gListView = {
 
         let descriptionId = (aType == "theme") ?
                             "legacyThemeWarning.description" : "legacyWarning.description";
-        let text = gStrings.ext.formatStringFromName(descriptionId, [gStrings.brandShortName], 1) + " ";
+        let text = gStrings.ext.formatStringFromName(descriptionId, [gStrings.brandShortName]) + " ";
         el.insertBefore(document.createTextNode(text), el.childNodes[0]);
         legacyNotice.hidden = false;
       } else {
@@ -3071,7 +3021,7 @@ var gDetailView = {
       this.node.setAttribute("pending", "uninstall");
       document.getElementById("detail-pending").textContent = gStrings.ext.formatStringFromName(
         "details.notification.restartless-uninstall",
-        [this._addon.name], 1);
+        [this._addon.name]);
     } else {
       this.node.removeAttribute("pending");
 
@@ -3079,7 +3029,7 @@ var gDetailView = {
         this.node.setAttribute("notification", "error");
         document.getElementById("detail-error").textContent = gStrings.ext.formatStringFromName(
           "details.notification.blocked",
-          [this._addon.name], 1
+          [this._addon.name]
         );
         var errorLink = document.getElementById("detail-error-link");
         errorLink.value = gStrings.ext.GetStringFromName("details.notification.blocked.link");
@@ -3090,7 +3040,7 @@ var gDetailView = {
       } else if (isDisabledUnsigned(this._addon)) {
         this.node.setAttribute("notification", "error");
         document.getElementById("detail-error").textContent = gStrings.ext.formatStringFromName(
-          "details.notification.unsignedAndDisabled", [this._addon.name, gStrings.brandShortName], 2
+          "details.notification.unsignedAndDisabled", [this._addon.name, gStrings.brandShortName]
         );
         let errorLink = document.getElementById("detail-error-link");
         errorLink.value = gStrings.ext.GetStringFromName("details.notification.unsigned.link");
@@ -3101,13 +3051,13 @@ var gDetailView = {
         this.node.setAttribute("notification", "warning");
         document.getElementById("detail-warning").textContent = gStrings.ext.formatStringFromName(
           "details.notification.incompatible",
-          [this._addon.name, gStrings.brandShortName, gStrings.appVersion], 3
+          [this._addon.name, gStrings.brandShortName, gStrings.appVersion]
         );
         document.getElementById("detail-warning-link").hidden = true;
       } else if (!isCorrectlySigned(this._addon)) {
         this.node.setAttribute("notification", "warning");
         document.getElementById("detail-warning").textContent = gStrings.ext.formatStringFromName(
-          "details.notification.unsigned", [this._addon.name, gStrings.brandShortName], 2
+          "details.notification.unsigned", [this._addon.name, gStrings.brandShortName]
         );
         var warningLink = document.getElementById("detail-warning-link");
         warningLink.value = gStrings.ext.GetStringFromName("details.notification.unsigned.link");
@@ -3117,7 +3067,7 @@ var gDetailView = {
         this.node.setAttribute("notification", "warning");
         document.getElementById("detail-warning").textContent = gStrings.ext.formatStringFromName(
           "details.notification.softblocked",
-          [this._addon.name], 1
+          [this._addon.name]
         );
         let warningLink = document.getElementById("detail-warning-link");
         warningLink.value = gStrings.ext.GetStringFromName("details.notification.softblocked.link");
@@ -3129,7 +3079,7 @@ var gDetailView = {
         this.node.setAttribute("notification", "warning");
         document.getElementById("detail-warning").textContent = gStrings.ext.formatStringFromName(
           "details.notification.outdated",
-          [this._addon.name], 1
+          [this._addon.name]
         );
         let warningLink = document.getElementById("detail-warning-link");
         warningLink.value = gStrings.ext.GetStringFromName("details.notification.outdated.link");
@@ -3141,7 +3091,7 @@ var gDetailView = {
         this.node.setAttribute("notification", "error");
         document.getElementById("detail-error").textContent = gStrings.ext.formatStringFromName(
           "details.notification.vulnerableUpdatable",
-          [this._addon.name], 1
+          [this._addon.name]
         );
         let errorLink = document.getElementById("detail-error-link");
         errorLink.value = gStrings.ext.GetStringFromName("details.notification.vulnerableUpdatable.link");
@@ -3153,7 +3103,7 @@ var gDetailView = {
         this.node.setAttribute("notification", "error");
         document.getElementById("detail-error").textContent = gStrings.ext.formatStringFromName(
           "details.notification.vulnerableNoUpdate",
-          [this._addon.name], 1
+          [this._addon.name]
         );
         let errorLink = document.getElementById("detail-error-link");
         errorLink.value = gStrings.ext.GetStringFromName("details.notification.vulnerableNoUpdate.link");
@@ -3167,7 +3117,7 @@ var gDetailView = {
         let warning = document.getElementById("detail-warning");
         warning.textContent =
           gStrings.ext.formatStringFromName("details.notification.gmpPending",
-                                            [this._addon.name], 1);
+                                            [this._addon.name]);
       } else {
         this.node.removeAttribute("notification");
       }
@@ -3366,13 +3316,6 @@ var gDetailView = {
         document.getElementById("contentAreaContextMenu").openPopupAtScreen = (...args) => {
           return parentContextMenuPopup.openPopupAtScreen(...args);
         };
-
-        // Subscribe a "contextmenu" listener to handle the context menus for the extension option page
-        // running in the extension process (the context menu will be handled only for extension running
-        // in OOP mode, but that's ok as it is the default on any platform that uses these extensions
-        // options pages).
-        browser.messageManager.addMessageListener(
-          "contextmenu", message => parentChromeWindow.openContextMenu(message));
       });
     } else {
       readyPromise = promiseEvent("load", browser, true);
@@ -3804,21 +3747,6 @@ var gDragDrop = {
   },
 };
 
-// Stub tabbrowser implementation for use by the tab-modal alert code
-// when an alert/prompt/confirm method is called in a WebExtensions options_ui page
-// (See Bug 1385548 for rationale).
-var gBrowser = {
-  getTabModalPromptBox(browser) {
-    const parentWindow = window.docShell.chromeEventHandler.ownerGlobal;
-
-    if (parentWindow.gBrowser) {
-      return parentWindow.gBrowser.getTabModalPromptBox(browser);
-    }
-
-    return null;
-  },
-};
-
 // Force the options_ui remote browser to recompute window.mozInnerScreenX and
 // window.mozInnerScreenY when the "addon details" page has been scrolled
 // (See Bug 1390445 for rationale).
@@ -3841,12 +3769,20 @@ const addonTypes = new Set([
   "extension", "theme", "plugin", "dictionary", "locale",
 ]);
 const htmlViewOpts = {
-  loadViewFn(type, param) {
+  loadViewFn(type, ...params) {
     let viewId = `addons://${type}`;
-    if (param) {
-      viewId += "/" + encodeURIComponent(param);
+    if (params.length > 0) {
+      for (let param of params) {
+        viewId += "/" + encodeURIComponent(param);
+      }
+    } else {
+      viewId += "/";
     }
+
     gViewController.loadView(viewId);
+  },
+  replaceWithDefaultViewFn() {
+    gViewController.replaceView(gViewDefault);
   },
   setCategoryFn(name) {
     if (addonTypes.has(name)) {
@@ -3874,22 +3810,29 @@ function getHtmlBrowser() {
 
 function htmlView(type) {
   return {
+    _browser: null,
     node: null,
     isRoot: type != "detail",
 
     initialize() {
-      this.node = getHtmlBrowser();
+      this._browser = getHtmlBrowser();
+      this.node = this._browser.closest("#html-view");
     },
 
     async show(param, request, state, refresh) {
       await htmlBrowserLoaded;
-      await this.node.contentWindow.show(type, param);
+      this.node.setAttribute("type", type);
+      this.node.setAttribute("param", param);
+      await this._browser.contentWindow.show(type, param);
+      gViewController.updateCommands();
       gViewController.notifyViewChanged();
     },
 
     async hide() {
       await htmlBrowserLoaded;
-      return this.node.contentWindow.hide();
+      this.node.removeAttribute("type");
+      this.node.removeAttribute("param");
+      return this._browser.contentWindow.hide();
     },
 
     getSelectedAddon() {

@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* globals ReflectedFluentElement */
+import {recordTelemetryEvent} from "../aboutLoginsUtils.js";
+import ReflectedFluentElement from "./reflected-fluent-element.js";
 
-class LoginFilter extends ReflectedFluentElement {
+export default class LoginFilter extends ReflectedFluentElement {
   connectedCallback() {
-    if (this.children.length) {
+    if (this.shadowRoot) {
       return;
     }
 
@@ -14,19 +15,17 @@ class LoginFilter extends ReflectedFluentElement {
     this.attachShadow({mode: "open"})
         .appendChild(loginFilterTemplate.content.cloneNode(true));
 
-    this.reflectFluentStrings();
+    this._input = this.shadowRoot.querySelector("input");
 
     this.addEventListener("input", this);
+
+    super.connectedCallback();
   }
 
   handleEvent(event) {
     switch (event.type) {
       case "input": {
-        this.dispatchEvent(new CustomEvent("AboutLoginsFilterLogins", {
-          bubbles: true,
-          composed: true,
-          detail: event.originalTarget.value,
-        }));
+        this._dispatchFilterEvent(event.originalTarget.value);
         break;
       }
     }
@@ -40,13 +39,33 @@ class LoginFilter extends ReflectedFluentElement {
     return this.reflectedFluentIDs;
   }
 
+  get value() {
+    return this._input.value;
+  }
+
+  set value(val) {
+    this._input.value = val;
+    this._dispatchFilterEvent(val);
+  }
+
   handleSpecialCaseFluentString(attrName) {
-    if (attrName != "placeholder") {
+    if (!this.shadowRoot ||
+        attrName != "placeholder") {
       return false;
     }
 
-    this.shadowRoot.querySelector("input").placeholder = this.getAttribute(attrName);
+    this._input.placeholder = this.getAttribute(attrName);
     return true;
+  }
+
+  _dispatchFilterEvent(value) {
+    this.dispatchEvent(new CustomEvent("AboutLoginsFilterLogins", {
+      bubbles: true,
+      composed: true,
+      detail: value,
+    }));
+
+    recordTelemetryEvent({object: "list", method: "filter"});
   }
 }
 customElements.define("login-filter", LoginFilter);

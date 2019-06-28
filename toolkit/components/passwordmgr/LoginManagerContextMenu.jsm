@@ -4,7 +4,7 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = ["LoginManagerContextMenu"];
+const EXPORTED_SYMBOLS = ["LoginManagerContextMenu"];
 
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
@@ -14,15 +14,15 @@ ChromeUtils.defineModuleGetter(this, "LoginHelper",
 ChromeUtils.defineModuleGetter(this, "LoginManagerParent",
                                "resource://gre/modules/LoginManagerParent.jsm");
 
-/*
+/**
  * Password manager object for the browser contextual menu.
  */
-var LoginManagerContextMenu = {
+this.LoginManagerContextMenu = {
   /**
    * Look for login items and add them to the contextual menu.
    *
-   * @param {HTMLInputElement} inputElement
-   *        The target input element of the context menu click.
+   * @param {Object} inputElementIdentifier
+   *        An identifier generated for the input element via ContentDOMReference.
    * @param {xul:browser} browser
    *        The browser for the document the context menu was open on.
    * @param {nsIURI} documentURI
@@ -31,7 +31,7 @@ var LoginManagerContextMenu = {
    *        when subframes are involved.
    * @returns {DocumentFragment} a document fragment with all the login items.
    */
-  addLoginsToMenu(inputElement, browser, documentURI) {
+  addLoginsToMenu(inputElementIdentifier, browser, documentURI) {
     let foundLogins = this._findLogins(documentURI);
 
     if (!foundLogins.length) {
@@ -58,7 +58,7 @@ var LoginManagerContextMenu = {
 
       // login is bound so we can keep the reference to each object.
       item.addEventListener("command", function(login, event) {
-        this._fillTargetField(login, inputElement, browser, documentURI);
+        this._fillTargetField(login, inputElementIdentifier, browser, documentURI);
       }.bind(this, login));
 
       fragment.appendChild(item);
@@ -84,7 +84,7 @@ var LoginManagerContextMenu = {
    * Find logins for the current URI.
    *
    * @param {nsIURI} documentURI
-   *        URI object with the hostname of the logins we want to find.
+   *        URI object with the origin of the logins we want to find.
    *        This isn't the same as the browser's top-level document URI
    *        when subframes are involved.
    *
@@ -92,7 +92,7 @@ var LoginManagerContextMenu = {
    */
   _findLogins(documentURI) {
     let searchParams = {
-      hostname: documentURI.displayPrePath,
+      origin: documentURI.displayPrePath,
       schemeUpgrades: LoginHelper.schemeUpgrades,
     };
     let logins = LoginHelper.searchLoginsWithObject(searchParams);
@@ -149,8 +149,8 @@ var LoginManagerContextMenu = {
   /**
    * @param {nsILoginInfo} login
    *        The login we want to fill the form with.
-   * @param {Element} inputElement
-   *        The target input element we want to fill.
+   * @param {Object} inputElementIdentifier
+   *        An identifier generated for the input element via ContentDOMReference.
    * @param {xul:browser} browser
    *        The target tab browser.
    * @param {nsIURI} documentURI
@@ -158,12 +158,12 @@ var LoginManagerContextMenu = {
    *        This isn't the same as the browser's top-level
    *        document URI when subframes are involved.
    */
-  _fillTargetField(login, inputElement, browser, documentURI) {
+  _fillTargetField(login, inputElementIdentifier, browser, documentURI) {
     LoginManagerParent.fillForm({
       browser,
+      inputElementIdentifier,
       loginFormOrigin: documentURI.displayPrePath,
       login,
-      inputElement,
     }).catch(Cu.reportError);
   },
 
@@ -178,7 +178,7 @@ var LoginManagerContextMenu = {
    */
   _getLocalizedString(key, formatArgs) {
     if (formatArgs) {
-      return this._stringBundle.formatStringFromName(key, formatArgs, formatArgs.length);
+      return this._stringBundle.formatStringFromName(key, formatArgs);
     }
     return this._stringBundle.GetStringFromName(key);
   },

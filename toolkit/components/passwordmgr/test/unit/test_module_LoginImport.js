@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -69,9 +67,9 @@ function promiseInsertLoginInfo(aConnection, aLoginInfo) {
   // properties beyond those being binded. So we might as well use an array as
   // it is simpler.
   let values = [
-    aLoginInfo.hostname,
+    aLoginInfo.origin,
     aLoginInfo.httpRealm,
-    aLoginInfo.formSubmitURL,
+    aLoginInfo.formActionOrigin,
     aLoginInfo.usernameField,
     aLoginInfo.passwordField,
     gLoginManagerCrypto.encrypt(aLoginInfo.username),
@@ -95,9 +93,9 @@ function promiseInsertLoginInfo(aConnection, aLoginInfo) {
 /**
  * Inserts a new disabled host entry in the database.
  */
-function promiseInsertDisabledHost(aConnection, aHostname) {
+function promiseInsertDisabledHost(aConnection, aOrigin) {
   return aConnection.execute("INSERT INTO moz_disabledHosts (hostname) " +
-                             "VALUES (?)", [aHostname]);
+                             "VALUES (?)", [aOrigin]);
 }
 
 // Tests
@@ -143,9 +141,9 @@ add_task(async function test_import() {
     return store.data.logins.some(function(loginDataItem) {
       let username = gLoginManagerCrypto.decrypt(loginDataItem.encryptedUsername);
       let password = gLoginManagerCrypto.decrypt(loginDataItem.encryptedPassword);
-      return loginDataItem.hostname == loginInfo.hostname &&
+      return loginDataItem.hostname == loginInfo.origin &&
              loginDataItem.httpRealm == loginInfo.httpRealm &&
-             loginDataItem.formSubmitURL == loginInfo.formSubmitURL &&
+             loginDataItem.formSubmitURL == loginInfo.formActionOrigin &&
              loginDataItem.usernameField == loginInfo.usernameField &&
              loginDataItem.passwordField == loginInfo.passwordField &&
              username == loginInfo.username &&

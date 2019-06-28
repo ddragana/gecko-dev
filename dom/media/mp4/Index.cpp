@@ -138,11 +138,9 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
     if (moofParser->mSinf.mDefaultEncryptionType == AtomType("cenc")) {
       cryptoScheme = CryptoScheme::Cenc;
       writer->mCrypto.mCryptoScheme = CryptoScheme::Cenc;
-      writer->mCrypto.mInitDataType = NS_LITERAL_STRING("cenc");
     } else if (moofParser->mSinf.mDefaultEncryptionType == AtomType("cbcs")) {
       cryptoScheme = CryptoScheme::Cbcs;
       writer->mCrypto.mCryptoScheme = CryptoScheme::Cbcs;
-      writer->mCrypto.mInitDataType = NS_LITERAL_STRING("cenc");
     } else {
       MOZ_ASSERT_UNREACHABLE(
           "Sample description entry reports sample is encrypted, but no "
@@ -151,17 +149,18 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
     }
   }
 
+  // We need to check if this moof has init data the CDM expects us to surface.
+  // This should happen when handling the first sample, even if that sample
+  // isn't encrypted (samples later in the moof may be).
   if (mCurrentSample == 0) {
     const nsTArray<Moof>& moofs = moofParser->Moofs();
     const Moof* currentMoof = &moofs[mCurrentMoof];
     if (!currentMoof->mPsshes.IsEmpty()) {
-      MOZ_ASSERT(sampleDescriptionEntry->mIsEncryptedEntry,
-                 "Unencrypted fragments should not contain pssh boxes");
-      MOZ_ASSERT(cryptoScheme != CryptoScheme::None);
       // This Moof contained crypto init data. Report that. We only report
       // the init data on the Moof's first sample, to avoid reporting it more
       // than once per Moof.
       writer->mCrypto.mInitDatas.AppendElements(currentMoof->mPsshes);
+      writer->mCrypto.mInitDataType = NS_LITERAL_STRING("cenc");
     }
   }
 
@@ -193,11 +192,16 @@ already_AddRefed<MediaRawData> SampleIterator::GetNext() {
           moofParser->mSinf.mDefaultConstantIV);
     }
 
-    MOZ_ASSERT((writer->mCrypto.mIVSize == 0 &&
-                !writer->mCrypto.mConstantIV.IsEmpty()) ||
-                   !s->mCencRange.IsEmpty(),
-               "Crypto information should contain either a constant IV, or "
-               "have auxiliary information that will contain an IV");
+    if ((writer->mCrypto.mIVSize == 0 &&
+         writer->mCrypto.mConstantIV.IsEmpty()) ||
+        (writer->mCrypto.mIVSize != 0 && s->mCencRange.IsEmpty())) {
+      // If mIVSize == 0, this indicates that a constant IV is in use, thus we
+      // should have a non empty constant IV. Alternatively if IV size is non
+      // zero, we should have an IV for this sample, which we need to look up
+      // in mCencRange (which must then be non empty). If neither of these are
+      // true we have bad crypto data, so bail.
+      return nullptr;
+    }
     // Parse auxiliary information if present
     if (!s->mCencRange.IsEmpty()) {
       // The size comes from an 8 bit field

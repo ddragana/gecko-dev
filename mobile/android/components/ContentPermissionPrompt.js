@@ -57,8 +57,6 @@ ContentPermissionPrompt.prototype = {
   },
 
   prompt: function(request) {
-    let isApp = request.principal.appId !== Ci.nsIScriptSecurityManager.NO_APP_ID && request.principal.appId !== Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID;
-
     // Only allow exactly one permission rquest here.
     let types = request.types.QueryInterface(Ci.nsIArray);
     if (types.length != 1) {
@@ -121,7 +119,7 @@ ContentPermissionPrompt.prototype = {
           Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION);
         // If we are in private mode, then it doesn't matter if the notification is desktop and also
         // it shouldn't matter if the Don't show checkbox was checked because it shouldn't be show in the first place
-        } else if (isApp || (isPrivate && isPermanent)) {
+        } else if (isPrivate && isPermanent) {
           // Otherwise allow the permission for the current session if the request comes from an app
           // or if the request was made in private mode
           Services.perms.addFromPrincipal(request.principal, perm.type, Ci.nsIPermissionManager.ALLOW_ACTION, Ci.nsIPermissionManager.EXPIRE_SESSION);
@@ -135,7 +133,7 @@ ContentPermissionPrompt.prototype = {
     let chromeWin = this.getChromeForRequest(request);
     let requestor = (chromeWin.BrowserApp && chromeWin.BrowserApp.manifest) ?
         "'" + chromeWin.BrowserApp.manifest.name + "'" : request.principal.URI.host;
-    let message = browserBundle.formatStringFromName(entityName + ".ask", [requestor], 1);
+    let message = browserBundle.formatStringFromName(entityName + ".ask", [requestor]);
     // desktopNotification doesn't have a checkbox
     let options;
     if (entityName == "desktopNotification2") {

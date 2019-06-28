@@ -161,7 +161,7 @@ var WebrtcUI = {
       aSubject.callID);
   },
 
-  getDeviceButtons: function(audioDevices, videoDevices, aCallID, aUri) {
+  getDeviceButtons: function(audioDevices, videoDevices, aCallID, aPrincipal) {
     return [{
       label: Strings.browser.GetStringFromName("getUserMedia.denyRequest.label"),
       callback: function() {
@@ -187,7 +187,7 @@ var WebrtcUI = {
           let perms = Services.perms;
           // Although the lifetime is "session" it will be removed upon
           // use so it's more of a one-shot.
-          perms.add(aUri, "MediaManagerVideo", perms.ALLOW_ACTION, perms.EXPIRE_SESSION);
+          perms.addFromPrincipal(aPrincipal, "MediaManagerVideo", perms.ALLOW_ACTION, perms.EXPIRE_SESSION);
         }
 
         Services.obs.notifyObservers(allowedDevices, "getUserMedia:response:allow", aCallID);
@@ -233,7 +233,7 @@ var WebrtcUI = {
 
         if (device.name.trim() == "") {
           defaultCount++;
-          return Strings.browser.formatStringFromName("getUserMedia." + aType + ".default", [defaultCount], 1);
+          return Strings.browser.formatStringFromName("getUserMedia." + aType + ".default", [defaultCount]);
         }
         return device.name;
       }, this);
@@ -315,11 +315,11 @@ var WebrtcUI = {
       return;
 
     let chromeWin = this.getChromeWindow(aContentWindow);
-    let uri = aContentWindow.document.documentURIObject;
-    let host = uri.host;
+    let principal = aContentWindow.document.nodePrincipal;
+    let host = principal.URI.host;
     let requestor = (chromeWin.BrowserApp && chromeWin.BrowserApp.manifest) ?
           "'" + chromeWin.BrowserApp.manifest.name + "'" : host;
-    let message = Strings.browser.formatStringFromName("getUserMedia.share" + requestType + ".message", [ requestor ], 1);
+    let message = Strings.browser.formatStringFromName("getUserMedia.share" + requestType + ".message", [ requestor ]);
 
     let options = { inputs: [] };
     if (videoDevices.length > 1 || audioDevices.length > 0) {
@@ -331,7 +331,7 @@ var WebrtcUI = {
       this._addDevicesToOptions(audioDevices, "audioDevice", options);
     }
 
-    let buttons = this.getDeviceButtons(audioDevices, videoDevices, aCallID, uri);
+    let buttons = this.getDeviceButtons(audioDevices, videoDevices, aCallID, principal);
 
     DoorHanger.show(aContentWindow, message, "webrtc-request", buttons, options, "WEBRTC");
   },

@@ -9,10 +9,12 @@
 
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
+#include "mozilla/UniquePtr.h"
 
 namespace mozilla {
 namespace layers {
 
+class CanvasParent;
 class CompositorOptions;
 
 /**
@@ -153,6 +155,9 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
 
   bool DeallocPTextureParent(PTextureParent* actor) override;
 
+  mozilla::ipc::IPCResult RecvInitPCanvasParent(
+      Endpoint<PCanvasParent>&& aEndpoint) final;
+
   bool IsSameProcess() const override;
 
   PCompositorWidgetParent* AllocPCompositorWidgetParent(
@@ -175,9 +180,8 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
 
   void UpdatePaintTime(LayerTransactionParent* aLayerTree,
                        const TimeDuration& aPaintTime) override;
-  void RegisterPayload(
-      LayerTransactionParent* aLayerTree,
-      const InfallibleTArray<CompositionPayload>& aPayload) override;
+  void RegisterPayloads(LayerTransactionParent* aLayerTree,
+                        const nsTArray<CompositionPayload>& aPayload) override;
 
   PWebRenderBridgeParent* AllocPWebRenderBridgeParent(
       const wr::PipelineId& aPipelineId,
@@ -188,6 +192,9 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
                            bool aActive) override;
 
   bool IsRemote() const override { return true; }
+
+  UniquePtr<SurfaceDescriptor> LookupSurfaceDescriptorForClientDrawTarget(
+      const uintptr_t aDrawTarget) final;
 
  private:
   // Private destructor, to discourage deletion outside of Release():
@@ -204,6 +211,8 @@ class ContentCompositorBridgeParent final : public CompositorBridgeParentBase {
   // transaction is received
   bool mNotifyAfterRemotePaint;
   bool mDestroyCalled;
+
+  RefPtr<CanvasParent> mCanvasParent;
 };
 
 }  // namespace layers

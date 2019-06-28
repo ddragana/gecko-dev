@@ -23,10 +23,6 @@ function getAllMessagesPayloadById(state) {
   return state.messages.messagesPayloadById;
 }
 
-function getAllMessagesTableDataById(state) {
-  return state.messages.messagesTableDataById;
-}
-
 function getAllGroupsById(state) {
   return state.messages.groupsById;
 }
@@ -63,12 +59,12 @@ function getAllWarningGroupsById(state) {
   return state.messages.warningGroupsById;
 }
 
-function isMessageInWarningGroup(state, message) {
+function isMessageInWarningGroup(message, visibleMessages = []) {
   if (!getWarningGroupType(message)) {
     return false;
   }
 
-  return getVisibleMessages(state).includes(getParentWarningGroupMessageId(message));
+  return visibleMessages.includes(getParentWarningGroupMessageId(message));
 }
 
 module.exports = {
@@ -76,7 +72,6 @@ module.exports = {
   getAllWarningGroupsById,
   getAllMessagesById,
   getAllMessagesPayloadById,
-  getAllMessagesTableDataById,
   getAllMessagesUiById,
   getAllNetworkMessagesUpdateById,
   getAllRepeatById,

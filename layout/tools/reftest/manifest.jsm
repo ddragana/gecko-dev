@@ -464,6 +464,10 @@ function BuildConditionSandbox(aURL) {
 
     sandbox.is64Bit = xr.is64Bit;
 
+    // GeckoView is currently uniquely identified by "android + e10s" but
+    // we might want to make this condition more precise in the future.
+    sandbox.geckoview = (sandbox.Android && g.browserIsRemote);
+
     // Scrollbars that are semi-transparent. See bug 1169666.
     sandbox.transparentScrollbars = xr.widgetToolkit == "gtk3";
 
@@ -549,7 +553,8 @@ sandbox.compareRetainedDisplayLists = g.compareRetainedDisplayLists;
     // Running in a test-verify session?
     sandbox.verify = prefs.getBoolPref("reftest.verify", false);
 
-    // Running with serviceworker e10s redesign enabled?
+    // Running with a variant enabled?
+    sandbox.fission = prefs.getBoolPref("fission.autostart", false);
     sandbox.serviceWorkerE10s = prefs.getBoolPref("dom.serviceWorkers.parent_intercept", false);
 
     if (!g.dumpedConditionSandbox) {

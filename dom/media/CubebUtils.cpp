@@ -32,6 +32,9 @@
 #ifdef MOZ_WIDGET_ANDROID
 #  include "GeneratedJNIWrappers.h"
 #endif
+#ifdef XP_WIN
+#  include "mozilla/mscom/EnsureMTA.h"
+#endif
 
 #define AUDIOIPC_POOL_SIZE_DEFAULT 2
 #define AUDIOIPC_STACK_SIZE_DEFAULT (64 * 4096)
@@ -78,6 +81,9 @@ extern void audioipc_server_stop(void*);
 // These functions are provided by audioipc-client crate
 extern int audioipc_client_init(cubeb**, const char*,
                                 const AudioIpcInitParams*);
+#ifdef XP_LINUX
+extern void audioipc_init_threads(const AudioIpcInitParams*);
+#endif
 }
 
 namespace mozilla {
@@ -398,14 +404,19 @@ void InitAudioIPCConnection() {
   auto promise = contentChild->SendCreateAudioIPCConnection();
   promise->Then(
       AbstractThread::MainThread(), __func__,
-      [](ipc::FileDescriptor&& aFD) {
+      [](dom::FileDescOrError&& aFD) {
         StaticMutexAutoLock lock(sMutex);
         MOZ_ASSERT(!sIPCConnection);
-        sIPCConnection = new ipc::FileDescriptor(std::move(aFD));
+        if (aFD.type() == dom::FileDescOrError::Type::TFileDescriptor) {
+          sIPCConnection = new ipc::FileDescriptor(std::move(aFD));
+        } else {
+          MOZ_LOG(gCubebLog, LogLevel::Error,
+                  ("SendCreateAudioIPCConnection failed: invalid FD"));
+        }
       },
       [](mozilla::ipc::ResponseRejectReason&& aReason) {
         MOZ_LOG(gCubebLog, LogLevel::Error,
-                ("SendCreateAudioIPCConnection failed: %d", int(aReason)));
+                ("SendCreateAudioIPCConnection rejected: %d", int(aReason)));
       });
 }
 #endif
@@ -432,6 +443,18 @@ ipc::FileDescriptor CreateAudioIPCConnection() {
   return ipc::FileDescriptor();
 #endif
 }
+
+#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+void InitAudioThreads() {
+  AudioIpcInitParams initParams;
+  initParams.mPoolSize = sAudioIPCPoolSize;
+  initParams.mStackSize = sAudioIPCStackSize;
+  initParams.mThreadCreateCallback = [](const char* aName) {
+    PROFILER_REGISTER_THREAD(aName);
+  };
+  audioipc_init_threads(&initParams);
+}
+#endif
 
 cubeb* GetCubebContextUnlocked() {
   sMutex.AssertCurrentThreadOwns();
@@ -460,18 +483,23 @@ cubeb* GetCubebContextUnlocked() {
         "Did not initialize sbrandName, and not on the main thread?");
   }
 
+  int rv = CUBEB_ERROR;
 #ifdef MOZ_CUBEB_REMOTING
   MOZ_LOG(gCubebLog, LogLevel::Info,
           ("%s: %s", PREF_CUBEB_SANDBOX, sCubebSandbox ? "true" : "false"));
 
-  int rv = CUBEB_OK;
   if (sCubebSandbox) {
-    if (XRE_IsParentProcess()) {
+    if (XRE_IsParentProcess() && !sIPCConnection) {
       // TODO: Don't use audio IPC when within the same process.
-      MOZ_ASSERT(!sIPCConnection);
-      sIPCConnection = new ipc::FileDescriptor(CreateAudioIPCConnection());
-    } else {
-      MOZ_DIAGNOSTIC_ASSERT(sIPCConnection);
+      auto fd = CreateAudioIPCConnection();
+      if (fd.IsValid()) {
+        sIPCConnection = new ipc::FileDescriptor(fd);
+      }
+    }
+    if (NS_WARN_IF(!sIPCConnection)) {
+      // Either the IPC connection failed to init or we're still waiting for
+      // InitAudioIPCConnection to complete (bug 1454782).
+      return nullptr;
     }
 
     AudioIpcInitParams initParams;
@@ -490,11 +518,17 @@ cubeb* GetCubebContextUnlocked() {
 
     rv = audioipc_client_init(&sCubebContext, sBrandName, &initParams);
   } else {
-    rv = cubeb_init(&sCubebContext, sBrandName, sCubebBackendName.get());
+#endif  // MOZ_CUBEB_REMOTING
+#ifdef XP_WIN
+    mozilla::mscom::EnsureMTA([&]() -> void {
+#endif
+      rv = cubeb_init(&sCubebContext, sBrandName, sCubebBackendName.get());
+#ifdef XP_WIN
+    });
+#endif
+#ifdef MOZ_CUBEB_REMOTING
   }
   sIPCConnection = nullptr;
-#else   // !MOZ_CUBEB_REMOTING
-  int rv = cubeb_init(&sCubebContext, sBrandName, sCubebBackendName.get());
 #endif  // MOZ_CUBEB_REMOTING
   NS_WARNING_ASSERTION(rv == CUBEB_OK, "Could not get a cubeb context.");
   sCubebState =

@@ -40,7 +40,6 @@
 #include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ConsoleUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/InternalHeaders.h"
@@ -444,6 +443,12 @@ void ServiceWorkerManager::MaybeStartShutdown() {
       queue->CancelAll();
     }
     it1.UserData()->mJobQueues.Clear();
+
+    for (auto it2 = it1.UserData()->mInfos.Iter(); !it2.Done(); it2.Next()) {
+      RefPtr<ServiceWorkerRegistrationInfo> regInfo = it2.UserData();
+      regInfo->Clear();
+    }
+    it1.UserData()->mInfos.Clear();
   }
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();

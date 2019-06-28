@@ -439,8 +439,6 @@ PlacesViewBase.prototype = {
     elt.setAttribute("image", aPlacesNode.icon);
   },
 
-  nodeAnnotationChanged() {},
-
   nodeTitleChanged:
   function PVB_nodeTitleChanged(aPlacesNode, aNewTitle) {
     let elt = this._getDOMNodeForPlacesNode(aPlacesNode);
@@ -1233,23 +1231,6 @@ PlacesToolbar.prototype = {
     PlacesViewBase.prototype.nodeMoved.apply(this, arguments);
   },
 
-  nodeAnnotationChanged:
-  function PT_nodeAnnotationChanged(aPlacesNode, aAnno) {
-    let elt = this._getDOMNodeForPlacesNode(aPlacesNode, true);
-    // Nothing to do if it's a never-visible node.
-    if (!elt || elt == this._rootElt)
-      return;
-
-    // We're notified for the menupopup, not the containing toolbarbutton.
-    if (elt.localName == "menupopup")
-      elt = elt.parentNode;
-
-    if (elt.parentNode != this._rootElt) { // Node is on the toolbar.
-      // Node is in a submenu.
-      PlacesViewBase.prototype.nodeAnnotationChanged.apply(this, arguments);
-    }
-  },
-
   nodeTitleChanged: function PT_nodeTitleChanged(aPlacesNode, aNewTitle) {
     let elt = this._getDOMNodeForPlacesNode(aPlacesNode, true);
 
@@ -1293,9 +1274,9 @@ PlacesToolbar.prototype = {
     // The mouse is no longer dragging over the stored menubutton.
     // Close the menubutton, clear out drag styles, and clear all
     // timers for opening/closing it.
-    if (this._overFolder.elt && this._overFolder.elt.lastElementChild) {
-      if (!this._overFolder.elt.lastElementChild.hasAttribute("dragover")) {
-        this._overFolder.elt.lastElementChild.hidePopup();
+    if (this._overFolder.elt && this._overFolder.elt.menupopup) {
+      if (!this._overFolder.elt.menupopup.hasAttribute("dragover")) {
+        this._overFolder.elt.menupopup.hidePopup();
       }
       this._overFolder.elt.removeAttribute("dragover");
       this._overFolder.elt = null;
@@ -1435,7 +1416,7 @@ PlacesToolbar.prototype = {
       // * Timer to open a menubutton that's being dragged over.
       // Set the autoopen attribute on the folder's menupopup so that
       // the menu will automatically close when the mouse drags off of it.
-      this._overFolder.elt.lastElementChild.setAttribute("autoopened", "true");
+      this._overFolder.elt.menupopup.setAttribute("autoopened", "true");
       this._overFolder.elt.open = true;
       this._overFolder.openTimer = null;
     } else if (aTimer == this._overFolder.closeTimer) {
@@ -1519,7 +1500,7 @@ PlacesToolbar.prototype = {
 
       // If the menu is open, close it.
       if (draggedElt.open) {
-        draggedElt.lastElementChild.hidePopup();
+        draggedElt.menupopup.hidePopup();
         draggedElt.open = false;
       }
     }
@@ -1859,8 +1840,6 @@ PlacesPanelMenuView.prototype = {
     this._removeChild(elt);
     this._rootElt.insertBefore(elt, this._rootElt.children[aNewIndex]);
   },
-
-  nodeAnnotationChanged() {},
 
   nodeTitleChanged: function PAMV_nodeTitleChanged(aPlacesNode, aNewTitle) {
     let elt = this._getDOMNodeForPlacesNode(aPlacesNode);

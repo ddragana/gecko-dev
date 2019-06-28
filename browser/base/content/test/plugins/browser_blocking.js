@@ -11,9 +11,8 @@ add_task(async function() {
   registerCleanupFunction(async function() {
     clearAllPluginPermissions();
     updateAllTestPlugins(Ci.nsIPluginTag.STATE_ENABLED);
-    Services.prefs.clearUserPref("plugins.click_to_play");
     Services.prefs.clearUserPref("extensions.blocklist.suppressUI");
-    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+    await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
     resetBlocklist();
     gBrowser.removeCurrentTab();
     window.focus();
@@ -28,7 +27,6 @@ add_task(async function() {
   updateAllTestPlugins(Ci.nsIPluginTag.STATE_CLICKTOPLAY);
 
   Services.prefs.setBoolPref("extensions.blocklist.suppressUI", true);
-  Services.prefs.setBoolPref("plugins.click_to_play", true);
 
   // Prime the content process
   await promiseTabLoadEvent(gBrowser.selectedTab, "data:text/html,<html>hi</html>");
@@ -38,7 +36,7 @@ add_task(async function() {
 
 add_task(async function() {
   // enable hard blocklisting of test
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableUpdatable.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableUpdatable", gTestBrowser);
 
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
@@ -104,7 +102,7 @@ add_task(async function() {
 add_task(async function() {
   updateAllTestPlugins(Ci.nsIPluginTag.STATE_CLICKTOPLAY);
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableNoUpdate.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableNoUpdate", gTestBrowser);
 
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 
@@ -203,7 +201,7 @@ add_task(async function() {
 // Test that "always allow"-ing a plugin will not allow it when it becomes
 // blocklisted.
 add_task(async function() {
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 
   updateAllTestPlugins(Ci.nsIPluginTag.STATE_CLICKTOPLAY);
 
@@ -229,7 +227,7 @@ add_task(async function() {
   pluginInfo = await promiseForPluginInfo("test");
   ok(pluginInfo.activated, "Test 24a, Plugin should be active.");
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableUpdatable.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginVulnerableUpdatable", gTestBrowser);
 });
 
 // the plugin is now blocklisted, so it should not automatically load
@@ -257,7 +255,7 @@ add_task(async function() {
 
   clearAllPluginPermissions();
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockNoPlugins", gTestBrowser);
 });
 
 // Plugin sync removal test. Note this test produces a notification drop down since
@@ -283,7 +281,7 @@ add_task(async function() {
 add_task(async function() {
   clearAllPluginPermissions();
 
-  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginInfoURL.xml", gTestBrowser);
+  await asyncSetAndUpdateBlocklist(gTestRoot + "blockPluginInfoURL", gTestBrowser);
 
   await promiseTabLoadEvent(gBrowser.selectedTab, gTestRoot + "plugin_test.html");
 

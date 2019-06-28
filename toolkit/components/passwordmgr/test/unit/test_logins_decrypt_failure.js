@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -58,7 +56,7 @@ add_task(function test_logins_decrypt_failure() {
   // Finding logins doesn't return the non-decryptable duplicates.
   Assert.equal(Services.logins.findLogins("http://www.example.com",
                                           "", "").length, 1);
-  let matchData = newPropertyBag({ hostname: "http://www.example.com" });
+  let matchData = newPropertyBag({ origin: "http://www.example.com" });
   Assert.equal(Services.logins.searchLogins(matchData).length, 1);
 
   // Removing single logins does not remove non-decryptable logins.

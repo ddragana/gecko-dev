@@ -693,9 +693,7 @@ nsSocketOutputStream::AsyncWait(nsIOutputStreamCallback* callback,
 //-----------------------------------------------------------------------------
 
 nsSocketTransport::nsSocketTransport()
-    : mTypes(nullptr),
-      mTypeCount(0),
-      mPort(0),
+    : mPort(0),
       mProxyPort(0),
       mOriginPort(0),
       mProxyTransparent(false),
@@ -751,23 +749,9 @@ nsSocketTransport::nsSocketTransport()
 
 nsSocketTransport::~nsSocketTransport() {
   SOCKET_LOG(("destroying nsSocketTransport @%p\n", this));
-
-  CleanupTypes();
 }
 
-void nsSocketTransport::CleanupTypes() {
-  // cleanup socket type info
-  if (mTypes) {
-    for (uint32_t i = 0; i < mTypeCount; ++i) {
-      PL_strfree(mTypes[i]);
-    }
-    free(mTypes);
-    mTypes = nullptr;
-  }
-  mTypeCount = 0;
-}
-
-nsresult nsSocketTransport::Init(const char** types, uint32_t typeCount,
+nsresult nsSocketTransport::Init(const nsTArray<nsCString>& types,
                                  const nsACString& host, uint16_t port,
                                  const nsACString& hostRoute,
                                  uint16_t portRoute,
@@ -814,8 +798,8 @@ nsresult nsSocketTransport::Init(const char** types, uint32_t typeCount,
        mProxyHost.get(), mProxyPort));
 
   // include proxy type as a socket type if proxy type is not "http"
-  mTypeCount = typeCount + (proxyType != nullptr);
-  if (!mTypeCount) return NS_OK;
+  uint32_t typeCount = types.Length() + (proxyType != nullptr);
+  if (!typeCount) return NS_OK;
 
   // if we have socket types, then the socket provider service had
   // better exist!
@@ -823,34 +807,30 @@ nsresult nsSocketTransport::Init(const char** types, uint32_t typeCount,
   nsCOMPtr<nsISocketProviderService> spserv =
       nsSocketProviderService::GetOrCreate();
 
-  mTypes = (char**)malloc(mTypeCount * sizeof(char*));
-  if (!mTypes) return NS_ERROR_OUT_OF_MEMORY;
+  if (!mTypes.SetCapacity(typeCount, fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   // now verify that each socket type has a registered socket provider.
-  for (uint32_t i = 0, type = 0; i < mTypeCount; ++i) {
+  for (uint32_t i = 0, type = 0; i < typeCount; ++i) {
     // store socket types
     if (i == 0 && proxyType)
-      mTypes[i] = PL_strdup(proxyType);
+      mTypes.AppendElement(proxyType);
     else
-      mTypes[i] = PL_strdup(types[type++]);
+      mTypes.AppendElement(types[type++]);
 
-    if (!mTypes[i]) {
-      mTypeCount = i;
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    if (strcmp(mTypes[0], "quic")) {
-        nsCOMPtr<nsISocketProvider> provider;
-        rv = spserv->GetSocketProvider(mTypes[i], getter_AddRefs(provider));
-        if (NS_FAILED(rv)) {
-          NS_WARNING("no registered socket provider");
-          return rv;
-        }
+    if (!mTypes[i].EqualsLiteral("quic")) {
+      nsCOMPtr<nsISocketProvider> provider;
+      rv = spserv->GetSocketProvider(mTypes[i].get(), getter_AddRefs(provider));
+      if (NS_FAILED(rv)) {
+        NS_WARNING("no registered socket provider");
+       return rv;
+      }
     }
 
     // note if socket type corresponds to a transparent proxy
     // XXX don't hardcode SOCKS here (use proxy info's flags instead).
-    if ((strcmp(mTypes[i], "socks") == 0) ||
-        (strcmp(mTypes[i], "socks4") == 0)) {
+    if (mTypes[i].EqualsLiteral("socks") || mTypes[i].EqualsLiteral("socks4")) {
       mProxyTransparent = true;
 
       if (proxyInfo->Flags() & nsIProxyInfo::TRANSPARENT_PROXY_RESOLVES_HOST) {
@@ -887,7 +867,6 @@ nsresult nsSocketTransport::InitWithName(const char* name, size_t length) {
     mHost.Assign(name, length);
   }
   mPort = 0;
-  mTypeCount = 0;
 
   mNetAddr.local.family = AF_LOCAL;
   memcpy(mNetAddr.local.path, name, length);
@@ -1073,8 +1052,8 @@ nsresult nsSocketTransport::ResolveHost() {
   if (mSocketTransportService->IsEsniEnabled() && NS_SUCCEEDED(rv) &&
       !(mConnectionFlags & (DONT_TRY_ESNI | BE_CONSERVATIVE))) {
     bool isSSL = false;
-    for (unsigned int i = 0; i < mTypeCount; ++i) {
-      if (!strcmp(mTypes[i], "ssl")) {
+    for (unsigned int i = 0; i < mTypes.Length(); ++i) {
+      if (mTypes[i].EqualsLiteral("ssl")) {
         isSSL = true;
         break;
       }
@@ -1116,7 +1095,7 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
   proxyTransparent = false;
   usingSSL = false;
 
-  if (mTypeCount == 0) {
+  if (mTypes.IsEmpty()) {
     fd = PR_OpenTCPSocket(mNetAddr.raw.family);
     rv = fd ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
   } else {
@@ -1128,7 +1107,7 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
     fd = nullptr;
     uint32_t i = 0;
 
-    if (!strcmp(mTypes[0], "quic")) {
+    if (mTypes[0].EqualsLiteral("quic")) {
         fd = PR_OpenUDPSocket(mNetAddr.raw.family);
         rv = fd ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
         mUsingQuic = true;
@@ -1149,6 +1128,7 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
            SOCKET_LOG(("  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
                        mCallbacks.get()));
         }
+
         // don't call into PSM while holding mLock!!
         nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
         if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
@@ -1156,121 +1136,123 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
         usingSSL = true;
     } else {
 
-        nsCOMPtr<nsISocketProviderService> spserv =
-            nsSocketProviderService::GetOrCreate();
+      nsCOMPtr<nsISocketProviderService> spserv =
+          nsSocketProviderService::GetOrCreate();
 
-        // by setting host to mOriginHost, instead of mHost we send the
-        // SocketProvider (e.g. PSM) the origin hostname but can still do DNS
-        // on an explicit alternate service host name
-        const char* host = mOriginHost.get();
-        int32_t port = (int32_t)mOriginPort;
-        nsCOMPtr<nsIProxyInfo> proxyInfo = mProxyInfo;
-        uint32_t controlFlags = 0;
+      // by setting host to mOriginHost, instead of mHost we send the
+      // SocketProvider (e.g. PSM) the origin hostname but can still do DNS
+      // on an explicit alternate service host name
+      const char* host = mOriginHost.get();
+      int32_t port = (int32_t)mOriginPort;
+      nsCOMPtr<nsIProxyInfo> proxyInfo = mProxyInfo;
+      uint32_t controlFlags = 0;
 
-        for (i = 0; i < mTypeCount; ++i) {
-          nsCOMPtr<nsISocketProvider> provider;
+      uint32_t i;
+      for (i = 0; i < mTypes.Length(); ++i) {
+        nsCOMPtr<nsISocketProvider> provider;
 
-          SOCKET_LOG(("  pushing io layer [%u:%s]\n", i, mTypes[i]));
+        SOCKET_LOG(("  pushing io layer [%u:%s]\n", i, mTypes[i].get()));
+  
+        rv = spserv->GetSocketProvider(mTypes[i].get(), getter_AddRefs(provider));
+        if (NS_FAILED(rv)) break;
 
-          rv = spserv->GetSocketProvider(mTypes[i], getter_AddRefs(provider));
-          if (NS_FAILED(rv)) break;
+        if (mProxyTransparentResolvesHost)
+          controlFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
 
-          if (mProxyTransparentResolvesHost)
-            controlFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
+        if (mConnectionFlags & nsISocketTransport::ANONYMOUS_CONNECT)
+          controlFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
 
-          if (mConnectionFlags & nsISocketTransport::ANONYMOUS_CONNECT)
-            controlFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
+        if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
+          controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
 
-          if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
-            controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
+        if (mConnectionFlags & nsISocketTransport::MITM_OK)
+          controlFlags |= nsISocketProvider::MITM_OK;
 
-          if (mConnectionFlags & nsISocketTransport::MITM_OK)
-            controlFlags |= nsISocketProvider::MITM_OK;
+        if (mConnectionFlags & nsISocketTransport::BE_CONSERVATIVE)
+          controlFlags |= nsISocketProvider::BE_CONSERVATIVE;
 
-          if (mConnectionFlags & nsISocketTransport::BE_CONSERVATIVE)
-            controlFlags |= nsISocketProvider::BE_CONSERVATIVE;
+        nsCOMPtr<nsISupports> secinfo;
+        if (i == 0) {
+          // if this is the first type, we'll want the
+          // service to allocate a new socket
 
-          nsCOMPtr<nsISupports> secinfo;
-          if (i == 0) {
-            // if this is the first type, we'll want the
-            // service to allocate a new socket
-
-            // Most layers _ESPECIALLY_ PSM want the origin name here as they
-            // will use it for secure checks, etc.. and any connection management
-            // differences between the origin name and the routed name can be
-            // taken care of via DNS. However, SOCKS is a special case as there is
-            // no DNS. in the case of SOCKS and PSM the PSM is a separate layer
-            // and receives the origin name.
-            const char* socketProviderHost = host;
-            int32_t socketProviderPort = port;
-            if (mProxyTransparentResolvesHost &&
-                (!strcmp(mTypes[0], "socks") || !strcmp(mTypes[0], "socks4"))) {
-              SOCKET_LOG(("SOCKS %d Host/Route override: %s:%d -> %s:%d\n",
-                          mHttpsProxy, socketProviderHost, socketProviderPort,
-                          mHost.get(), mPort));
-              socketProviderHost = mHost.get();
-              socketProviderPort = mPort;
-            }
-
-            // when https proxying we want to just connect to the proxy as if
-            // it were the end host (i.e. expect the proxy's cert)
-
-            rv = provider->NewSocket(
-                mNetAddr.raw.family,
-                mHttpsProxy ? mProxyHost.get() : socketProviderHost,
-                mHttpsProxy ? mProxyPort : socketProviderPort, proxyInfo,
-                mOriginAttributes, controlFlags, mTlsFlags, &fd,
-                getter_AddRefs(secinfo));
-
-            if (NS_SUCCEEDED(rv) && !fd) {
-              MOZ_ASSERT_UNREACHABLE(
-                  "NewSocket succeeded but failed to "
-                  "create a PRFileDesc");
-              rv = NS_ERROR_UNEXPECTED;
-            }
-          } else {
-            // the socket has already been allocated,
-            // so we just want the service to add itself
-            // to the stack (such as pushing an io layer)
-            rv = provider->AddToSocket(mNetAddr.raw.family, host, port, proxyInfo,
-                                       mOriginAttributes, controlFlags, mTlsFlags,
-                                       fd, getter_AddRefs(secinfo));
+          // Most layers _ESPECIALLY_ PSM want the origin name here as they
+          // will use it for secure checks, etc.. and any connection management
+          // differences between the origin name and the routed name can be
+          // taken care of via DNS. However, SOCKS is a special case as there is
+          // no DNS. in the case of SOCKS and PSM the PSM is a separate layer
+          // and receives the origin name.
+          const char* socketProviderHost = host;
+          int32_t socketProviderPort = port;
+          if (mProxyTransparentResolvesHost &&
+              (mTypes[0].EqualsLiteral("socks") ||
+               mTypes[0].EqualsLiteral("socks4"))) {
+            SOCKET_LOG(("SOCKS %d Host/Route override: %s:%d -> %s:%d\n",
+                        mHttpsProxy, socketProviderHost, socketProviderPort,
+                        mHost.get(), mPort));
+            socketProviderHost = mHost.get();
+            socketProviderPort = mPort;
           }
 
-          // controlFlags = 0; not used below this point...
-          if (NS_FAILED(rv)) break;
+          // when https proxying we want to just connect to the proxy as if
+          // it were the end host (i.e. expect the proxy's cert)
 
-          // if the service was ssl or starttls, we want to hold onto the socket
-          // info
-          bool isSSL = (strcmp(mTypes[i], "ssl") == 0);
-          if (isSSL || (strcmp(mTypes[i], "starttls") == 0)) {
-            // remember security info and give notification callbacks to PSM...
-            nsCOMPtr<nsIInterfaceRequestor> callbacks;
-            {
-              MutexAutoLock lock(mLock);
-              mSecInfo = secinfo;
-              callbacks = mCallbacks;
-              SOCKET_LOG(("  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
-                          mCallbacks.get()));
-            }
-            // don't call into PSM while holding mLock!!
-            nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
-            if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
-              // remember if socket type is SSL so we can ProxyStartSSL if need be.
-            usingSSL = isSSL;
-          } else if ((strcmp(mTypes[i], "socks") == 0) ||
-                     (strcmp(mTypes[i], "socks4") == 0)) {
-            // since socks is transparent, any layers above
-            // it do not have to worry about proxy stuff
-            proxyInfo = nullptr;
-            proxyTransparent = true;
+          rv = provider->NewSocket(
+              mNetAddr.raw.family,
+              mHttpsProxy ? mProxyHost.get() : socketProviderHost,
+              mHttpsProxy ? mProxyPort : socketProviderPort, proxyInfo,
+              mOriginAttributes, controlFlags, mTlsFlags, &fd,
+              getter_AddRefs(secinfo));
+
+          if (NS_SUCCEEDED(rv) && !fd) {
+            MOZ_ASSERT_UNREACHABLE(
+                "NewSocket succeeded but failed to "
+                "create a PRFileDesc");
+            rv = NS_ERROR_UNEXPECTED;
           }
+        } else {
+          // the socket has already been allocated,
+          // so we just want the service to add itself
+          // to the stack (such as pushing an io layer)
+          rv = provider->AddToSocket(mNetAddr.raw.family, host, port, proxyInfo,
+                                     mOriginAttributes, controlFlags, mTlsFlags,
+                                     fd, getter_AddRefs(secinfo));
         }
+
+        // controlFlags = 0; not used below this point...
+        if (NS_FAILED(rv)) break;
+
+        // if the service was ssl or starttls, we want to hold onto the socket
+        // info
+        bool isSSL = mTypes[i].EqualsLiteral("ssl");
+        if (isSSL || mTypes[i].EqualsLiteral("starttls")) {
+          // remember security info and give notification callbacks to PSM...
+          nsCOMPtr<nsIInterfaceRequestor> callbacks;
+          {
+             MutexAutoLock lock(mLock);
+             mSecInfo = secinfo;
+             callbacks = mCallbacks;
+             SOCKET_LOG(("  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
+                         mCallbacks.get()));
+          }
+          // don't call into PSM while holding mLock!!
+          nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
+          if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
+          // remember if socket type is SSL so we can ProxyStartSSL if need be.
+          usingSSL = isSSL;
+        } else if (mTypes[i].EqualsLiteral("socks") ||
+                   mTypes[i].EqualsLiteral("socks4")) {
+          // since socks is transparent, any layers above
+          // it do not have to worry about proxy stuff
+          proxyInfo = nullptr;
+          proxyTransparent = true;
+        }
+      }
     }
 
     if (NS_FAILED(rv)) {
       SOCKET_LOG(("  error pushing io layer [%u:%s rv=%" PRIx32 "]\n", i,
-                  mTypes[i], static_cast<uint32_t>(rv)));
+                  mTypes[i].get(), static_cast<uint32_t>(rv)));
       if (fd) {
         CloseSocket(
             fd, mSocketTransportService->IsTelemetryEnabledAndNotSleepPhase());
@@ -1418,8 +1400,7 @@ nsresult nsSocketTransport::InitiateSocket() {
 #endif
 
   PRStatus status;
-
-//  if (!mUsingQuic) { 
+ 
   // Make the socket non-blocking...
   PRSocketOptionData opt;
   opt.option = PR_SockOpt_Nonblocking;
