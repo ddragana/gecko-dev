@@ -12,8 +12,15 @@ namespace net {
 
 class NeqoHttp3Conn final {
  public:
-  static nsresult Init(NeqoHttp3Conn** aConn) {
-    return neqo_http3conn_new(aConn);
+  static nsresult Init(const nsACString *origin,
+                       const nsACString *alpn,
+                       const nsACString *local_addr,
+                       const nsACString *remote_addr,
+                       uint32_t max_table_size,
+                       uint16_t max_blocked_streams,
+                       NeqoHttp3Conn** aConn) {
+    return neqo_http3conn_new(origin, alpn, local_addr, remote_addr,
+        max_table_size, max_blocked_streams, aConn);
   }
 
   void close(Http3AppError aError) {

@@ -429,6 +429,12 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   uint32_t DefaultHpackBuffer() const { return mDefaultHpackBuffer; }
 
+  uint32_t DefaultQpackTableSize() const { return mQpackTableSize; }
+  uint16_t DefaultH3MaxBlockedStreams() const {
+    return mH3MaxBlockedStreams;
+  }
+  bool AlwaysTryHttp3() const { return mAlwaysTryHttp3; }
+
   uint32_t MaxHttpResponseHeaderSize() const {
     return mMaxHttpResponseHeaderSize;
   }
@@ -670,6 +676,11 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   // The default size (in bytes) of the HPACK decompressor table.
   uint32_t mDefaultHpackBuffer;
+
+  //Http3 parameters
+  uint32_t mQpackTableSize;
+  uint16_t mH3MaxBlockedStreams;
+  bool mAlwaysTryHttp3;
 
   // The max size (in bytes) for received Http response header.
   uint32_t mMaxHttpResponseHeaderSize;

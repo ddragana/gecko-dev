@@ -6,6 +6,7 @@
 
 #include "HttpLog.h"
 #include "Http3Stream.h"
+#include "DNS.h"
 #include "nsHttpHandler.h"
 #include "mozilla/RefPtr.h"
 #include "ASpdySession.h" // because of SoftStreamError()
@@ -13,6 +14,8 @@
 
 namespace mozilla {
 namespace net {
+
+const nsCString kHttp3Version = NS_LITERAL_CSTRING("h3-20");
 
 NS_IMPL_ADDREF(Http3Session)
 NS_IMPL_RELEASE(Http3Session)
@@ -30,10 +33,71 @@ Http3Session::Http3Session()
     mPacketToSendLen(0),
     mSegmentReader(nullptr),
     mSegmentWriter(nullptr) {
-  Unused << NeqoHttp3Conn::Init(getter_AddRefs(mHttp3Connection));
-
   mCurrentForegroundTabOuterContentWindowId =
       gHttpHandler->ConnMgr()->CurrentTopLevelOuterContentWindowId();
+}
+
+nsresult Http3Session::Init(const nsACString& aOrigin,
+    nsISocketTransport* aSocketTransport) {
+  LOG3(("Http3Session::Init %p", this));
+  mSocketTransport = aSocketTransport;
+  NetAddr selfAddr;
+  if (NS_FAILED(mSocketTransport->GetSelfAddr(&selfAddr))) {
+    LOG3(("Http3Session::Init GetSelfAddr failed [this=%p]", this));
+    return NS_ERROR_FAILURE;
+  }
+  char buf[kIPv6CStrBufSize];
+  NetAddrToString(&selfAddr, buf, kIPv6CStrBufSize);
+
+  nsAutoCString selfAddrStr;
+  if (selfAddr.raw.family == AF_INET6) {
+    selfAddrStr.Append("[");
+  }
+  // Append terminating ']' and port.
+  selfAddrStr.Append(buf, strlen(buf));
+  if (selfAddr.raw.family == AF_INET6) {
+    selfAddrStr.Append("]:");
+    selfAddrStr.AppendInt(ntohs(selfAddr.inet6.port));
+  } else {
+    selfAddrStr.Append(":");
+    selfAddrStr.AppendInt(ntohs(selfAddr.inet.port));
+  }
+
+  NetAddr peerAddr;
+  if (NS_FAILED(mSocketTransport->GetPeerAddr(&peerAddr))) {
+    LOG3(("Http3Session::Init GetPeerAddr failed [this=%p]", this));
+    return NS_ERROR_FAILURE;
+  }
+  NetAddrToString(&peerAddr, buf, kIPv6CStrBufSize);
+
+  nsAutoCString peerAddrStr;
+  if (peerAddr.raw.family == AF_INET6) {
+    peerAddrStr.Append("[");
+  }
+  peerAddrStr.Append(buf, strlen(buf));
+  // Append terminating ']' and port.
+  if (peerAddr.raw.family == AF_INET6) {
+    peerAddrStr.Append("]:");
+    peerAddrStr.AppendInt(ntohs(peerAddr.inet6.port));
+  } else {
+    peerAddrStr.Append(':');
+    peerAddrStr.AppendInt(ntohs(peerAddr.inet.port));
+  }
+
+  LOG3(("Http3Session::Init origin=%s, alpn=%s, selfAddr=%s, peerAddr=%s,"
+        " qpack table size=%u, max blocked streams=%u [this=%p]",
+        PromiseFlatCString(aOrigin).get(),
+        PromiseFlatCString(kHttp3Version).get(),
+        selfAddrStr.get(), peerAddrStr.get(),
+        gHttpHandler->DefaultQpackTableSize(),
+        gHttpHandler->DefaultH3MaxBlockedStreams(), this));
+
+  return NeqoHttp3Conn::Init(&aOrigin,
+      &kHttp3Version,
+      &selfAddrStr, &peerAddrStr,
+      gHttpHandler->DefaultQpackTableSize(),
+      gHttpHandler->DefaultH3MaxBlockedStreams(),
+      getter_AddRefs(mHttp3Connection));
 }
 
 void Http3Session::Shutdown() {
@@ -83,7 +147,7 @@ nsresult Http3Session::ProcessInput(nsIAsyncInputStream *aIn) {
   LOG(("Http3Session::Process status: connected=%d", mConnected));
   if (!mConnected) {
     bool notUsed;
-    ProcessEvents(0, nullptr, &notUsed);
+    ProcessEvents(10, nullptr, &notUsed);
   }
 
   return NS_OK;

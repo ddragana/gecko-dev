@@ -274,6 +274,9 @@ nsHttpHandler::nsHttpHandler()
       mTCPKeepaliveLongLivedIdleTimeS(600),
       mEnforceH1Framing(FRAMECHECK_BARELY),
       mDefaultHpackBuffer(4096),
+      mQpackTableSize(4096),
+      mH3MaxBlockedStreams(10),
+      mAlwaysTryHttp3(false),
       mMaxHttpResponseHeaderSize(393216),
       mFocusedWindowTransactionRatio(0.9f),
       mSpeculativeConnectEnabled(false),
@@ -1875,6 +1878,27 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     rv = Preferences::GetInt(HTTP_PREF("spdy.default-hpack-buffer"), &val);
     if (NS_SUCCEEDED(rv)) {
       mDefaultHpackBuffer = val;
+    }
+  }
+
+  if (PREF_CHANGED(HTTP_PREF("http3.default-qpack-table-size"))) {
+    rv = Preferences::GetInt(HTTP_PREF("http3.default-qpack-table-size"), &val);
+    if (NS_SUCCEEDED(rv)) {
+      mQpackTableSize = val;
+    }
+  }
+
+  if (PREF_CHANGED(HTTP_PREF("http3.default--max-stream-blocked"))) {
+    rv = Preferences::GetInt(HTTP_PREF("http3.default--max-stream-blocked"), &val);
+    if (NS_SUCCEEDED(rv)) {
+      mH3MaxBlockedStreams = (uint16_t)clamped(val, 0, UINT16_MAX);
+    }
+  }
+
+  if (PREF_CHANGED(HTTP_PREF("http3.do-http3-always"))) {
+    rv = Preferences::GetBool(HTTP_PREF("http3.do-http3-always"), &cVar);
+    if (NS_SUCCEEDED(rv)) {
+      mAlwaysTryHttp3 = cVar;
     }
   }
 

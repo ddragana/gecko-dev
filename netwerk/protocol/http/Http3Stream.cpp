@@ -182,7 +182,7 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
         if (fin) {
           mState = RECEIVED_FIN;
         }
-        if (countWritten == 0) {
+        if (*countWritten == 0) {
           if (fin) {
             mState = DONE;
             rv = NS_BASE_STREAM_CLOSED;

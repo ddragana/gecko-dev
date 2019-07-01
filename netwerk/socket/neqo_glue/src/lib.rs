@@ -3,9 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 //extern crate neqo_http3;
+use neqo_common::Datagram;
 use neqo_http3::Http3Connection;
 use neqo_transport::connection::Connection;
-use neqo_common::Datagram;
 
 extern crate xpcom;
 use std::net::SocketAddr;
@@ -23,36 +23,75 @@ use nsstring::*;
 use std::ops;
 use std::ptr;
 use std::slice;
+use std::str;
 use std::time::Instant;
-
-fn loopback() -> SocketAddr {
-    "127.0.0.1:443".parse().unwrap()
-}
 
 #[repr(C)]
 pub struct NeqoHttp3Conn {
     pub conn: Http3Connection,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
     refcnt: AtomicRefcnt,
     packets_to_send: Vec<Datagram>,
     events: Vec<neqo_http3::Http3Event>,
 }
 
 impl NeqoHttp3Conn {
-    pub fn new() -> RefPtr<NeqoHttp3Conn> {
-        init_db(" /Users/draganadamjanovic/dragana_work/gecko-dev/netwerk/socket/neqo/test-fixture/db");
+    pub fn new(
+        origin: &nsACString,
+        alpn: &nsACString,
+        local_addr: &nsACString,
+        remote_addr: &nsACString,
+        max_table_size: u32,
+        max_blocked_streams: u16,
+    ) -> Result<RefPtr<NeqoHttp3Conn>, nsresult> {
+        init_db(
+            " /Users/draganadamjanovic/dragana_work/gecko-dev/netwerk/socket/neqo/test-fixture/db",
+        );
+
+        let origin_conv = match str::from_utf8(origin) {
+            Ok(v) => v,
+            Err(_) => return Err(NS_ERROR_INVALID_ARG),
+        };
+
+        let alpn_conv = match str::from_utf8(alpn) {
+            Ok(v) => v,
+            Err(_) => return Err(NS_ERROR_INVALID_ARG),
+        };
+
+        let local: SocketAddr = match str::from_utf8(local_addr) {
+            Ok(s) => match s.parse() {
+                Ok(addr) => addr,
+                Err(_) => return Err(NS_ERROR_INVALID_ARG),
+            },
+            Err(_) => return Err(NS_ERROR_INVALID_ARG),
+        };
+
+        let remote: SocketAddr = match str::from_utf8(remote_addr) {
+            Ok(s) => match s.parse() {
+                Ok(addr) => addr,
+                Err(_) => return Err(NS_ERROR_INVALID_ARG),
+            },
+            Err(_) => return Err(NS_ERROR_INVALID_ARG),
+        };
+
+        let conn = match Connection::new_client(origin_conv, &[alpn_conv], local, remote) {
+            Ok(c) => c,
+            Err(_) => return Err(NS_ERROR_INVALID_ARG),
+        };
+
         unsafe {
-            RefPtr::from_raw(Box::into_raw(Box::new(NeqoHttp3Conn {
-                conn: Http3Connection::new(
-                    Connection::new_client("", &["h3"], loopback(), loopback()).unwrap(),
-                    100,
-                    100,
-                    None,
-                ),
+            match RefPtr::from_raw(Box::into_raw(Box::new(NeqoHttp3Conn {
+                conn: Http3Connection::new(conn, max_table_size, max_blocked_streams, None),
+                local_addr: local,
+                remote_addr: remote,
                 refcnt: AtomicRefcnt::new(),
                 packets_to_send: Vec::new(),
                 events: Vec::new(),
-            })))
-            .unwrap()
+            }))) {
+                Some(refp) => Ok(refp),
+                None => return Err(NS_ERROR_FAILURE),
+            }
         }
     }
 }
@@ -95,11 +134,31 @@ unsafe impl RefCounted for NeqoHttp3Conn {
 
 // Allocate a new NeqoHttp3Conn object.
 #[no_mangle]
-pub extern "C" fn neqo_http3conn_new(result: &mut *const NeqoHttp3Conn) -> nsresult {
+pub extern "C" fn neqo_http3conn_new(
+    origin: &nsACString,
+    alpn: &nsACString,
+    local_addr: &nsACString,
+    remote_addr: &nsACString,
+    max_table_size: u32,
+    max_blocked_streams: u16,
+    result: &mut *const NeqoHttp3Conn,
+) -> nsresult {
     *result = ptr::null_mut();
 
-    NeqoHttp3Conn::new().forget(result);
-    NS_OK
+    match NeqoHttp3Conn::new(
+        origin,
+        alpn,
+        local_addr,
+        remote_addr,
+        max_table_size,
+        max_blocked_streams,
+    ) {
+        Ok(http3_conn) => {
+            http3_conn.forget(result);
+            NS_OK
+        }
+        Err(e) => e,
+    }
 }
 
 #[no_mangle]
@@ -111,7 +170,11 @@ pub extern "C" fn neqo_http3conn_process_input(
     let mut input = Vec::new();
     unsafe {
         let array: &[u8] = slice::from_raw_parts(packet, len as usize);
-        input.push(Datagram::new(loopback(), loopback(), array.to_vec()));
+        input.push(Datagram::new(
+            conn.remote_addr,
+            conn.local_addr,
+            array.to_vec(),
+        ));
     }
     conn.conn.process_input(input.drain(..), Instant::now());
 }
@@ -336,17 +399,20 @@ pub extern "C" fn neqo_http3conn_reset_stream(
     error: Http3AppError,
 ) -> nsresult {
     match conn.conn.stream_reset(stream_id, error.code()) {
-      Ok(()) => NS_OK,
-      Err(_) => NS_ERROR_INVALID_ARG
+        Ok(()) => NS_OK,
+        Err(_) => NS_ERROR_INVALID_ARG,
     }
 }
 
 // TODO when sending request body has been implemented.
 #[no_mangle]
-pub extern "C" fn neqo_http3conn_close_stream(conn: &mut NeqoHttp3Conn, stream_id: u64) -> nsresult {
+pub extern "C" fn neqo_http3conn_close_stream(
+    conn: &mut NeqoHttp3Conn,
+    stream_id: u64,
+) -> nsresult {
     match conn.conn.stream_close_send(Instant::now(), stream_id) {
-      Ok(()) => NS_OK,
-      Err(_) => NS_ERROR_INVALID_ARG
+        Ok(()) => NS_OK,
+        Err(_) => NS_ERROR_INVALID_ARG,
     }
 }
 
@@ -445,8 +511,8 @@ pub extern "C" fn neqo_http3conn_get_headers(
             let mut r = nsCString::from(res_str);
             headers.take_from(&mut r);
             NS_OK
-        },
-        Err(_) => NS_ERROR_INVALID_ARG
+        }
+        Err(_) => NS_ERROR_INVALID_ARG,
     }
 }
 
@@ -461,20 +527,25 @@ pub extern "C" fn neqo_http3conn_read_data(
 ) -> nsresult {
     unsafe {
         let array: &mut [u8] = slice::from_raw_parts_mut(buf, len as usize);
-        match conn.conn.read_data(Instant::now(), stream_id, &mut array[..]) {
+        match conn
+            .conn
+            .read_data(Instant::now(), stream_id, &mut array[..])
+        {
             Ok(r) => {
                 *read = r.0 as u32;
                 *fin = r.1;
                 NS_OK
             }
-            Err(e) => {
-              match e {
-                neqo_http3::Error::TransportError(neqo_transport::Error::InvalidStreamId) => NS_ERROR_INVALID_ARG,
+            Err(e) => match e {
+                neqo_http3::Error::TransportError(neqo_transport::Error::InvalidStreamId) => {
+                    NS_ERROR_INVALID_ARG
+                }
                 neqo_http3::Error::MalformedFrame(..) => NS_ERROR_ABORT,
-                neqo_http3::Error::TransportError(neqo_transport::Error::NoMoreData) => NS_ERROR_INVALID_ARG,
+                neqo_http3::Error::TransportError(neqo_transport::Error::NoMoreData) => {
+                    NS_ERROR_INVALID_ARG
+                }
                 _ => NS_ERROR_UNEXPECTED,
-              }
-            }
+            },
         }
     }
 }

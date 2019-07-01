@@ -33,6 +33,11 @@ class Http3Session final : public nsAHttpTransaction,
   NS_DECL_NSAHTTPSEGMENTWRITER
 
   Http3Session();
+  nsresult Init(const nsACString& aOrigin,
+      nsISocketTransport* aSocketTransport);
+
+  bool Initialized() const { return mHttp3Connection; }
+  bool IsConnected() { return mConnected; }
 
   nsresult Process(nsIAsyncOutputStream *aOut, nsIAsyncInputStream *aIn);
 
@@ -49,8 +54,6 @@ class Http3Session final : public nsAHttpTransaction,
 
   // We will let neqo-transport handle connection timeouts.
   uint32_t ReadTimeoutTick(PRIntervalTime now) { return UINT32_MAX; }
-
-  bool IsConnected() {return mConnected;}
 
   // overload of nsAHttpTransaction
   MOZ_MUST_USE nsresult ReadSegmentsAgain(nsAHttpSegmentReader*, uint32_t,
@@ -86,9 +89,6 @@ class Http3Session final : public nsAHttpTransaction,
 
   void TransactionHasDataToWrite(nsAHttpTransaction* caller) override;
 
-  void SetSocketTransport(nsISocketTransport* aSocketTransport) {
-    mSocketTransport = aSocketTransport;
-  }
   nsISocketTransport* SocketTransport() { return mSocketTransport; }
  private:
   ~Http3Session();

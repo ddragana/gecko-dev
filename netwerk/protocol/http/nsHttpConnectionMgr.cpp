@@ -3941,7 +3941,8 @@ nsHttpConnectionMgr::nsHalfOpenSocket::nsHalfOpenSocket(
       mFreeToUse(true),
       mPrimaryStreamStatus(NS_OK),
       mFastOpenInProgress(false),
-      mEnt(ent) {
+      mEnt(ent),
+      mHttp3Forced(false) {
   MOZ_ASSERT(ent && trans, "constructor with null arguments");
   LOG(("Creating nsHalfOpenSocket [this=%p trans=%p ent=%s key=%s]\n", this,
        trans, ent->mConnInfo->Origin(), ent->mConnInfo->HashKey().get()));
@@ -3983,16 +3984,18 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
   nsresult rv;
   nsTArray<nsCString> socketTypes;
   const nsHttpConnectionInfo* ci = mEnt->mConnInfo;
-  if (!isBackup && ci->FirstHopSSL()) {
+  if (gHttpHandler->AlwaysTryHttp3() && !isBackup && ci->FirstHopSSL()) {
     socketTypes.AppendElement(NS_LITERAL_CSTRING("quic"));
     mHttp3Session = new Http3Session();
+    mHttp3Forced = true;
   } else {
     if (ci->FirstHopSSL()) {
       socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
     } else {
-    const nsCString& defaultType = gHttpHandler->DefaultSocketType();
-    if (!defaultType.IsVoid()) {
-      socketTypes.AppendElement(defaultType);
+      const nsCString& defaultType = gHttpHandler->DefaultSocketType();
+      if (!defaultType.IsVoid()) {
+        socketTypes.AppendElement(defaultType);
+      }
     }
   }
 
@@ -4152,10 +4155,6 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupPrimaryStreams() {
   rv = SetupStreams(getter_AddRefs(mSocketTransport), getter_AddRefs(mStreamIn),
                     getter_AddRefs(mStreamOut), false);
 
-  if (mHttp3Session) {
-    mHttp3Session->SetSocketTransport(mSocketTransport);
-  }
-
   LOG(("nsHalfOpenSocket::SetupPrimaryStream [this=%p ent=%s rv=%" PRIx32 "]",
        this, mEnt->mConnInfo->Origin(), static_cast<uint32_t>(rv)));
   if (NS_FAILED(rv)) {
@@ -4198,7 +4197,8 @@ void nsHttpConnectionMgr::nsHalfOpenSocket::SetupBackupTimer() {
   }
   // When using Fast Open the correct transport will be setup for sure (it is
   // guaranteed), but it can be that it will happened a bit later.
-  if (mFastOpenInProgress || (timeout && !mSpeculative)) {
+  // When http3 is forced try backup ccnnection as well.
+  if (mFastOpenInProgress || mHttp3Forced || (timeout && !mSpeculative)) {
     // Setup the timer that will establish a backup socket
     // if we do not get a writable event on the main one.
     // We do this because a lost SYN takes a very long time
@@ -4351,9 +4351,27 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnOutputStreamReady(
 
   if (mHttp3Session && (out == mStreamOut)) {
     nsresult rv = NS_OK;
+    if (!mHttp3Session->Initialized()) {
+      rv = mHttp3Session->Init(mEnt->mConnInfo->GetOrigin(), mSocketTransport);
+      if (NS_FAILED(rv)) {
+        LOG(("nsHalfOpenSocket  mHttp3Session->Init failed "
+             "[this=%p rv=%x]\n", this, rv));
+        mSocketTransport->Close(NS_ERROR_ABORT);
+        mStreamOut = nullptr;
+        mStreamIn = nullptr;
+        mSocketTransport = nullptr;
+        mHttp3Session = nullptr;
+        if (mEnt) {
+          mEnt->mDoNotDestroy = false;
+        }
+        return rv;
+      }
+    }
     mHttp3Session->Process(out, mStreamIn);
     if (mHttp3Session->IsConnected()) {
+      mPrimaryConnectedOK = true;
       gHttpHandler->ConnMgr()->RecvdConnect();
+      CancelBackupTimer();
       rv = SetupConn(out, false, mHttp3Session);
     } else {
       out->AsyncWait(this, 0, 0, nullptr);
@@ -5045,7 +5063,9 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport* trans,
   MOZ_ASSERT(trans == mSocketTransport || trans == mBackupTransport);
   if (status == NS_NET_STATUS_CONNECTED_TO) {
     if (trans == mSocketTransport) {
-      mPrimaryConnectedOK = true;
+      if (!mHttp3Session) {
+        mPrimaryConnectedOK = true;
+      }
     } else {
       mBackupConnectedOK = true;
     }
@@ -5118,7 +5138,9 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport* trans,
     case NS_NET_STATUS_CONNECTED_TO:
       // TCP connection's up, now transfer or SSL negotiantion starts,
       // no need for backup socket
-      CancelBackupTimer();
+      if (!mHttp3Session) {
+        CancelBackupTimer();
+      }
       break;
 
     default:

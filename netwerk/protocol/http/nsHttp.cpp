@@ -12,6 +12,7 @@
 #include "PLDHashTable.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/HashFunctions.h"
+#include "nsContentUtils.h"
 #include "nsCRT.h"
 #include "nsHttpRequestHead.h"
 #include "nsHttpResponseHead.h"

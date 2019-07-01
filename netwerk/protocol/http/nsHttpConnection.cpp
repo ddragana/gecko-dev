@@ -871,7 +871,6 @@ failed_activation:
     mTransaction = nullptr;
   }
 
-LOG(("DDDDD nsHttpConnection %x", rv));
   return rv;
 }
 
@@ -949,7 +948,8 @@ nsresult nsHttpConnection::SetupNPNList(nsISSLSocketControl* ssl,
 nsresult nsHttpConnection::AddTransaction(nsAHttpTransaction* httpTransaction,
                                           int32_t priority) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
-  MOZ_ASSERT(mSpdySession && (mUsingSpdyVersion != SpdyVersion::NONE),
+  MOZ_ASSERT((mSpdySession && (mUsingSpdyVersion != SpdyVersion::NONE)) ||
+             mHttp3Session,
              "AddTransaction to live http connection without spdy");
 
   // If this is a wild card nshttpconnection (i.e. a spdy proxy) then
@@ -1900,7 +1900,6 @@ nsresult nsHttpConnection::ReadFromStream(nsIInputStream* input, void* closure,
 
 nsresult nsHttpConnection::OnReadSegment(const char* buf, uint32_t count,
                                          uint32_t* countRead) {
-LOG(("DDDD nsHttpConnection::OnReadSegment %d", count));
   if (count == 0) {
     // some ReadSegments implementations will erroneously call the writer
     // to consume 0 bytes worth of data.  we must protect against this case
@@ -1908,7 +1907,7 @@ LOG(("DDDD nsHttpConnection::OnReadSegment %d", count));
     NS_ERROR("bad ReadSegments implementation");
     return NS_ERROR_FAILURE;  // stop iterating
   }
-LOG(("DDDD nsHttpConnection::OnReadSegment %d", count));
+
   nsresult rv = mSocketOut->Write(buf, count, countRead);
   if (NS_FAILED(rv))
     mSocketOutCondition = rv;
@@ -1919,7 +1918,7 @@ LOG(("DDDD nsHttpConnection::OnReadSegment %d", count));
     mSocketOutCondition = NS_OK;  // reset condition
     if (!mProxyConnectInProgress) mTotalBytesWritten += *countRead;
   }
-LOG(("DDDD nsHttpConnection::OnReadSegment %d %d %d", count, rv, *countRead));
+
   return mSocketOutCondition;
 }
 
@@ -2390,7 +2389,7 @@ nsresult nsHttpConnection::StartShortLivedTCPKeepalives() {
 nsresult nsHttpConnection::StartLongLivedTCPKeepalives() {
   MOZ_ASSERT(mUsingSpdyVersion == SpdyVersion::NONE,
              "Don't use TCP Keepalive with SPDY!");
-  MOZ_ASSERT(mHttp3Session,
+  MOZ_ASSERT(!mHttp3Session,
              "Don't use TCP Keepalive with Http3, we don not have TCP connection!");
   if (NS_WARN_IF((mUsingSpdyVersion != SpdyVersion::NONE) || mHttp3Session)) {
     return NS_OK;

@@ -132,7 +132,13 @@ Buffer neqo_http3conn_get_data_to_send(NeqoHttp3Conn *conn);
 
 nsresult neqo_http3conn_get_headers(NeqoHttp3Conn *conn, uint64_t stream_id, nsCString *headers);
 
-nsresult neqo_http3conn_new(NeqoHttp3Conn **result);
+nsresult neqo_http3conn_new(const nsACString *origin,
+                            const nsACString *alpn,
+                            const nsACString *local_addr,
+                            const nsACString *remote_addr,
+                            uint32_t max_table_size,
+                            uint16_t max_blocked_streams,
+                            NeqoHttp3Conn **result);
 
 void neqo_http3conn_process_http3(NeqoHttp3Conn *conn);
 

@@ -517,6 +517,7 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
     nsCOMPtr<nsIAsyncInputStream> mBackupStreamIn;
 
     RefPtr<Http3Session> mHttp3Session;
+    bool mHttp3Forced;
   };
   friend class nsHalfOpenSocket;
 
