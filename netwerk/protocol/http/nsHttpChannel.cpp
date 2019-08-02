@@ -6486,6 +6486,33 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     AsyncOpenFinal(TimeStamp::Now());
   }
 
+#if defined(DEBUG) && defined(NIGHTLY_BUILD)
+  nsAutoCString originHost;
+  if (gHttpHandler->IsHttp3Enabled() &&
+    NS_SUCCEEDED(mURI->GetAsciiHost(originHost)) &&
+    gHttpHandler->MatchAltSvcTestsOnly(originHost)) {
+    LOG((".......set alt-svc mapping for testing!!!!!"));
+
+    nsAutoCString scheme;
+    mURI->GetScheme(scheme);
+    int32_t originPort = 80;
+    mURI->GetPort(&originPort);
+
+    nsCOMPtr<nsIInterfaceRequestor> callbacks;
+    nsCOMPtr<nsProxyInfo> proxyInfo;
+    NS_NewNotificationCallbacksAggregation(mCallbacks, mLoadGroup,
+                                           getter_AddRefs(callbacks));
+
+    OriginAttributes originAttributes;
+    NS_GetOriginAttributes(this, originAttributes);
+
+    AltSvcMapping::ProcessHeader(
+        gHttpHandler->GetAltSvcMappingHeaderTestOnly(), scheme, originHost,
+        originPort, mUsername, GetTopWindowOrigin(), mPrivateBrowsing,
+        callbacks, nullptr, mCaps & NS_HTTP_DISALLOW_SPDY, originAttributes);
+  }
+#endif
+
   return NS_OK;
 }
 

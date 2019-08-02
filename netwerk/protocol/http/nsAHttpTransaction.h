@@ -182,6 +182,11 @@ class nsAHttpTransaction : public nsSupportsWeakReference {
   virtual void DisableSpdy() {}
   virtual void ReuseConnectionOnRestartOK(bool) {}
 
+  // We call this function if we want to use alt-svc host again on the next
+  // restart. If this function is not called on the next restart the
+  // transaction will use the original route.
+  virtual void DoNotRemoveAltSvc() {}
+
   // Returns true if early-data or fast open is possible.
   virtual MOZ_MUST_USE bool CanDo0RTT() { return false; }
   // Returns true if early-data is possible and transaction will remember

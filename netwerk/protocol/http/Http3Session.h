@@ -23,7 +23,9 @@ class Http3Stream;
 class Http3Session final : public nsAHttpTransaction,
                            public nsAHttpConnection,
                            public nsAHttpSegmentReader,
-                           public nsAHttpSegmentWriter
+                           public nsAHttpSegmentWriter,
+                           public nsICertAuthenticationListener,
+                           public nsITimerCallback
 {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -31,18 +33,24 @@ class Http3Session final : public nsAHttpTransaction,
   NS_DECL_NSAHTTPCONNECTION(mConnection)
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
+  NS_DECL_NSICERTAUTHENTICATIONLISTENER
+  NS_DECL_NSITIMERCALLBACK
 
   Http3Session();
   nsresult Init(const nsACString& aOrigin,
-      nsISocketTransport* aSocketTransport);
+      nsISocketTransport* aSocketTransport, nsAHttpSegmentReader* reader,
+      nsAHttpSegmentWriter* writer);
 
   bool Initialized() const { return mHttp3Connection; }
-  bool IsConnected() { return mConnected; }
+  bool IsConnected() { return mState == CONNECTED; }
+  bool IsClosing() { return (mState == CLOSING || mState == CLOSED); }
+  nsresult GetError() { return mError; }
 
-  nsresult Process(nsIAsyncOutputStream *aOut, nsIAsyncInputStream *aIn);
+  nsresult Process();
 
-  void CloseInternal(nsresult aReason, bool aCloseTransport);
+  void CloseInternal(bool aCallNeqoClose);
   void Shutdown();
+  void ConnectionClosed();
 
   bool AddStream(nsAHttpTransaction* aHttpTransaction,
                  int32_t aPriority,
@@ -66,7 +74,7 @@ class Http3Session final : public nsAHttpTransaction,
 
   nsresult TryActivating(const nsACString& aMethod, const nsACString& aScheme,
     const nsACString& aHost, const nsACString& aPath,
-    const nsACString& aHeaders, uint64_t& aStreamId, Http3Stream* aStream);
+    const nsACString& aHeaders, uint64_t* aStreamId, Http3Stream* aStream);
 
   const static uint32_t kDefaultReadAmount = 2048;
 
@@ -97,38 +105,53 @@ class Http3Session final : public nsAHttpTransaction,
       bool justKidding);
   void Shutdown(uint64_t aGoawayId);
 
-  nsresult ProcessOutput(nsIAsyncOutputStream* aOut);
-  nsresult ProcessInput(nsIAsyncInputStream* aIn);
+  nsresult ProcessOutput();
+  nsresult ProcessInput();
   nsresult ProcessEvents(uint32_t count, uint32_t* countWritten, bool* again);
+  nsresult ProcessOutputAndEvents();
+
+  void SetupTimer(uint64_t aTimeout);
 
   void QueueStream(Http3Stream* stream);
   void RemoveStreamFromQueues(Http3Stream*);
   void ProcessPending();
 
+  void CallCertVerification();
+
   RefPtr<NeqoHttp3Conn> mHttp3Connection;
   RefPtr<nsAHttpConnection> mConnection;
-  nsDataHashtable<nsUint64HashKey, Http3Stream*> mStreamIDHash;
+  nsDataHashtable<nsUint64HashKey, Http3Stream*> mStreamIdHash;
   nsClassHashtable<nsPtrHashKey<nsAHttpTransaction>, Http3Stream>
       mStreamTransactionHash;
 
   nsDeque mReadyForWrite;
   nsDeque mQueuedStreams;
-  bool mConnected;
-  bool mClosing;
-  bool mClosed;
+
+  enum State {
+   INITIALIZING,
+   CONNECTED,
+   CLOSING,
+   CLOSED
+  } mState;
+
   bool mCleanShutdown;
   bool mGoawayReceived;
   bool mShouldClose;
+  nsresult mError;
+  bool mBeforeConnectedError;
   uint64_t mCurrentForegroundTabOuterContentWindowId;
 
-  uint32_t mPacketToSendLen;
-  UniquePtr<char[]> mPacketToSend;
+  nsTArray<uint8_t> mPacketToSend;
 
   nsAHttpSegmentReader* mSegmentReader;
   nsAHttpSegmentWriter* mSegmentWriter;
 
   // The underlying socket transport object is needed to propogate some events
   nsISocketTransport* mSocketTransport;
+
+  nsCOMPtr<nsITimer> mTimer;
+
+  nsDataHashtable<nsCStringHashKey, bool> mJoinConnectionCache;
 };
 
 }

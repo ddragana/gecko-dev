@@ -81,9 +81,7 @@ fn nss_dir() -> PathBuf {
                 Command::new("hg")
                     .args(&[
                         "clone",
-                        "-r", // TODO(mt) use the real repo when these patches land
-                        "c92be7ed922a0781973ccc69356d797cb1507b6f",
-                        "https://hg.mozilla.org/projects/nss-try",
+                        "https://hg.mozilla.org/projects/nss",
                         dir.to_str().unwrap(),
                     ])
                     .status()
@@ -132,11 +130,12 @@ fn build_nss(dir: PathBuf) {
         }
         _ => (),
     }
-    Command::new(get_bash())
+    let status = Command::new(get_bash())
         .args(build_nss)
         .current_dir(dir)
         .status()
-        .expect("NSS build failed");
+        .expect("couldn't start NSS build");
+    assert!(status.success(), "NSS build failed");
 }
 
 fn static_link(nsstarget: &PathBuf) {

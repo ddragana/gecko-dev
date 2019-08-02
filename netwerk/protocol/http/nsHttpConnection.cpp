@@ -53,7 +53,7 @@ namespace net {
 // nsHttpConnection <public>
 //-----------------------------------------------------------------------------
 
-nsHttpConnection::nsHttpConnection(Http3Session* aHttp3Session /* = nullptr */)
+nsHttpConnection::nsHttpConnection(bool aIsHttp3)
     : mSocketInCondition(NS_ERROR_NOT_INITIALIZED),
       mSocketOutCondition(NS_ERROR_NOT_INITIALIZED),
       mTransaction(nullptr),
@@ -112,7 +112,8 @@ nsHttpConnection::nsHttpConnection(Http3Session* aHttp3Session /* = nullptr */)
       mReceivedSocketWouldBlockDuringFastOpen(false),
       mCheckNetworkStallsWithTFO(false),
       mLastRequestBytesSentTime(0),
-      mBootstrappedTimingsSet(false) {
+      mBootstrappedTimingsSet(false),
+      mIsHttp3(aIsHttp3) {
   LOG(("Creating nsHttpConnection @%p\n", this));
 
   // the default timeout is for when this connection has not yet processed a
@@ -124,9 +125,8 @@ nsHttpConnection::nsHttpConnection(Http3Session* aHttp3Session /* = nullptr */)
 
   mThroughCaptivePortal = gHttpHandler->GetThroughCaptivePortal();
 
-  if (aHttp3Session) {
-    mHttp3Session = aHttp3Session;
-    mNPNComplete = true;
+  if (aIsHttp3) {
+    mHttp3Session = new Http3Session();
   }
 }
 
@@ -222,7 +222,14 @@ nsresult nsHttpConnection::Init(
   mSocketTransport->SetEventSink(this, nullptr);
   mSocketTransport->SetSecurityCallbacks(this);
 
-  if (mHttp3Session) {
+  if (mIsHttp3) {
+    nsresult rv = mHttp3Session->Init(mConnInfo->GetOrigin(), mSocketTransport,
+        this, this);
+    if (NS_FAILED(rv)) {
+      LOG(("nsHttpConnection::Init mHttp3Session->Init failed "
+           "[this=%p rv=%x]\n", this, rv));
+      return rv;
+    }
     mTransaction = mHttp3Session;
   }
 
@@ -450,6 +457,10 @@ bool nsHttpConnection::EnsureNPNComplete(nsresult& aOut0RTTWriteHandshakeValue,
 
   if (mNPNComplete) {
     return true;
+  }
+
+  if (mIsHttp3) {
+    return EnsureNPNCompleteHttp3();
   }
 
   nsresult rv = NS_OK;
@@ -728,6 +739,23 @@ npnComplete:
   return true;
 }
 
+bool nsHttpConnection::EnsureNPNCompleteHttp3() {
+  LOG(("nsHttpConnection::EnsureNPNCompleteHttp3 [this=%p].", this));
+  mHttp3Session->Process();
+  if (mHttp3Session->IsConnected()) {
+    mNPNComplete = true;
+    mIsReused = true;
+    //TODO ReportSpdyConnectioni
+  } else if (mHttp3Session->IsClosing()) {
+    LOG(("nsHttpConnection::EnsureNPNCompleteHttp3 "
+         "mHttp3Session failed [this=%p rv=%x]",
+         this, mHttp3Session->GetError()));
+    mNPNComplete = true;
+  }
+
+  return mNPNComplete;
+}
+
 nsresult nsHttpConnection::OnTunnelNudged(TLSFilterTransaction* trans) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   LOG(("nsHttpConnection::OnTunnelNudged %p\n", this));
@@ -847,12 +875,14 @@ nsresult nsHttpConnection::Activate(nsAHttpTransaction* trans, uint32_t caps,
                             mTransaction->ResponseTimeout() > 0 &&
                             mTransaction->ResponseTimeoutEnabled();
 
-  rv = StartShortLivedTCPKeepalives();
-  if (NS_FAILED(rv)) {
-    LOG(
-        ("nsHttpConnection::Activate [%p] "
-         "StartShortLivedTCPKeepalives failed rv[0x%" PRIx32 "]",
-         this, static_cast<uint32_t>(rv)));
+  if (!mIsHttp3) {
+    rv = StartShortLivedTCPKeepalives();
+    if (NS_FAILED(rv)) {
+      LOG(
+          ("nsHttpConnection::Activate [%p] "
+           "StartShortLivedTCPKeepalives failed rv[0x%" PRIx32 "]",
+           this, static_cast<uint32_t>(rv)));
+    }
   }
 
   if (mTLSFilter) {
@@ -884,6 +914,7 @@ void nsHttpConnection::SetupSSL() {
 
   if (mNPNComplete) return;
 
+  if (mIsHttp3) return;
   // we flip this back to false if SetNPNList succeeds at the end
   // of this function
   mNPNComplete = true;
@@ -976,6 +1007,11 @@ nsresult nsHttpConnection::AddTransaction(nsAHttpTransaction* httpTransaction,
 
   if (mHttp3Session) {
     MOZ_ASSERT(!needTunnel && !isWebsocket);
+    if (mHttp3Session->IsClosing()) {
+      mSocketOutCondition  = mHttp3Session->GetError();
+      CloseTransaction(mTransaction, mSocketOutCondition);
+      return mSocketOutCondition;
+    }
     if (!mHttp3Session->AddStream(httpTransaction, priority, mCallbacks)) {
       MOZ_ASSERT(false);  // this cannot happen!
       httpTransaction->Close(NS_ERROR_ABORT);
@@ -1085,9 +1121,7 @@ nsresult nsHttpConnection::InitSSLParams(bool connectingToProxy,
     }
   }
 
-  if (mHttp3Session) {
-    mNPNComplete = false;
-  } else if (NS_SUCCEEDED(SetupNPNList(ssl, mTransactionCaps))) {
+  if (NS_SUCCEEDED(SetupNPNList(ssl, mTransactionCaps))) {
     LOG(("InitSSLParams Setting up SPDY Negotiation OK"));
     mNPNComplete = false;
   }
@@ -1211,10 +1245,11 @@ uint32_t nsHttpConnection::TimeToLive() {
 }
 
 bool nsHttpConnection::IsAlive() {
+  if (!mSocketTransport || !mConnectedTransport) return false;
+
   if (mHttp3Session) {
     return true;
   }
-  if (!mSocketTransport || !mConnectedTransport) return false;
 
   // SocketTransport::IsAlive can run the SSL state machine, so make sure
   // the NPN options are set before that happens.
@@ -1900,6 +1935,7 @@ nsresult nsHttpConnection::ReadFromStream(nsIInputStream* input, void* closure,
 
 nsresult nsHttpConnection::OnReadSegment(const char* buf, uint32_t count,
                                          uint32_t* countRead) {
+  LOG(("nsHttpConnection::OnReadSegment [this=%p]\n", this));
   if (count == 0) {
     // some ReadSegments implementations will erroneously call the writer
     // to consume 0 bytes worth of data.  we must protect against this case
@@ -1983,7 +2019,7 @@ nsresult nsHttpConnection::OnSocketWritable() {
                                              &transactionBytes);
     } else if (!EnsureNPNComplete(rv, transactionBytes)) {
       if (NS_SUCCEEDED(rv) && !transactionBytes &&
-          NS_SUCCEEDED(mSocketOutCondition)) {
+          NS_SUCCEEDED(mSocketOutCondition) && !mIsHttp3) {
         mSocketOutCondition = NS_BASE_STREAM_WOULD_BLOCK;
       }
     } else if (!mTransaction) {
@@ -2142,6 +2178,10 @@ nsresult nsHttpConnection::OnSocketReadable() {
   bool again = true;
 
   do {
+
+    if (mHttp3Session && !mNPNComplete) {
+      return OnSocketWritable();
+    }
     if (!mProxyConnectInProgress && !mNPNComplete) {
       // Unless we are setting up a tunnel via CONNECT, prevent reading
       // from the socket until the results of NPN

@@ -8,20 +8,21 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::BTreeMap;
+use std::collections::{hash_map::IterMut, BTreeMap, HashMap};
 use std::mem;
 use std::rc::Rc;
-use std::time::Instant;
+
+use slice_deque::SliceDeque;
+use smallvec::SmallVec;
 
 use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
-use slice_deque::SliceDeque;
 
 use crate::flow_mgr::FlowMgr;
-use crate::frame::TxMode;
-use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken};
+use crate::frame::{Frame, TxMode};
+use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
+use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
-use crate::{Connection, ConnectionEvents};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
 
@@ -167,7 +168,7 @@ impl RangeTracker {
             .map(|(len, _)| *len);
 
         if let Some(len_from_zero) = acked_range_from_zero {
-            let mut to_remove = Vec::new();
+            let mut to_remove = SmallVec::<[_; 8]>::new();
 
             let mut new_len_from_zero = len_from_zero;
 
@@ -215,7 +216,7 @@ impl RangeTracker {
         let len = len as u64;
         let end_off = off + len;
 
-        let mut to_remove = Vec::new();
+        let mut to_remove = SmallVec::<[_; 8]>::new();
         let mut to_add = None;
 
         // Walk backwards through possibly affected existing ranges
@@ -694,35 +695,59 @@ impl SendStream {
     }
 }
 
-/// Calculate the frame header size so we know how much data we can fit
-fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
-    let mut hdr_len = 1; // for frame type
-    hdr_len += Encoder::varint_len(stream_id.as_u64());
-    if offset > 0 {
-        hdr_len += Encoder::varint_len(offset);
+#[derive(Debug, Default)]
+pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
+
+impl SendStreams {
+    pub fn get(&self, id: StreamId) -> Res<&SendStream> {
+        self.0.get(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
-    // We always include a length field.
-    hdr_len + Encoder::varint_len(remaining as u64)
-}
+    pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
+        self.0.get_mut(&id).ok_or_else(|| Error::InvalidStreamId)
+    }
 
-#[derive(Default)]
-pub(crate) struct StreamGenerator {}
+    pub fn insert(&mut self, id: StreamId, stream: SendStream) {
+        self.0.insert(id, stream);
+    }
 
-impl FrameGenerator for StreamGenerator {
-    fn generate(
+    pub fn acked(&mut self, token: StreamRecoveryToken) {
+        if let Some(ss) = self.0.get_mut(&token.id) {
+            ss.mark_as_acked(token.offset, token.length as usize, token.fin);
+        }
+    }
+
+    pub fn reset_acked(&mut self, id: StreamId) {
+        if let Some(ss) = self.0.get_mut(&id) {
+            ss.reset_acked()
+        }
+    }
+
+    pub fn lost(&mut self, token: StreamRecoveryToken) {
+        if let Some(ss) = self.0.get_mut(&token.id) {
+            ss.mark_as_lost(token.offset, token.length as usize, token.fin);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    pub fn clear_terminal(&mut self) {
+        self.0.retain(|_, stream| !stream.is_terminal())
+    }
+
+    pub(crate) fn get_frame(
         &mut self,
-        conn: &mut Connection,
-        _now: Instant,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
         if epoch != 3 && epoch != 1 {
             return None;
         }
 
-        for (stream_id, stream) in &mut conn.send_streams {
+        for (stream_id, stream) in self {
             let fin = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
                 qtrace!(
@@ -749,7 +774,7 @@ impl FrameGenerator for StreamGenerator {
                 stream.mark_as_sent(offset, data_len, fin);
                 return Some((
                     frame,
-                    Some(Box::new(StreamGeneratorToken {
+                    Some(RecoveryToken::Stream(StreamRecoveryToken {
                         id: *stream_id,
                         offset,
                         length: data_len as u64,
@@ -762,40 +787,33 @@ impl FrameGenerator for StreamGenerator {
     }
 }
 
-struct StreamGeneratorToken {
-    id: StreamId,
+impl<'a> IntoIterator for &'a mut SendStreams {
+    type Item = (&'a StreamId, &'a mut SendStream);
+    type IntoIter = IterMut<'a, StreamId, SendStream>;
+
+    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
+        self.0.iter_mut()
+    }
+}
+
+/// Calculate the frame header size so we know how much data we can fit
+fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += Encoder::varint_len(stream_id.as_u64());
+    if offset > 0 {
+        hdr_len += Encoder::varint_len(offset);
+    }
+
+    // We always include a length field.
+    hdr_len + Encoder::varint_len(remaining as u64)
+}
+
+#[derive(Debug)]
+pub(crate) struct StreamRecoveryToken {
+    pub(crate) id: StreamId,
     offset: u64,
     length: u64,
     fin: bool,
-}
-
-impl FrameGeneratorToken for StreamGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Acked frame stream={} offset={} length={} fin={}",
-            self.id.as_u64(),
-            self.offset,
-            self.length,
-            self.fin
-        );
-        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_acked(self.offset, self.length as usize, self.fin);
-        }
-    }
-    fn lost(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Lost frame stream={} offset={} length={} fin={}",
-            self.id.as_u64(),
-            self.offset,
-            self.length,
-            self.fin
-        );
-        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_lost(self.offset, self.length as usize, self.fin);
-        }
-    }
 }
 
 #[cfg(test)]

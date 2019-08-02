@@ -6,10 +6,10 @@
 
 #![deny(warnings)]
 
-use neqo_common::{now, Datagram};
+use neqo_common::{Datagram, matches};
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
+use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -38,14 +38,34 @@ struct Args {
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
-    fn rewrite_out(&mut self, _dgrams: &mut Vec<Datagram>) {}
+    fn rewrite_out(&mut self, _dgram: &Datagram) -> Option<Datagram> {
+        None
+    }
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
-        let sent = socket.send(&d[..]).expect("Error sending datagram");
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
+fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+    let sent = socket.send(&d[..]).expect("Error sending datagram");
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
+    }
+}
+
+struct Timer {
+    end: Instant,
+}
+impl Timer {
+    pub fn new(timeout: Duration) -> Timer {
+        Timer {
+            end: Instant::now() + timeout,
+        }
+    }
+
+    pub fn check(&self) -> Result<Duration, String> {
+        let now = Instant::now();
+        if now > self.end {
+            Err(String::from("Timed out"))
+        } else {
+            Ok(self.end - now)
         }
     }
 }
@@ -54,34 +74,31 @@ fn process_loop(
     nctx: &NetworkCtx,
     client: &mut Connection,
     handler: &mut Handler,
-    timeout: &Duration,
+    timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
-    let start = Instant::now();
+    let timer = Timer::new(timeout);
 
     loop {
-        client.process_input(in_dgrams.drain(..), now());
-
         if let State::Closed(..) = client.state() {
             return Ok(client.state().clone());
         }
 
         let exiting = !handler.handle(client);
-        let (mut out_dgrams, _timer) = client.process_output(now());
-        handler.rewrite_out(&mut out_dgrams);
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = client.process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(client.state().clone());
         }
 
-        let spent = Instant::now() - start;
-        if spent > *timeout {
-            return Err(String::from("Timed out"));
-        }
+        let time_remaining = timer.check()?;
+
         nctx.socket
-            .set_read_timeout(Some(*timeout - spent))
+            .set_read_timeout(Some(time_remaining))
             .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
@@ -98,7 +115,8 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            client.process_input(received, Instant::now());
         }
     }
 }
@@ -106,6 +124,10 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        if client.events().into_iter().any(authentication_needed) {
+          client.authenticated(0, Instant::now());
+        }
         match client.state() {
             State::Connected => false,
             State::Closing { .. } => false,
@@ -143,7 +165,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(now(), 0, "kthxbye!");
+                        client.close(Instant::now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
@@ -208,33 +230,29 @@ struct H3Handler {
 fn process_loop_h3(
     nctx: &NetworkCtx,
     handler: &mut H3Handler,
-    timeout: &Duration,
+    timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
-    let start = Instant::now();
+    let timer = Timer::new(timeout);
 
     loop {
-        handler.h3.process_input(in_dgrams.drain(..), now());
-
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
         }
 
         let exiting = !handler.handle();
-        let (out_dgrams, _timer) = handler.h3.conn().process_output(now());
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = handler.h3.conn().process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let spent = Instant::now() - start;
-        if spent > *timeout {
-            return Err(String::from("Timed out"));
-        }
+        let remaining_time = timer.check()?;
         nctx.socket
-            .set_read_timeout(Some(*timeout - spent))
+            .set_read_timeout(Some(remaining_time))
             .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
@@ -251,7 +269,8 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            handler.h3.process_input(received, Instant::now());
         }
     }
 }
@@ -260,36 +279,36 @@ fn process_loop_h3(
 impl H3Handler {
     fn handle(&mut self) -> bool {
         let mut data = vec![0; 4000];
-        self.h3.process_http3(now());
+        self.h3.process_http3(Instant::now());
         for event in self.h3.events() {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
                     let headers = self.h3.get_headers(stream_id);
-                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
                     let (_sz, fin) = self
                         .h3
-                        .read_data(now(), stream_id, &mut data)
+                        .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    println!(
+                    eprintln!(
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
                     );
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
-                        self.h3.close(now(), 0, "kthxbye!");
+                        eprintln!("<FIN[{}]>", stream_id);
+                        self.h3.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
                 }
@@ -347,8 +366,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Test::H3 => vec![String::from("h3-20")],
-            _ => vec![String::from("hq-20")],
+            Test::H3 => vec![String::from("h3-22")],
+            _ => vec![String::from("hq-22")],
         }
     }
 
@@ -361,14 +380,14 @@ impl Test {
         })
     }
 
-    /*    fn letters(&self) -> Vec<char> {
+    fn letters(&self) -> Vec<char> {
         match self {
             Test::Connect => vec!['H'],
             Test::H9 => vec!['D', 'C'],
-            Test::H3 => vec!['3'],
+            Test::H3 => vec!['3', 'C', 'D'],
             Test::VN => vec!['V'],
         }
-    }*/
+    }
 }
 
 struct NetworkCtx {
@@ -378,12 +397,16 @@ struct NetworkCtx {
 }
 
 fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, test.alpn(), nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        test.alpn(),
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    let res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+    let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
 
     let st = match res {
         Ok(st) => st,
@@ -406,7 +429,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);
-    let res = process_loop(nctx, client, &mut hc, &Duration::new(5, 0));
+    let res = process_loop(nctx, client, &mut hc, Duration::new(5, 0));
 
     if let Err(e) = res {
         return Err(format!("ERROR: {}", e));
@@ -434,7 +457,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .unwrap();
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0)) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {
         return Err(format!("ERROR: {}", e));
     }
 
@@ -452,18 +475,23 @@ impl Handler for VnHandler {
         }
     }
 
-    fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
-        assert!(dgrams.len() == 1);
-        dgrams[0].d[1] = 0x1a;
+    fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
+        let mut payload = d[..].to_vec();
+        payload[1] = 0x1a;
+        Some(Datagram::new(*d.source(), *d.destination(), payload))
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, vec!["hq-20"], nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        vec!["hq-20"],
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
-    let _res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+    let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
 
     Ok(client)
 }
@@ -482,8 +510,17 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     };
 
     if let Test::VN = test {
-        let _res = test_vn(&nctx, peer);
-        unimplemented!();
+        let res = test_vn(&nctx, peer);
+        return match res {
+            Err(e) => (test, format!("ERROR: {}", e)),
+            Ok(client) => match client.state() {
+                State::Closing {
+                    error: ConnectionError::Transport(Error::VersionNegotiation),
+                    ..
+                } => (test, String::from("OK")),
+                _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
+            },
+        };
     }
 
     let mut client = match test_connect(&nctx, test, peer) {
@@ -543,11 +580,11 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
         }
     }
 
-    println!("Tests for {} complete {:?}", peer.label, results);
+    eprintln!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
-const PEERS: [Peer; 9] = [
+const PEERS: &[Peer] = &[
     Peer {
         label: "quant",
         host: "quant.eggert.org",
@@ -565,12 +602,12 @@ const PEERS: [Peer; 9] = [
     },
     Peer {
         label: "applequic",
-        host: "192.168.203.142",
-        port: 4433,
+        host: "31.133.129.48",
+        port: 8443,
     },
     Peer {
         label: "f5",
-        host: "208.85.208.226",
+        host: "204.134.187.194",
         port: 4433,
     },
     Peer {
@@ -593,6 +630,16 @@ const PEERS: [Peer; 9] = [
         host: "nghttp2.org",
         port: 4433,
     },
+    Peer {
+        label: "picoquic",
+        host: "test.privateoctopus.com",
+        port: 4433,
+    },
+    Peer {
+        label: "ats",
+        host: "quic.ogre.com",
+        port: 4433,
+    },
 ];
 
 const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
@@ -606,7 +653,7 @@ fn main() {
     let mut children = Vec::new();
 
     // Start all the children.
-    for peer in &PEERS {
+    for peer in PEERS {
         if !args.include.is_empty() && !args.include.contains(&String::from(peer.label)) {
             continue;
         }
@@ -622,6 +669,20 @@ fn main() {
     // Now wait for them.
     for child in children {
         let res = child.1.join().unwrap();
-        println!("{} -> {:?}", child.0.label, res);
+        let mut all_letters = HashSet::new();
+        for r in &res {
+            for l in r.0.letters() {
+                if r.1 == "OK" {
+                    all_letters.insert(l);
+                }
+            }
+        }
+        let mut letter_str = String::from("");
+        for l in &['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
+            if all_letters.contains(l) {
+                letter_str.push(*l);
+            }
+        }
+        println!("{}: {} -> {:?}", child.0.label, letter_str, res);
     }
 }

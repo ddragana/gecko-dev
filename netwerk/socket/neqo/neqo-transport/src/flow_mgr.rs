@@ -10,13 +10,18 @@
 use std::cmp::max;
 use std::collections::HashMap;
 use std::mem;
-use std::time::Instant;
 
 use neqo_common::{qinfo, qtrace, qwarn, Encoder};
+use neqo_crypto::Epoch;
 
-use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, StreamType, TxMode};
-use crate::stream_id::{StreamId, StreamIndex};
-use crate::{AppError, Connection};
+use crate::frame::{Frame, StreamType};
+use crate::recovery::RecoveryToken;
+use crate::recv_stream::RecvStreams;
+use crate::send_stream::SendStreams;
+use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
+use crate::AppError;
+
+pub type FlowControlRecoveryToken = Frame;
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
@@ -145,12 +150,134 @@ impl FlowMgr {
         }
     }
 
-    pub(crate) fn need_close_frame(&self) -> bool {
+    pub fn need_close_frame(&self) -> bool {
         self.need_close_frame
     }
 
-    pub(crate) fn set_need_close_frame(&mut self, new: bool) {
+    pub fn set_need_close_frame(&mut self, new: bool) {
         self.need_close_frame = new
+    }
+
+    pub(crate) fn acked(
+        &mut self,
+        token: FlowControlRecoveryToken,
+        send_streams: &mut SendStreams,
+    ) {
+        if let Frame::ResetStream {
+            stream_id,
+            application_error_code,
+            final_size,
+        } = token
+        {
+            qinfo!(
+                "Reset received stream={} err={} final_size={}",
+                stream_id,
+                application_error_code,
+                final_size
+            );
+            send_streams.reset_acked(stream_id.into());
+        }
+    }
+
+    pub(crate) fn lost(
+        &mut self,
+        token: FlowControlRecoveryToken,
+        send_streams: &mut SendStreams,
+        recv_streams: &mut RecvStreams,
+        indexes: &mut StreamIndexes,
+    ) {
+        match token {
+            // Always resend ResetStream if lost
+            Frame::ResetStream {
+                stream_id,
+                application_error_code,
+                final_size,
+            } => {
+                qinfo!(
+                    "Reset lost stream={} err={} final_size={}",
+                    stream_id,
+                    application_error_code,
+                    final_size
+                );
+                if send_streams.get(stream_id.into()).is_ok() {
+                    self.stream_reset(stream_id.into(), application_error_code, final_size);
+                }
+            }
+            // Resend MaxStreams if lost (with updated value)
+            Frame::MaxStreams { stream_type, .. } => {
+                let local_max = match stream_type {
+                    StreamType::BiDi => &mut indexes.local_max_stream_bidi,
+                    StreamType::UniDi => &mut indexes.local_max_stream_uni,
+                };
+
+                self.max_streams(*local_max, stream_type)
+            }
+            // Only resend "*Blocked" frames if still blocked
+            Frame::DataBlocked { .. } => {
+                if self.conn_credit_avail() == 0 {
+                    self.data_blocked()
+                }
+            }
+            Frame::StreamDataBlocked { stream_id, .. } => {
+                if let Ok(ss) = send_streams.get(stream_id.into()) {
+                    if ss.credit_avail() == 0 {
+                        self.stream_data_blocked(stream_id.into(), ss.max_stream_data())
+                    }
+                }
+            }
+            Frame::StreamsBlocked { stream_type, .. } => match stream_type {
+                StreamType::UniDi => {
+                    if indexes.peer_next_stream_uni >= indexes.peer_max_stream_uni {
+                        self.streams_blocked(indexes.peer_max_stream_uni, StreamType::UniDi);
+                    }
+                }
+                StreamType::BiDi => {
+                    if indexes.peer_next_stream_bidi >= indexes.peer_max_stream_bidi {
+                        self.streams_blocked(indexes.peer_max_stream_bidi, StreamType::BiDi);
+                    }
+                }
+            },
+            // Resend StopSending
+            Frame::StopSending {
+                stream_id,
+                application_error_code,
+            } => self.stop_sending(stream_id.into(), application_error_code),
+            // Resend MaxStreamData if not SizeKnown
+            // (maybe_send_flowc_update() checks this.)
+            Frame::MaxStreamData { stream_id, .. } => {
+                if let Some(rs) = recv_streams.get_mut(&stream_id.into()) {
+                    rs.maybe_send_flowc_update()
+                }
+            }
+            Frame::PathResponse { .. } => qinfo!("Path Response lost, not re-sent"),
+            _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", token),
+        }
+    }
+
+    pub(crate) fn get_frame(
+        &mut self,
+        epoch: Epoch,
+        remaining: usize,
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        if epoch != 3 {
+            return None;
+        }
+
+        if let Some(frame) = self.peek() {
+            // A suboptimal way to figure out if the frame fits within remaining
+            // space.
+            let mut d = Encoder::default();
+            frame.marshal(&mut d);
+            if d.len() > remaining {
+                qtrace!("flowc frame doesn't fit in remaining");
+                return None;
+            }
+        } else {
+            return None;
+        }
+        // There is enough space we can add this frame to the packet.
+        let frame = self.next().expect("just peeked this");
+        Some((frame.clone(), Some(RecoveryToken::Flow(frame))))
     }
 }
 
@@ -174,147 +301,5 @@ impl Iterator for FlowMgr {
         }
 
         None
-    }
-}
-
-#[derive(Default)]
-pub struct FlowControlGenerator {}
-
-impl FrameGenerator for FlowControlGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        _now: Instant,
-        _epoch: u16,
-        _mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        if let Some(frame) = conn.flow_mgr.borrow().peek() {
-            // A suboptimal way to figure out if the frame fits within remaining
-            // space.
-            let mut d = Encoder::default();
-            frame.marshal(&mut d);
-            if d.len() > remaining {
-                qtrace!("flowc frame doesn't fit in remaining");
-                return None;
-            }
-        } else {
-            return None;
-        }
-        // There is enough space we can add this frame to the packet.
-        let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
-        Some((
-            frame.clone(),
-            Some(Box::new(FlowControlGeneratorToken(frame))),
-        ))
-    }
-}
-
-struct FlowControlGeneratorToken(Frame);
-
-impl FrameGeneratorToken for FlowControlGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        if let Frame::ResetStream {
-            stream_id,
-            application_error_code,
-            final_size,
-        } = self.0
-        {
-            qinfo!(
-                [conn]
-                "Reset received stream={} err={} final_size={}",
-                stream_id,
-                application_error_code,
-                final_size
-            );
-            if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
-                ss.reset_acked()
-            }
-        }
-    }
-
-    fn lost(&mut self, conn: &mut Connection) {
-        match self.0 {
-            // Always resend ResetStream if lost
-            Frame::ResetStream {
-                stream_id,
-                application_error_code,
-                final_size,
-            } => {
-                qinfo!(
-                    [conn]
-                    "Reset lost stream={} err={} final_size={}",
-                    stream_id,
-                    application_error_code,
-                    final_size
-                );
-                if conn.send_streams.contains_key(&stream_id.into()) {
-                    conn.flow_mgr.borrow_mut().stream_reset(
-                        stream_id.into(),
-                        application_error_code,
-                        final_size,
-                    );
-                }
-            }
-            // Resend MaxStreams if lost (with updated value)
-            Frame::MaxStreams { stream_type, .. } => {
-                let local_max = match stream_type {
-                    StreamType::BiDi => &mut conn.indexes.local_max_stream_bidi,
-                    StreamType::UniDi => &mut conn.indexes.local_max_stream_uni,
-                };
-
-                conn.flow_mgr
-                    .borrow_mut()
-                    .max_streams(*local_max, stream_type)
-            }
-            // Only resend "*Blocked" frames if still blocked
-            Frame::DataBlocked { .. } => {
-                if conn.flow_mgr.borrow().conn_credit_avail() == 0 {
-                    conn.flow_mgr.borrow_mut().data_blocked()
-                }
-            }
-            Frame::StreamDataBlocked { stream_id, .. } => {
-                if let Some(ss) = conn.send_streams.get(&stream_id.into()) {
-                    if ss.credit_avail() == 0 {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .stream_data_blocked(stream_id.into(), ss.max_stream_data())
-                    }
-                }
-            }
-            Frame::StreamsBlocked { stream_type, .. } => match stream_type {
-                StreamType::UniDi => {
-                    if conn.indexes.peer_next_stream_uni >= conn.indexes.peer_max_stream_uni {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .streams_blocked(conn.indexes.peer_max_stream_uni, StreamType::UniDi);
-                    }
-                }
-                StreamType::BiDi => {
-                    if conn.indexes.peer_next_stream_bidi >= conn.indexes.peer_max_stream_bidi {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .streams_blocked(conn.indexes.peer_max_stream_bidi, StreamType::BiDi);
-                    }
-                }
-            },
-            // Resend StopSending
-            Frame::StopSending {
-                stream_id,
-                application_error_code,
-            } => conn
-                .flow_mgr
-                .borrow_mut()
-                .stop_sending(stream_id.into(), application_error_code),
-            // Resend MaxStreamData if not SizeKnown
-            // (maybe_send_flowc_update() checks this.)
-            Frame::MaxStreamData { stream_id, .. } => {
-                if let Some(rs) = conn.recv_streams.get_mut(&stream_id.into()) {
-                    rs.maybe_send_flowc_update()
-                }
-            }
-            Frame::PathResponse { .. } => qinfo!("Path Response lost, not re-sent"),
-            _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", self.0),
-        }
     }
 }

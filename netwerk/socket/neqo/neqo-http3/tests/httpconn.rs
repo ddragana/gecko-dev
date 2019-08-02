@@ -6,9 +6,8 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::Datagram;
-use neqo_http3::{Http3Connection, Http3State};
-use std::time::Duration;
+use neqo_common::{Datagram, matches};
+use neqo_http3::{Http3Connection, Http3State, Http3Event};
 use test_fixture::*;
 
 fn new_stream_callback(
@@ -36,11 +35,7 @@ fn new_stream_callback(
     )
 }
 
-fn connect() -> (
-    Http3Connection,
-    Http3Connection,
-    (Vec<Datagram>, Option<Duration>),
-) {
+fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
     let mut hconn_c = Http3Connection::new(default_client(), 100, 100, None);
     let mut hconn_s = Http3Connection::new(
         default_server(),
@@ -51,41 +46,46 @@ fn connect() -> (
 
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     assert_eq!(hconn_s.state(), Http3State::Initializing);
-    let mut r = hconn_c.process(Vec::new(), now());
-    r = hconn_s.process(r.0, now());
-    r = hconn_c.process(r.0, now());
-    r = hconn_s.process(r.0, now());
+    let out = hconn_c.process(None, now()); // Initial
+    let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now()); // ACK
+    let _ = hconn_s.process(out.dgram(), now()); //consume ACK
+    let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+    assert!(hconn_c.events().into_iter().any(authentication_needed));
+    hconn_c.authenticated(0, now());
+    let out = hconn_c.process(None, now()); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
+    let out = hconn_s.process(out.dgram(), now()); // Handshake
     assert_eq!(hconn_s.state(), Http3State::Connected);
-    r = hconn_c.process(r.0, now());
-    r = hconn_s.process(r.0, now());
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
     // assert_eq!(hconn_s.settings_received, true);
-    r = hconn_c.process(r.0, now());
+    let out = hconn_c.process(out.dgram(), now());
     // assert_eq!(hconn_c.settings_received, true);
 
-    (hconn_c, hconn_s, r)
+    (hconn_c, hconn_s, out.dgram())
 }
 
 #[test]
 fn test_connect() {
-    let (_hconn_c, _hconn_s, _r) = connect();
+    let (_hconn_c, _hconn_s, _d) = connect();
 }
 
 #[test]
 fn test_fetch() {
-    let (mut hconn_c, mut hconn_s, mut r) = connect();
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
 
     eprintln!("-----client");
     let req = hconn_c
         .fetch("GET", "https", "something.com", "/", &[])
         .unwrap();
     assert_eq!(req, 0);
-    r = hconn_c.process(r.0, now());
+    let out = hconn_c.process(dgram, now());
     eprintln!("-----server");
-    r = hconn_s.process(r.0, now());
+    let out = hconn_s.process(out.dgram(), now());
 
     eprintln!("-----client");
-    r = hconn_c.process(r.0, now());
+    let _ = hconn_c.process(out.dgram(), now());
     // TODO: some kind of client API needed to read result of fetch
     // TODO: assert result is as expected e.g. (200 "abc")
     // assert!(false);

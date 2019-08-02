@@ -54,6 +54,9 @@ enum class SpdyVersion {
   // 31 was h2-16
 };
 
+const nsCString kHttp3Version = NS_LITERAL_CSTRING("h3-22");
+const char kHttp3VersionHEX[] = "68332d3232";
+
 //-----------------------------------------------------------------------------
 // http connection capabilities
 //-----------------------------------------------------------------------------

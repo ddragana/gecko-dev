@@ -14,6 +14,8 @@ use std::mem;
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
+use smallvec::SmallVec;
+
 use crate::flow_mgr::FlowMgr;
 use crate::stream_id::StreamId;
 use crate::ConnectionEvents;
@@ -21,6 +23,8 @@ use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+
+pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
@@ -129,7 +133,7 @@ impl RxStreamOrderer {
 
         if insert_new {
             // Now handle possible overlap with next entries
-            let mut to_remove = Vec::new(); // TODO(agrover@mozilla.com): use smallvec?
+            let mut to_remove = SmallVec::<[_; 8]>::new();
 
             for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
                 let next_end = next_start + next_data.len() as u64;

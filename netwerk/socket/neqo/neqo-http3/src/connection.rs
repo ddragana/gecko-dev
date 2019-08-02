@@ -11,16 +11,19 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
+use neqo_crypto::{err, SecretAgentInfo};
+use neqo_crypto::agent::CertificateInfo;
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::Role;
+use neqo_transport::{
+    AppError, CloseError, Connection, ConnectionEvent, Output, Role, State, StreamType,
+};
 
-use neqo_transport::{AppError, Connection, ConnectionEvent, State, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::{Error, Res};
 
@@ -157,8 +160,8 @@ pub enum Http3State {
     Initializing,
     Connected,
     GoingAway,
-    Closing(AppError),
-    Closed(AppError),
+    Closing(CloseError),
+    Closed(CloseError),
 }
 
 pub struct Http3Connection {
@@ -225,6 +228,19 @@ impl Http3Connection {
         }
     }
 
+    pub fn get_sec_info(&self) -> Option<&SecretAgentInfo> {
+        self.conn.get_sec_info()
+    }
+
+    /// Get the peer's certificate.
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        self.conn.peer_certificate()
+    }
+
+    pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
+        self.conn.authenticated(error, now);
+    }
+
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
         self.create_control_stream()?;
@@ -287,43 +303,69 @@ impl Http3Connection {
     pub fn check_state_change(&mut self, now: Instant) {
         match self.state {
             Http3State::Initializing => {
-                if self.conn.state().clone() == State::Connected {
-                    self.state = Http3State::Connected;
-                    self.events.borrow_mut().connected();
-                    let res = self.initialize_http3_connection();
-                    self.check_result(now, res);
-                }
-            }
+                match self.conn.state().clone() {
+                    State::Connected => {
+                        self.state = Http3State::Connected;
+                        self.events.borrow_mut().connected();
+                        let res = self.initialize_http3_connection();
+                        self.check_result(now, res);
+                    }
+                    State::Closing { error, .. } => {
+                        self.events.borrow_mut().connection_closing(error.clone().into());
+                        self.state = Http3State::Closing(error.into());
+                    }
+                    State::Closed(error) => {
+                        self.events.borrow_mut().connection_closed(error.clone().into());
+                        self.state = Http3State::Closed(error.into());
+                    }
+                    _ => {}
+                };
+            },
             Http3State::Connected => {
-                if let State::Closing { error, .. } = self.conn.state().clone() {
-                    self.events.borrow_mut().connection_closing();
-                    self.state = Http3State::Closing(match error.app_code() {
-                        Some(c) => c,
-                        None => 0,
-                    });
+                match self.conn.state().clone() {
+                    State::Closing { error, .. } => {
+                        self.events.borrow_mut().connection_closing(error.clone().into());
+                        self.state = Http3State::Closing(error.into());
+                    },
+                    State::Closed(error) => {
+                        self.events.borrow_mut().connection_closed(error.clone().into());
+                        self.state = Http3State::Closed(error.into());
+                    }
+                    _ => {}
                 }
-            }
+            },
+            Http3State::Closing(..) => {
+                match self.conn.state().clone() {
+                    State::Closed(error) => {
+                        self.events.borrow_mut().connection_closed(error.clone().into());
+                        self.state = Http3State::Closed(error.into());
+                    }
+                    _ => {}
+                }
+            },
             _ => {}
         }
     }
 
-    pub fn process<I>(&mut self, in_dgrams: I, now: Instant) -> (Vec<Datagram>, Option<Duration>)
-    where
-        I: IntoIterator<Item = Datagram>,
-    {
+    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qdebug!([self] "Process.");
-        self.process_input(in_dgrams, now);
+        if let Some(d) = dgram {
+            self.process_input(d, now);
+        }
         self.process_http3(now);
         self.process_output(now)
     }
 
-    pub fn process_input<I>(&mut self, in_dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = Datagram>,
-    {
+    pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
         qdebug!([self] "Process input.");
-        self.conn.process_input(in_dgrams, now);
+        self.conn.process_input(dgram, now);
         self.check_state_change(now);
+        if self.state == Http3State::Initializing {
+            let res = self.check_connection_events();
+            if self.check_result(now, res) {
+                return;
+            }
+        }
     }
 
     pub fn conn(&mut self) -> &mut Connection {
@@ -349,9 +391,11 @@ impl Http3Connection {
         }
     }
 
-    pub fn process_output(&mut self, now: Instant) -> (Vec<Datagram>, Option<Duration>) {
+    pub fn process_output(&mut self, now: Instant) -> Output {
         qdebug!([self] "Process output.");
-        self.conn.process_output(now)
+        let out = self.conn.process_output(now);
+        self.check_state_change(now);
+        out
     }
 
     // If this return an error the connection must be closed.
@@ -426,6 +470,9 @@ impl Http3Connection {
                 }
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
+                }
+                ConnectionEvent::AuthenticationNeeded => {
+                    self.events.borrow_mut().authentication_needed();
                 }
                 ConnectionEvent::ConnectionClosed { error_code, .. } => {
                     self.handle_connection_closed(error_code)?
@@ -566,7 +613,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_connection_closed(&mut self, error_code: u16) -> Res<()> {
+    fn handle_connection_closed(&mut self, error_code: CloseError) -> Res<()> {
         self.events.borrow_mut().connection_closed(error_code);
         self.state = Http3State::Closed(error_code);
         Ok(())
@@ -702,7 +749,7 @@ impl Http3Connection {
 
     pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
         qdebug!([self] "Closed.");
-        self.state = Http3State::Closing(error);
+        self.state = Http3State::Closing(CloseError::Application(error));
         if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
             && (error == 0)
         {
@@ -858,9 +905,10 @@ impl Http3Connection {
                     | Http3Event::DataReadable { stream_id }
                     | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
                     Http3Event::Reset { .. }
+                    | Http3Event::AuthenticationNeeded
                     | Http3Event::ConnectionConnected
                     | Http3Event::GoawayReceived
-                    | Http3Event::ConnectionClosing
+                    | Http3Event::ConnectionClosing { .. }
                     | Http3Event::ConnectionClosed { .. } => true,
                     Http3Event::RequestsCreatable => false,
                 })
@@ -959,34 +1007,25 @@ impl Http3Connection {
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3Event {
     /// Space available in the buffer for an application write to succeed.
-    HeaderReady {
-        stream_id: u64,
-    },
+    HeaderReady { stream_id: u64 },
     /// New bytes available for reading.
-    DataReadable {
-        stream_id: u64,
-    },
+    DataReadable { stream_id: u64 },
     /// Peer reset the stream.
-    Reset {
-        stream_id: u64,
-        error: AppError,
-    },
+    Reset { stream_id: u64, error: AppError },
     /// A new push stream
-    NewPushStream {
-        stream_id: u64,
-    },
+    NewPushStream { stream_id: u64 },
     /// New stream can be created
     RequestsCreatable,
-    // Connection change state to Connected.
+    /// Cert authentication needed
+    AuthenticationNeeded,
+    /// Connection change state to Connected.
     ConnectionConnected,
-    // Client has received a GOAWAY frame
+    /// Client has received a GOAWAY frame
     GoawayReceived,
-    // Connection change state to Closing.
-    ConnectionClosing,
-    // Connection change state to Closed.
-    ConnectionClosed {
-        error_code: AppError,
-    },
+    /// Connection change state to Closing.
+    ConnectionClosing { error: CloseError },
+    /// Connection change state to Closed.
+    ConnectionClosed { error: CloseError },
 }
 
 #[derive(Debug, Default)]
@@ -1015,6 +1054,10 @@ impl Http3Events {
         self.events.insert(Http3Event::RequestsCreatable);
     }
 
+    pub fn authentication_needed(&mut self) {
+        self.events.insert(Http3Event::AuthenticationNeeded);
+    }
+
     pub fn connected(&mut self) {
         self.events.insert(Http3Event::ConnectionConnected);
     }
@@ -1023,14 +1066,15 @@ impl Http3Events {
         self.events.insert(Http3Event::GoawayReceived);
     }
 
-    pub fn connection_closing(&mut self) {
-        self.events.insert(Http3Event::ConnectionClosing);
+    pub fn connection_closing(&mut self, error: CloseError) {
+        self.events
+            .insert(Http3Event::ConnectionClosing { error });
     }
 
-    pub fn connection_closed(&mut self, error_code: u16) {
+    pub fn connection_closed(&mut self, error: CloseError) {
         self.events.clear();
         self.events
-            .insert(Http3Event::ConnectionClosed { error_code });
+            .insert(Http3Event::ConnectionClosed { error });
     }
 
     pub fn events(&mut self) -> BTreeSet<Http3Event> {
@@ -1042,10 +1086,13 @@ impl Http3Events {
 mod tests {
     use super::*;
     use test_fixture::*;
+    use neqo_common::matches;
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
         match hconn.state() {
-            Http3State::Closing(err) | Http3State::Closed(err) => assert_eq!(err, expected.code()),
+            Http3State::Closing(err) | Http3State::Closed(err) => {
+                assert_eq!(err, CloseError::Application(expected.code()))
+            }
             _ => panic!("Wrong state {:?}", hconn.state()),
         };
     }
@@ -1069,30 +1116,37 @@ mod tests {
         }
         if client {
             assert_eq!(hconn.state(), Http3State::Initializing);
-            let mut r = hconn.process(vec![], now());
+            let out = hconn.process(None, now());
             assert_eq!(hconn.state(), Http3State::Initializing);
             assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
-            r = neqo_trans_conn.process(r.0, now());
+            let out = neqo_trans_conn.process(out.dgram(), now());
             assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
-            assert_eq!(hconn.state(), Http3State::Initializing);
-            r = hconn.process(r.0, now());
-            let http_events = hconn.events();
-            for e in http_events {
-                match e {
-                    Http3Event::ConnectionConnected => assert!(true),
-                    _ => assert!(false),
-                }
-            }
+            let out = hconn.process(out.dgram(), now());
+            let out = neqo_trans_conn.process(out.dgram(), now());
+            assert!(out.as_dgram_ref().is_none());
+
+            let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+            assert!(hconn.events().into_iter().any(authentication_needed));
+            hconn.authenticated(0, now());
+
+            let out = hconn.process(out.dgram(), now());
+            let connected = |e| matches!(e, Http3Event::ConnectionConnected);
+            assert!(hconn.events().into_iter().any(connected));
             assert_eq!(hconn.state(), Http3State::Connected);
-            neqo_trans_conn.process(r.0, now());
+            neqo_trans_conn.process(out.dgram(), now());
         } else {
             assert_eq!(hconn.state(), Http3State::Initializing);
-            let mut r = neqo_trans_conn.process(vec![], now());
-            r = hconn.process(r.0, now());
-            r = neqo_trans_conn.process(r.0, now());
-            r = hconn.process(r.0, now());
+            let out = neqo_trans_conn.process(None, now());
+            let out = hconn.process(out.dgram(), now());
+            let out = neqo_trans_conn.process(out.dgram(), now());
+            let _ = hconn.process(out.dgram(), now());
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            assert!(neqo_trans_conn.events().into_iter().any(authentication_needed));
+            neqo_trans_conn.authenticated(0, now());
+            let out = neqo_trans_conn.process(None, now());
+            let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);
-            neqo_trans_conn.process(r.0, now());
+            neqo_trans_conn.process(out.dgram(), now());
         }
 
         let events = neqo_trans_conn.events();
@@ -1172,8 +1226,8 @@ mod tests {
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
         assert_eq!(sent, Ok(1));
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         // assert no error occured.
         assert_eq!(hconn.state(), Http3State::Connected);
@@ -1198,8 +1252,8 @@ mod tests {
     fn test_client_close_control_stream() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         neqo_trans_conn.stream_close_send(3).unwrap();
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
 
@@ -1209,8 +1263,8 @@ mod tests {
     fn test_server_close_control_stream() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(false);
         neqo_trans_conn.stream_close_send(2).unwrap();
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
 
@@ -1225,8 +1279,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1241,8 +1295,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1254,8 +1308,8 @@ mod tests {
         // send the second SETTINGS frame.
         let sent = neqo_trans_conn.stream_send(3, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
         assert_eq!(sent, Ok(8));
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
@@ -1267,8 +1321,8 @@ mod tests {
         // send the second SETTINGS frame.
         let sent = neqo_trans_conn.stream_send(2, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
         assert_eq!(sent, Ok(8));
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
@@ -1282,8 +1336,8 @@ mod tests {
             let _ = neqo_trans_conn.stream_send(2, v);
         }
 
-        let r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         assert_closed(&hconn, Error::WrongStream);
     }
@@ -1328,9 +1382,9 @@ mod tests {
             new_stream_id,
             &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
         );
-        let mut r = neqo_trans_conn.process(vec![], now());
-        r = hconn.process(r.0, now());
-        neqo_trans_conn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        let out = hconn.process(out.dgram(), now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
         let events = neqo_trans_conn.events();
@@ -1364,9 +1418,9 @@ mod tests {
             new_stream_id,
             &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
         );
-        let mut r = neqo_trans_conn.process(vec![], now());
-        r = hconn.process(r.0, now());
-        neqo_trans_conn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        let out = hconn.process(out.dgram(), now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
         let events = neqo_trans_conn.events();
@@ -1396,9 +1450,9 @@ mod tests {
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
-        let mut r = neqo_trans_conn.process(vec![], now());
-        r = hconn.process(r.0, now());
-        neqo_trans_conn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        let out = hconn.process(out.dgram(), now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::Error::PushRefused.
         let events = neqo_trans_conn.events();
@@ -1428,9 +1482,9 @@ mod tests {
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
-        let mut r = neqo_trans_conn.process(vec![], now());
-        r = hconn.process(r.0, now());
-        neqo_trans_conn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        let out = hconn.process(out.dgram(), now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::WrongStreamDirection.
         let events = neqo_trans_conn.events();
@@ -1467,8 +1521,8 @@ mod tests {
             Ok(0)
         );
 
-        let mut r = hconn.process(vec![], now());
-        neqo_trans_conn.process(r.0, now());
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
         let events = neqo_trans_conn.events();
@@ -1485,11 +1539,11 @@ mod tests {
             }
         }
         // Generate packet with the above bad h3 input
-        r = neqo_trans_conn.process(vec![], now());
+        let out = neqo_trans_conn.process(None, now());
         // Process bad input and generate stop sending frame
-        r = hconn.process(r.0, now());
+        let out = hconn.process(out.dgram(), now());
         // Process stop sending frame and generate an event and a reset frame
-        r = neqo_trans_conn.process(r.0, now());
+        let out = neqo_trans_conn.process(out.dgram(), now());
 
         let mut stop_sending_event_found = false;
         for e in neqo_trans_conn.events() {
@@ -1509,7 +1563,7 @@ mod tests {
         assert_eq!(hconn.state(), Http3State::Connected);
 
         // Process reset frame
-        hconn.conn.process(r.0, now());
+        hconn.conn.process(out.dgram(), now());
         let mut reset_event_found = false;
         for e in hconn.conn.events() {
             match e {
@@ -1566,57 +1620,57 @@ mod tests {
         // send the stream type
         let mut sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        let mut r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         // start sending SETTINGS frame
         sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x6]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x8]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         assert_eq!(hconn.state(), Http3State::Connected);
 
         // Now test PushPromise
         sent = neqo_trans_conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x5]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
         assert_eq!(sent, Ok(1));
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         // PUSH_PROMISE on a control stream will cause an error
         assert_closed(&hconn, Error::WrongStream);
@@ -1636,8 +1690,8 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], now());
-        neqo_trans_conn.process(r.0, now());
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
         let events = neqo_trans_conn.events();
@@ -1683,8 +1737,8 @@ mod tests {
                 _ => {}
             }
         }
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1758,8 +1812,8 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], now());
-        neqo_trans_conn.process(r.0, now());
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
         let events = neqo_trans_conn.events();
@@ -1793,8 +1847,8 @@ mod tests {
                 _ => {}
             }
         }
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1885,8 +1939,8 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id_3, 8);
 
-        let mut r = hconn.process(vec![], now());
-        neqo_trans_conn.process(r.0, now());
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
 
         let _ = neqo_trans_conn.stream_send(
             3, //control_stream,
@@ -1924,8 +1978,8 @@ mod tests {
                 _ => {}
             }
         }
-        r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, now());
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
 
         let mut stream_reset = false;
         let mut http_events = hconn.events();

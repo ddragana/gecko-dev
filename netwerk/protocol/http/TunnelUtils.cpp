@@ -1045,7 +1045,7 @@ void SpdyConnectTransaction::MapStreamToHttpConnection(
   mTunnelTransport = new SocketTransportShim(aTransport, mIsWebsocket);
   mTunnelStreamIn = new InputStreamShim(this, mIsWebsocket);
   mTunnelStreamOut = new OutputStreamShim(this, mIsWebsocket);
-  mTunneledConn = new nsHttpConnection();
+  mTunneledConn = new nsHttpConnection(false);
 
   switch (httpResponseCode) {
     case 404:

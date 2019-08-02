@@ -1748,8 +1748,10 @@ nsresult nsHttpConnectionMgr::DispatchTransaction(nsConnectionEntry* ent,
 
   LOG(
       ("nsHttpConnectionMgr::DispatchTransaction "
-       "[ent-ci=%s %p trans=%p caps=%x conn=%p priority=%d]\n",
-       ent->mConnInfo->HashKey().get(), ent, trans, caps, conn, priority));
+       "[ent-ci=%s %p trans=%p caps=%x conn=%p priority=%d isSpdy=%d "
+       "isHttp3=%d]\n",
+       ent->mConnInfo->HashKey().get(), ent, trans, caps, conn, priority,
+       conn->UsingSpdy(), conn->UsingHttp3()));
 
   // It is possible for a rate-paced transaction to be dispatched independent
   // of the token bucket when the amount of parallelization has changed or
@@ -1762,7 +1764,8 @@ nsresult nsHttpConnectionMgr::DispatchTransaction(nsConnectionEntry* ent,
          "Connection host = %s\n",
          trans->ConnectionInfo()->Origin(), conn->ConnectionInfo()->Origin()));
     rv = conn->Activate(trans, caps, priority);
-    MOZ_ASSERT(NS_SUCCEEDED(rv), "SPDY Cannot Fail Dispatch");
+    MOZ_ASSERT((conn->UsingSpdy() && NS_SUCCEEDED(rv)) ||
+                conn->UsingHttp3(), "SPDY Cannot Fail Dispatch");
     if (NS_SUCCEEDED(rv) && !trans->GetPendingTime().IsNull()) {
       AccumulateTimeDelta(Telemetry::TRANSACTION_WAIT_TIME_SPDY,
                           trans->GetPendingTime(), TimeStamp::Now());
@@ -3941,12 +3944,12 @@ nsHttpConnectionMgr::nsHalfOpenSocket::nsHalfOpenSocket(
       mFreeToUse(true),
       mPrimaryStreamStatus(NS_OK),
       mFastOpenInProgress(false),
-      mEnt(ent),
-      mHttp3Forced(false) {
+      mEnt(ent) {
   MOZ_ASSERT(ent && trans, "constructor with null arguments");
   LOG(("Creating nsHalfOpenSocket [this=%p trans=%p ent=%s key=%s]\n", this,
        trans, ent->mConnInfo->Origin(), ent->mConnInfo->HashKey().get()));
 
+  mIsHttp3 = mEnt->mConnInfo->IsHttp3();
   if (speculative) {
     Telemetry::AutoCounter<Telemetry::HTTPCONNMGR_TOTAL_SPECULATIVE_CONN>
         totalSpeculativeConn;
@@ -3984,10 +3987,8 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
   nsresult rv;
   nsTArray<nsCString> socketTypes;
   const nsHttpConnectionInfo* ci = mEnt->mConnInfo;
-  if (gHttpHandler->AlwaysTryHttp3() && !isBackup && ci->FirstHopSSL()) {
+  if (mIsHttp3) {
     socketTypes.AppendElement(NS_LITERAL_CSTRING("quic"));
-    mHttp3Session = new Http3Session();
-    mHttp3Forced = true;
   } else {
     if (ci->FirstHopSSL()) {
       socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
@@ -4198,7 +4199,7 @@ void nsHttpConnectionMgr::nsHalfOpenSocket::SetupBackupTimer() {
   // When using Fast Open the correct transport will be setup for sure (it is
   // guaranteed), but it can be that it will happened a bit later.
   // When http3 is forced try backup ccnnection as well.
-  if (mFastOpenInProgress || mHttp3Forced || (timeout && !mSpeculative)) {
+  if (mFastOpenInProgress || (timeout && !mSpeculative)) {
     // Setup the timer that will establish a backup socket
     // if we do not get a writable event on the main one.
     // We do this because a lost SYN takes a very long time
@@ -4348,39 +4349,6 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnOutputStreamReady(
        mEnt->mConnInfo->Origin(), out == mStreamOut ? "primary" : "backup"));
 
   mEnt->mDoNotDestroy = true;
-
-  if (mHttp3Session && (out == mStreamOut)) {
-    nsresult rv = NS_OK;
-    if (!mHttp3Session->Initialized()) {
-      rv = mHttp3Session->Init(mEnt->mConnInfo->GetOrigin(), mSocketTransport);
-      if (NS_FAILED(rv)) {
-        LOG(("nsHalfOpenSocket  mHttp3Session->Init failed "
-             "[this=%p rv=%x]\n", this, rv));
-        mSocketTransport->Close(NS_ERROR_ABORT);
-        mStreamOut = nullptr;
-        mStreamIn = nullptr;
-        mSocketTransport = nullptr;
-        mHttp3Session = nullptr;
-        if (mEnt) {
-          mEnt->mDoNotDestroy = false;
-        }
-        return rv;
-      }
-    }
-    mHttp3Session->Process(out, mStreamIn);
-    if (mHttp3Session->IsConnected()) {
-      mPrimaryConnectedOK = true;
-      gHttpHandler->ConnMgr()->RecvdConnect();
-      CancelBackupTimer();
-      rv = SetupConn(out, false, mHttp3Session);
-    } else {
-      out->AsyncWait(this, 0, 0, nullptr);
-    }
-    if (mEnt) {
-      mEnt->mDoNotDestroy = false;
-    }
-    return rv;
-  }
 
   gHttpHandler->ConnMgr()->RecvdConnect();
   CancelBackupTimer();
@@ -4580,7 +4548,7 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::StartFastOpen() {
     // SetupBackupTimer should setup timer which will hold a ref to this
     // halfOpen. It will failed only if it cannot create timer. Anyway just
     // to be sure I will add this deleteProtector!!!
-    if (!mSynTimer) {
+    if (!mSynTimer && !mIsHttp3) {
       // For Fast Open we will setup backup timer also for
       // NullTransaction.
       // So maybe it is not set and we need to set it here.
@@ -4780,14 +4748,15 @@ void nsHttpConnectionMgr::nsHalfOpenSocket::FastOpenNotSupported() {
 }
 
 nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
-    nsIAsyncOutputStream* out, bool aFastOpen, Http3Session* aHttp3Session /* = nullptr */) {
+    nsIAsyncOutputStream* out, bool aFastOpen) {
   MOZ_ASSERT(!aFastOpen || (out == mStreamOut));
+  MOZ_ASSERT(!(mIsHttp3 && aFastOpen));
   // assign the new socket to the http connection
-  RefPtr<nsHttpConnection> conn = new nsHttpConnection(aHttp3Session);
+  RefPtr<nsHttpConnection> conn = new nsHttpConnection(mIsHttp3);
   LOG(
       ("nsHalfOpenSocket::SetupConn "
-       "Created new nshttpconnection %p\n",
-       conn.get()));
+       "Created new nshttpconnection %p %s\n",
+       conn.get(), mIsHttp3 ? "using http3" : ""));
 
   NullHttpTransaction* nullTrans = mTransaction->QueryNullTransaction();
   if (nullTrans) {
@@ -4888,17 +4857,19 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
 
   // if this is still in the pending list, remove it and dispatch it
   RefPtr<PendingTransactionInfo> pendingTransInfo = FindTransactionHelper(true);
-  if (aHttp3Session) {
-    aHttp3Session->SetConnection(new ConnectionHandle(conn));
-    gHttpHandler->ConnMgr()->AddActiveConn(conn, mEnt);
-    if (pendingTransInfo) {
-      rv = gHttpHandler->ConnMgr()->DispatchTransaction(
-        mEnt, pendingTransInfo->mTransaction, conn);
-    }
-  } else if (pendingTransInfo) {
+  if (pendingTransInfo) {
     MOZ_ASSERT(!mSpeculative, "Speculative Half Open found mTransaction");
 
     gHttpHandler->ConnMgr()->AddActiveConn(conn, mEnt);
+
+    if (mIsHttp3) {
+        // If this is Http3 we need to set a ConnectionHandle to the first
+        // transaction. The handler will be given to Http3Session.
+        RefPtr<ConnectionHandle> handle = new ConnectionHandle(conn);
+
+       // give the transaction the indirect reference to the connection.
+       pendingTransInfo->mTransaction->SetConnection(handle);
+    }
     rv = gHttpHandler->ConnMgr()->DispatchTransaction(
         mEnt, pendingTransInfo->mTransaction, conn);
   } else {
@@ -5063,9 +5034,7 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport* trans,
   MOZ_ASSERT(trans == mSocketTransport || trans == mBackupTransport);
   if (status == NS_NET_STATUS_CONNECTED_TO) {
     if (trans == mSocketTransport) {
-      if (!mHttp3Session) {
-        mPrimaryConnectedOK = true;
-      }
+      mPrimaryConnectedOK = true;
     } else {
       mBackupConnectedOK = true;
     }
@@ -5132,15 +5101,14 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport* trans,
       // nsHttpConnectionMgr::Shutdown and nsSocketTransportService::Shutdown
       // where the first abandons all half open socket instances and only
       // after that the second stops the socket thread.
-      if (mEnt && !mBackupTransport && !mSynTimer) SetupBackupTimer();
+      if (mEnt && !mBackupTransport && !mSynTimer && !mIsHttp3)
+        SetupBackupTimer();
       break;
 
     case NS_NET_STATUS_CONNECTED_TO:
       // TCP connection's up, now transfer or SSL negotiantion starts,
       // no need for backup socket
-      if (!mHttp3Session) {
-        CancelBackupTimer();
-      }
+      CancelBackupTimer();
       break;
 
     default:
@@ -5190,7 +5158,7 @@ bool nsHttpConnectionMgr::nsHalfOpenSocket::Claim() {
     }
 
     if ((mPrimaryStreamStatus == NS_NET_STATUS_CONNECTING_TO) && mEnt &&
-        !mBackupTransport && !mSynTimer) {
+        !mBackupTransport && !mSynTimer && !mIsHttp3) {
       SetupBackupTimer();
     }
   }
@@ -5239,7 +5207,7 @@ nsHttpConnectionMgr::nsConnectionEntry::nsConnectionEntry(
       mDoNotDestroy(false) {
   MOZ_COUNT_CTOR(nsConnectionEntry);
 
-  if (mConnInfo->FirstHopSSL()) {
+  if (mConnInfo->FirstHopSSL() && !mConnInfo->IsHttp3()) {
     mUseFastOpen = gHttpHandler->UseFastOpen();
   } else {
     // Only allow the TCP fast open on a secure connection.

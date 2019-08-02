@@ -276,7 +276,6 @@ nsHttpHandler::nsHttpHandler()
       mDefaultHpackBuffer(4096),
       mQpackTableSize(4096),
       mH3MaxBlockedStreams(10),
-      mAlwaysTryHttp3(false),
       mMaxHttpResponseHeaderSize(393216),
       mFocusedWindowTransactionRatio(0.9f),
       mSpeculativeConnectEnabled(false),
@@ -292,7 +291,8 @@ nsHttpHandler::nsHttpHandler()
       mNextChannelId(1),
       mLastActiveTabLoadOptimizationLock(
           "nsHttpConnectionMgr::LastActiveTabLoadOptimization"),
-      mThroughCaptivePortal(false) {
+      mThroughCaptivePortal(false),
+      mHttp3Enabled(true) {
   LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
   mUserAgentOverride.SetIsVoid(true);
@@ -1881,26 +1881,43 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
   }
 
+  if (PREF_CHANGED(HTTP_PREF("http3.enabled"))) {
+    rv = Preferences::GetBool(HTTP_PREF("http3.default-qpack-table-size"),
+                              &cVar);
+    if (NS_SUCCEEDED(rv)) {
+      mHttp3Enabled = cVar;
+    }
+  }
+
   if (PREF_CHANGED(HTTP_PREF("http3.default-qpack-table-size"))) {
-    rv = Preferences::GetInt(HTTP_PREF("http3.default-qpack-table-size"), &val);
+    rv = Preferences::GetInt(HTTP_PREF("http3.default-qpack-table-size"),
+                             &val);
     if (NS_SUCCEEDED(rv)) {
       mQpackTableSize = val;
     }
   }
 
   if (PREF_CHANGED(HTTP_PREF("http3.default--max-stream-blocked"))) {
-    rv = Preferences::GetInt(HTTP_PREF("http3.default--max-stream-blocked"), &val);
+    rv = Preferences::GetInt(HTTP_PREF("http3.default--max-stream-blocked"),
+                             &val);
     if (NS_SUCCEEDED(rv)) {
       mH3MaxBlockedStreams = (uint16_t)clamped(val, 0, UINT16_MAX);
     }
   }
 
-  if (PREF_CHANGED(HTTP_PREF("http3.do-http3-always"))) {
-    rv = Preferences::GetBool(HTTP_PREF("http3.do-http3-always"), &cVar);
+#if defined(DEBUG) && defined(NIGHTLY_BUILD)
+  if (PREF_CHANGED(HTTP_PREF("http3.set-alt-svc"))) {
+    nsAutoCString value;
+    rv = Preferences::GetCString(HTTP_PREF("http3.set-alt-svc"), value);
     if (NS_SUCCEEDED(rv)) {
-      mAlwaysTryHttp3 = cVar;
+      int32_t index = value.Find(";");
+      if (index != kNotFound) {
+        mAltSvcMappingTemptativeHost.Assign(Substring(value, 0, index));
+        mAltSvcMappingTemptativeHeader.Assign(Substring(value, index + 1));
+      }
     }
   }
+#endif
 
   // Enable HTTP response timeout if TCP Keepalives are disabled.
   mResponseTimeoutEnabled =
@@ -1909,6 +1926,12 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
 #undef PREF_CHANGED
 #undef MULTI_PREF_CHANGED
 }
+
+#if defined(DEBUG) && defined(NIGHTLY_BUILD)
+bool nsHttpHandler::MatchAltSvcTestsOnly(nsACString& origin) {
+    return mAltSvcMappingTemptativeHost.Equals(origin);
+}
+#endif
 
 /**
  *  Allocates a C string into that contains a ISO 639 language list
@@ -2678,6 +2701,10 @@ HttpTrafficAnalyzer* nsHttpHandler::GetHttpTrafficAnalyzer() {
   }
 
   return &mHttpTrafficAnalyzer;
+}
+
+bool nsHttpHandler::IsQuicVersionSupportedHex(const nsACString& version) {
+  return version.LowerCaseEqualsLiteral(kHttp3VersionHEX);
 }
 
 }  // namespace net

@@ -21,7 +21,8 @@ class Http3Stream final : public nsAHttpSegmentReader,
 
   Http3Stream(nsAHttpTransaction* httpTransaction, Http3Session* session);
 
-  uint64_t StreamID() { return mStreamId; }
+  bool HasStreamId() { return mStreamId != UINT64_MAX; }
+  uint64_t StreamId() { return mStreamId; }
 
   nsresult TryActivating();
 

@@ -4,15 +4,15 @@
 
 //extern crate neqo_http3;
 use neqo_common::Datagram;
+use neqo_crypto::{err, init};
 use neqo_http3::Http3Connection;
-use neqo_transport::connection::Connection;
+use neqo_transport::connection::{Connection, Output};
 
 extern crate xpcom;
 use std::net::SocketAddr;
+use thin_vec::ThinVec;
 use xpcom::interfaces::nsrefcnt;
 use xpcom::{AtomicRefcnt, RefCounted, RefPtr};
-
-use neqo_crypto::init_db;
 
 extern crate nserror;
 use nserror::*;
@@ -45,9 +45,7 @@ impl NeqoHttp3Conn {
         max_table_size: u32,
         max_blocked_streams: u16,
     ) -> Result<RefPtr<NeqoHttp3Conn>, nsresult> {
-        init_db(
-            " /Users/draganadamjanovic/dragana_work/gecko-dev/netwerk/socket/neqo/test-fixture/db",
-        );
+        init();
 
         let origin_conv = match str::from_utf8(origin) {
             Ok(v) => v,
@@ -167,16 +165,14 @@ pub extern "C" fn neqo_http3conn_process_input(
     packet: *const u8,
     len: u32,
 ) {
-    let mut input = Vec::new();
+    let array: &[u8];
     unsafe {
-        let array: &[u8] = slice::from_raw_parts(packet, len as usize);
-        input.push(Datagram::new(
-            conn.remote_addr,
-            conn.local_addr,
-            array.to_vec(),
-        ));
+        array = slice::from_raw_parts(packet, len as usize);
     }
-    conn.conn.process_input(input.drain(..), Instant::now());
+    conn.conn.process_input(
+        Datagram::new(conn.remote_addr, conn.local_addr, array.to_vec()),
+        Instant::now(),
+    );
 }
 
 #[no_mangle]
@@ -186,46 +182,31 @@ pub extern "C" fn neqo_http3conn_process_http3(conn: &mut NeqoHttp3Conn) {
 
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_process_output(conn: &mut NeqoHttp3Conn) -> u64 {
-    let (mut datagrams, timeout) = conn.conn.process_output(Instant::now());
-    conn.packets_to_send.append(&mut datagrams);
-    match timeout {
-        Some(t) => (t.as_micros() as u64),
-        None => std::u64::MAX,
-    }
-}
-
-#[repr(C)]
-pub struct Buffer {
-    data: *mut u8,
-    len: u32,
-}
-
-#[no_mangle]
-pub extern "C" fn neqo_http3conn_get_data_to_send(conn: &mut NeqoHttp3Conn) -> Buffer {
-    match conn.packets_to_send.pop() {
-        None => Buffer {
-            data: ptr::null_mut(),
-            len: 0,
-        },
-        Some(d) => {
-            let mut buf: Vec<u8> = d.to_vec();
-            let data = buf.as_mut_ptr();
-            let len = buf.len();
-            std::mem::forget(buf);
-            Buffer {
-                data: data,
-                len: len as u32,
+    loop {
+        let out = conn.conn.process_output(Instant::now());
+        match out {
+            Output::Datagram(dg) => {
+                conn.packets_to_send.push(dg);
             }
+            Output::Callback(to) => {
+                let timeout = to.as_millis() as u64;
+                break timeout;
+            }
+            Output::None => break std::u64::MAX,
         }
     }
 }
 
 #[no_mangle]
-pub extern "C" fn neqo_http3conn_forget_buffer(buf: Buffer) {
-    let s = unsafe { std::slice::from_raw_parts_mut(buf.data, buf.len as usize) };
-    let s = s.as_mut_ptr();
-    unsafe {
-        Box::from_raw(s);
+pub extern "C" fn neqo_http3conn_get_data_to_send(conn: &mut NeqoHttp3Conn, packet: &mut ThinVec<u8>) -> nsresult {
+    match conn.packets_to_send.pop() {
+        None => NS_BASE_STREAM_WOULD_BLOCK,
+        Some(d) => {
+            for elem in d.d {
+                packet.push(elem);
+            }
+            NS_OK
+        }
     }
 }
 
@@ -318,14 +299,14 @@ pub enum Http3AppError {
     UnexpectedFrame,
     RequestRejected,
     GeneralProtocolError,
-    MalformedFrame(u16),
+    MalformedFrame(u64),
     DecompressionFailed,
     EncoderStreamError,
     DecoderStreamError,
 }
 
 impl Http3AppError {
-    pub fn from_code(error: u16) -> Http3AppError {
+    pub fn from_code(error: u64) -> Http3AppError {
         match error {
             0 => Http3AppError::NoError,
             1 => Http3AppError::WrongSettingsDirection,
@@ -392,6 +373,61 @@ impl Http3AppError {
     }
 }
 
+#[repr(C)]
+pub enum QuicTransportError {
+    NoError,
+    InternalError,
+    ServerBusy,
+    FlowControlError,
+    StreamLimitError,
+    StreamStateError,
+    FinalSizeError,
+    FrameEncodingError,
+    TransportParameterError,
+    ProtocolViolation,
+    InvalidMigration,
+    CryptoAlert(u8),
+}
+
+impl QuicTransportError {
+    pub fn from_code(error: u64) -> QuicTransportError {
+        match error {
+            0 => QuicTransportError::NoError,
+            1 => QuicTransportError::InternalError,
+            2 => QuicTransportError::ServerBusy,
+            3 => QuicTransportError::FlowControlError,
+            4 => QuicTransportError::StreamLimitError,
+            5 => QuicTransportError::StreamStateError,
+            6 => QuicTransportError::FinalSizeError,
+            7 => QuicTransportError::FrameEncodingError,
+            8 => QuicTransportError::TransportParameterError,
+            10 => QuicTransportError::ProtocolViolation,
+            12 => QuicTransportError::InvalidMigration,
+            0x100...0x1ff => QuicTransportError::CryptoAlert((error & 0xff) as u8),
+            _ => QuicTransportError::InternalError,
+        }
+    }
+}
+
+#[repr(C)]
+pub enum CloseError {
+    QuicTransportError(QuicTransportError),
+    Http3AppError(Http3AppError),
+}
+
+impl CloseError {
+    pub fn from_neqo_error(error: neqo_transport::CloseError) -> CloseError {
+        match error {
+            neqo_transport::CloseError::Transport(c) => {
+                CloseError::QuicTransportError(QuicTransportError::from_code(c))
+            }
+            neqo_transport::CloseError::Application(c) => {
+                CloseError::Http3AppError(Http3AppError::from_code(c))
+            }
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_reset_stream(
     conn: &mut NeqoHttp3Conn,
@@ -435,10 +471,15 @@ pub enum Http3Event {
         stream_id: u64,
     },
     RequestsCreatable,
+    AuthenticationNeeded,
     ConnectionConnected,
     GoawayReceived,
-    ConnectionClosing,
-    ConnectionClosed,
+    ConnectionClosing {
+        error: CloseError,
+    },
+    ConnectionClosed {
+        error: CloseError,
+    },
     NoEvent,
 }
 
@@ -470,10 +511,15 @@ impl From<neqo_http3::Http3Event> for Http3Event {
                 stream_id: stream_id,
             },
             neqo_http3::Http3Event::RequestsCreatable => Http3Event::RequestsCreatable,
+            neqo_http3::Http3Event::AuthenticationNeeded => Http3Event::AuthenticationNeeded,
             neqo_http3::Http3Event::ConnectionConnected => Http3Event::ConnectionConnected,
             neqo_http3::Http3Event::GoawayReceived => Http3Event::GoawayReceived,
-            neqo_http3::Http3Event::ConnectionClosing => Http3Event::ConnectionClosing,
-            neqo_http3::Http3Event::ConnectionClosed { .. } => Http3Event::ConnectionClosed,
+            neqo_http3::Http3Event::ConnectionClosing { error } => Http3Event::ConnectionClosing {
+                error: CloseError::from_neqo_error(error),
+            },
+            neqo_http3::Http3Event::ConnectionClosed { error } => Http3Event::ConnectionClosed {
+                error: CloseError::from_neqo_error(error),
+            },
         }
     }
 }
@@ -548,4 +594,105 @@ pub extern "C" fn neqo_http3conn_read_data(
             },
         }
     }
+}
+
+#[repr(C)]
+pub struct NeqoSecretInfo {
+    set: bool,
+    version: u16,
+    cipher: u16,
+    group: u16,
+    resumed: bool,
+    early_data: bool,
+    alpn: nsCString,
+    signature_scheme: u16,
+}
+
+#[no_mangle]
+pub extern "C" fn neqo_http3conn_get_sec_info(conn: &mut NeqoHttp3Conn) -> NeqoSecretInfo {
+    match conn.conn.get_sec_info() {
+        Some(info) => NeqoSecretInfo {
+            set: true,
+            version: info.version(),
+            cipher: info.cipher_suite(),
+            group: info.key_exchange(),
+            resumed: info.resumed(),
+            early_data: info.early_data_accepted(),
+            alpn: match info.alpn() {
+                Some(a) => nsCString::from(a),
+                None => nsCString::new(),
+            },
+            signature_scheme: info.signature_scheme(),
+        },
+        None => NeqoSecretInfo {
+            set: false,
+            version: 0,
+            cipher: 0,
+            group: 0,
+            resumed: false,
+            early_data: false,
+            alpn: nsCString::new(),
+            signature_scheme: 0,
+        },
+    }
+}
+
+#[repr(C)]
+pub struct NeqoCertificateInfo {
+    certs: ThinVec<ThinVec<u8>>,
+    stapled_ocsp_responses_present: bool,
+    stapled_ocsp_responses: ThinVec<ThinVec<u8>>,
+    signed_cert_timestamp_present: bool,
+    signed_cert_timestamp: ThinVec<u8>,
+}
+
+#[no_mangle]
+pub extern "C" fn neqo_http3conn_peer_certificate_info(
+    conn: &mut NeqoHttp3Conn,
+    neqo_certs_info: &mut NeqoCertificateInfo,
+) -> nsresult {
+    let mut certs_info = match conn.peer_certificate() {
+        Some(certs) => certs,
+        None => return NS_ERROR_NOT_AVAILABLE,
+    };
+
+    let certs_vec: Vec<&[u8]> = certs_info.collect();
+    for iter1 in certs_vec.iter() {
+        let mut cert: ThinVec<u8> = ThinVec::new();
+        for iter2 in iter1.iter() {
+            cert.push(*iter2);
+        }
+        neqo_certs_info.certs.push(cert);
+    }
+
+    match certs_info.get_stapled_ocsp_responses() {
+        Some(ocsp_val) => {
+            neqo_certs_info.stapled_ocsp_responses_present = true;
+            for iter1 in ocsp_val.iter() {
+                let mut ocsp: ThinVec<u8> = ThinVec::new();
+                for iter2 in iter1.iter() {
+                    ocsp.push(*iter2);
+                }
+                neqo_certs_info.stapled_ocsp_responses.push(ocsp);
+            }
+        },
+        None => { neqo_certs_info.stapled_ocsp_responses_present = false; }
+    };
+
+    match certs_info.get_signed_cert_timestamp() {
+        Some(sct_val) => {
+            neqo_certs_info.signed_cert_timestamp_present = true;
+            for iter in sct_val.iter() {
+                neqo_certs_info.signed_cert_timestamp.push(*iter);
+            }
+        },
+        None => { neqo_certs_info.signed_cert_timestamp_present = false; }
+    };
+
+    return NS_OK;
+}
+
+#[no_mangle]
+pub extern "C" fn neqo_http3conn_authenticated(conn: &mut NeqoHttp3Conn, error: err::PRErrorCode) {
+    conn.authenticated(error, Instant::now());
 }

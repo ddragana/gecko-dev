@@ -6,14 +6,11 @@
 
 // Directly relating to QUIC frames.
 
-use std::fmt::{self, Debug};
-use std::time::Instant;
-
 use neqo_common::{qdebug, Decoder, Encoder};
-use neqo_crypto::Epoch;
 
 use crate::stream_id::StreamIndex;
-use crate::{Connection, ConnectionError, Error, Res};
+use crate::{AppError, TransportError};
+use crate::{ConnectionError, Error, Res};
 
 pub type FrameType = u64;
 
@@ -61,38 +58,48 @@ impl StreamType {
     }
     fn from_type_bit(bit: u64) -> StreamType {
         if (bit & 0x01) == 0 {
-            return StreamType::BiDi;
+            StreamType::BiDi
+        } else {
+            StreamType::UniDi
         }
-        StreamType::UniDi
     }
 }
 
 #[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Clone, Copy)]
-pub enum CloseType {
-    Transport,
-    Application,
+pub enum CloseError {
+    Transport(TransportError),
+    Application(AppError),
 }
 
-impl CloseType {
+impl CloseError {
     fn frame_type_bit(self) -> u64 {
         match self {
-            CloseType::Transport => 0,
-            CloseType::Application => 1,
+            CloseError::Transport(_) => 0,
+            CloseError::Application(_) => 1,
         }
     }
-    fn from_type_bit(bit: u64) -> CloseType {
+
+    fn from_type_bit(bit: u64, code: u64) -> CloseError {
         if (bit & 0x01) == 0 {
-            return CloseType::Transport;
+            CloseError::Transport(code)
+        } else {
+            CloseError::Application(code)
         }
-        CloseType::Application
+    }
+
+    fn code(&self) -> u64 {
+        match self {
+            CloseError::Transport(c) => *c,
+            CloseError::Application(c) => *c,
+        }
     }
 }
 
-impl From<&ConnectionError> for CloseType {
-    fn from(err: &ConnectionError) -> Self {
+impl From<ConnectionError> for CloseError {
+    fn from(err: ConnectionError) -> Self {
         match err {
-            ConnectionError::Transport(_) => CloseType::Transport,
-            _ => CloseType::Application,
+            ConnectionError::Transport(c) => CloseError::Transport(c.code()),
+            ConnectionError::Application(c) => CloseError::Application(c),
         }
     }
 }
@@ -115,12 +122,12 @@ pub enum Frame {
     },
     ResetStream {
         stream_id: u64,
-        application_error_code: u16,
+        application_error_code: AppError,
         final_size: u64,
     },
     StopSending {
         stream_id: u64,
-        application_error_code: u16,
+        application_error_code: AppError,
     },
     Crypto {
         offset: u64,
@@ -159,6 +166,7 @@ pub enum Frame {
     },
     NewConnectionId {
         sequence_number: u64,
+        retire_prior: u64,
         connection_id: Vec<u8>,
         stateless_reset_token: [u8; 16],
     },
@@ -172,8 +180,7 @@ pub enum Frame {
         data: [u8; 8],
     },
     ConnectionClose {
-        close_type: CloseType,
-        error_code: u16,
+        error_code: CloseError,
         frame_type: u64,
         reason_phrase: Vec<u8>,
     },
@@ -214,8 +221,8 @@ impl Frame {
             Frame::RetireConnectionId { .. } => FRAME_TYPE_RETIRE_CONNECTION_ID,
             Frame::PathChallenge { .. } => FRAME_TYPE_PATH_CHALLENGE,
             Frame::PathResponse { .. } => FRAME_TYPE_PATH_RESPONSE,
-            Frame::ConnectionClose { close_type, .. } => {
-                FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + close_type.frame_type_bit()
+            Frame::ConnectionClose { error_code, .. } => {
+                FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + error_code.frame_type_bit()
             }
         }
     }
@@ -247,7 +254,7 @@ impl Frame {
                 final_size,
             } => {
                 enc.encode_varint(*stream_id);
-                enc.encode_uint(2, *application_error_code);
+                enc.encode_varint(*application_error_code);
                 enc.encode_varint(*final_size);
             }
             Frame::StopSending {
@@ -255,7 +262,7 @@ impl Frame {
                 application_error_code,
             } => {
                 enc.encode_varint(*stream_id);
-                enc.encode_uint(2, *application_error_code);
+                enc.encode_varint(*application_error_code);
             }
             Frame::Crypto { offset, data } => {
                 enc.encode_varint(*offset);
@@ -306,10 +313,12 @@ impl Frame {
             }
             Frame::NewConnectionId {
                 sequence_number,
+                retire_prior,
                 connection_id,
                 stateless_reset_token,
             } => {
                 enc.encode_varint(*sequence_number);
+                enc.encode_varint(*retire_prior);
                 enc.encode_uint(1, connection_id.len() as u64);
                 enc.encode(connection_id);
                 enc.encode(stateless_reset_token);
@@ -327,9 +336,8 @@ impl Frame {
                 error_code,
                 frame_type,
                 reason_phrase,
-                ..
             } => {
-                enc.encode_uint(2, *error_code);
+                enc.encode_varint(error_code.code());
                 enc.encode_varint(*frame_type);
                 enc.encode_vvec(reason_phrase);
             }
@@ -434,10 +442,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         FRAME_TYPE_PING => Ok(Frame::Ping),
         FRAME_TYPE_RST_STREAM => Ok(Frame::ResetStream {
             stream_id: dv!(dec),
-            application_error_code: match dec.decode_uint(2) {
-                Some(v) => v as u16,
-                _ => return Err(Error::NoMoreData),
-            },
+            application_error_code: d!(dec.decode_varint()),
             final_size: match dec.decode_varint() {
                 Some(v) => v,
                 _ => return Err(Error::NoMoreData),
@@ -473,7 +478,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         }
         FRAME_TYPE_STOP_SENDING => Ok(Frame::StopSending {
             stream_id: dv!(dec),
-            application_error_code: d!(dec.decode_uint(2)) as u16,
+            application_error_code: d!(dec.decode_varint()),
         }),
         FRAME_TYPE_CRYPTO => {
             let o = dv!(dec);
@@ -536,6 +541,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         }
         FRAME_TYPE_NEW_CONNECTION_ID => {
             let s = dv!(dec);
+            let retire_prior = dv!(dec);
             let cid = d!(dec.decode_vec(1)).to_vec(); // TODO(mt) unnecessary copy
             let srt = d!(dec.decode(16));
             let mut srtv: [u8; 16] = [0; 16];
@@ -543,6 +549,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
 
             Ok(Frame::NewConnectionId {
                 sequence_number: s,
+                retire_prior,
                 connection_id: cid,
                 stateless_reset_token: srtv,
             })
@@ -564,8 +571,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         }
         FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT | FRAME_TYPE_CONNECTION_CLOSE_APPLICATION => {
             Ok(Frame::ConnectionClose {
-                close_type: CloseType::from_type_bit(t),
-                error_code: d!(dec.decode_uint(2)) as u16,
+                error_code: CloseError::from_type_bit(t, d!(dec.decode_varint())),
                 frame_type: dv!(dec),
                 reason_phrase: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
             })
@@ -579,34 +585,6 @@ pub enum TxMode {
     Normal,
     #[allow(dead_code)]
     Pto,
-}
-
-pub trait FrameGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        now: Instant,
-        epoch: Epoch,
-        tx_mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)>;
-}
-
-impl Debug for FrameGenerator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Function>")
-    }
-}
-
-pub trait FrameGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection);
-    fn lost(&mut self, conn: &mut Connection);
-}
-
-impl Debug for FrameGeneratorToken {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Token>")
-    }
 }
 
 #[cfg(test)]
@@ -668,7 +646,7 @@ mod tests {
             final_size: 0x3456,
         };
 
-        enc_dec(&f, "04523400777456");
+        enc_dec(&f, "04523440777456");
     }
 
     #[test]
@@ -678,7 +656,7 @@ mod tests {
             application_error_code: 0x77,
         };
 
-        enc_dec(&f, "053F0077")
+        enc_dec(&f, "053F4077")
     }
 
     #[test]
@@ -803,11 +781,12 @@ mod tests {
     fn test_new_connection_id() {
         let f = Frame::NewConnectionId {
             sequence_number: 0x1234,
+            retire_prior: 0,
             connection_id: vec![0x01, 0x02],
             stateless_reset_token: [9; 16],
         };
 
-        enc_dec(&f, "18523402010209090909090909090909090909090909");
+        enc_dec(&f, "1852340002010209090909090909090909090909090909");
     }
 
     #[test]
@@ -836,22 +815,20 @@ mod tests {
     #[test]
     fn test_connection_close() {
         let mut f = Frame::ConnectionClose {
-            close_type: CloseType::Transport,
-            error_code: 0x5678,
+            error_code: CloseError::Transport(0x5678),
             frame_type: 0x1234,
             reason_phrase: vec![0x01, 0x02, 0x03],
         };
 
-        enc_dec(&f, "1c5678523403010203");
+        enc_dec(&f, "1c80005678523403010203");
 
         f = Frame::ConnectionClose {
-            close_type: CloseType::Application,
-            error_code: 0x5678,
+            error_code: CloseError::Application(0x5678),
             frame_type: 0x1234,
             reason_phrase: vec![0x01, 0x02, 0x03],
         };
 
-        enc_dec(&f, "1d5678523403010203");
+        enc_dec(&f, "1d80005678523403010203");
     }
 
     #[test]

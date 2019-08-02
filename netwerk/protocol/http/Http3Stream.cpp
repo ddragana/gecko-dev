@@ -67,7 +67,7 @@ void Http3Stream::GetHeadersString(const char* buf, uint32_t avail,
 }
 
 nsresult Http3Stream::TryActivating() {
-  LOG(("Http3Stream::StartRequest [this=%p]", this));
+  LOG(("Http3Stream::TryActivating [this=%p]", this));
   nsHttpRequestHead* head = mTransaction->RequestHead();
 
   nsAutoCString authorityHeader;
@@ -86,7 +86,7 @@ nsresult Http3Stream::TryActivating() {
 
   mRequestStarted = true;
   rv =  mSession->TryActivating(method, scheme, authorityHeader,
-      path, mFlatHttpRequestHeaders, mStreamId, this);
+      path, mFlatHttpRequestHeaders, &mStreamId, this);
   if (NS_SUCCEEDED(rv)) {
     mRequestStarted = true;
   }
@@ -117,6 +117,8 @@ nsresult Http3Stream::OnReadSegment(const char* buf, uint32_t count,
           return *countRead ? NS_OK : NS_BASE_STREAM_WOULD_BLOCK;
         }
         if (NS_FAILED(rv)) {
+          LOG3(("Http3Stream::OnReadSegment %p cannot activate error=%" PRIX32
+                ".", this, static_cast<uint32_t>(rv)));
           return rv;
         }
       }

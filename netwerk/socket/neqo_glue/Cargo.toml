@@ -15,3 +15,4 @@ neqo-common = { version = "0.1", path = "../neqo/neqo-common" }
 nserror = { path = "../../../xpcom/rust/nserror" }
 nsstring = { path = "../../../xpcom/rust/nsstring" }
 xpcom = { path = "../../../xpcom/rust/xpcom" }
+thin-vec = { version = "0.1.0", features = ["gecko-ffi"] }

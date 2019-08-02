@@ -1516,17 +1516,11 @@ SSLServerCertVerificationJob::Run() {
 }  // unnamed namespace
 
 // Extracts whatever information we need out of fd (using SSL_*) and passes it
-// to SSLServerCertVerificationJob::Dispatch. SSLServerCertVerificationJob
+// to AuthCertificateHookWithInfo. AuthCertificateHookWithInfo will call
+// SSLServerCertVerificationJob::Dispatch. SSLServerCertVerificationJob
 // should never do anything with fd except logging.
 SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
                               PRBool isServer) {
-  RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
-  if (!certVerifier) {
-    PR_SetError(SEC_ERROR_NOT_INITIALIZED, 0);
-    return SECFailure;
-  }
-
-  // Runs on the socket transport thread
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
           ("[%p] starting AuthCertificateHook\n", fd));
@@ -1539,18 +1533,42 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   // and many things in PSM assume that we are a client.
   MOZ_ASSERT(!isServer, "AuthCertificateHook: isServer unexpectedly true");
 
-  nsNSSSocketInfo* socketInfo = static_cast<nsNSSSocketInfo*>(arg);
-
-  UniqueCERTCertificate serverCert(SSL_PeerCertificate(fd));
-
-  if (!checkSig || isServer || !socketInfo || !serverCert) {
+  if (!checkSig || isServer) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
 
-  // Get the peer certificate chain for error reporting
+  UniqueCERTCertificate serverCert(SSL_PeerCertificate(fd));
+
   UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
-  if (!peerCertChain) {
+
+  const SECItemArray* csa = SSL_PeerStapledOCSPResponses(fd);
+
+  const SECItem* sctsFromTLSExtension = SSL_PeerSignedCertTimestamps(fd);
+
+  return AuthCertificateHookWithInfo(arg, static_cast<const void*>(fd),
+      serverCert, peerCertChain, csa, sctsFromTLSExtension);
+}
+
+// Takes informations needed for cert verification, does some sanity checks and
+// calls SSLServerCertVerificationJob::Dispatch.
+SECStatus AuthCertificateHookWithInfo(void* arg, const void* aPtrForLoging,
+    const UniqueCERTCertificate& serverCert, UniqueCERTCertList& peerCertChain,
+    const SECItemArray* csa, const SECItem* sctsFromTLSExtension) {
+  RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
+  if (!certVerifier) {
+    PR_SetError(SEC_ERROR_NOT_INITIALIZED, 0);
+    return SECFailure;
+  }
+
+  // Runs on the socket transport thread
+
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+          ("[%p] starting AuthCertificateHookWithInfo\n", aPtrForLoging));
+
+  nsNSSSocketInfo* socketInfo = static_cast<nsNSSSocketInfo*>(arg);
+
+  if (!socketInfo || !serverCert) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
@@ -1567,7 +1585,7 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
       NS_ISUPPORTS_CAST(nsITransportSecurityInfo*, socketInfo));
   if (sslSocketControl && sslSocketControl->GetBypassAuthentication()) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("[%p] Bypass Auth in AuthCertificateHook\n", fd));
+            ("[%p] Bypass Auth in AuthCertificateHook\n", aPtrForLoging));
     return SECSuccess;
   }
 
@@ -1589,14 +1607,12 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   // OCSP stapling wasn't enabled because libssl wouldn't have let the server
   // return a stapled OCSP response.
   // We don't own these pointers.
-  const SECItemArray* csa = SSL_PeerStapledOCSPResponses(fd);
   SECItem* stapledOCSPResponse = nullptr;
-  // we currently only support single stapled responses
+  // we currently only support single stapled responses.
   if (csa && csa->len == 1) {
     stapledOCSPResponse = &csa->items[0];
   }
 
-  const SECItem* sctsFromTLSExtension = SSL_PeerSignedCertTimestamps(fd);
   if (sctsFromTLSExtension && sctsFromTLSExtension->len == 0) {
     // SSL_PeerSignedCertTimestamps returns null on error and empty item
     // when no extension was returned by the server. We always use null when
@@ -1614,7 +1630,7 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
     // because of the performance benefits of doing so.
     socketInfo->SetCertVerificationWaiting();
     SECStatus rv = SSLServerCertVerificationJob::Dispatch(
-        certVerifier, static_cast<const void*>(fd), socketInfo, serverCert,
+        certVerifier, aPtrForLoging, socketInfo, serverCert,
         peerCertChain, stapledOCSPResponse, sctsFromTLSExtension, providerFlags,
         now, prnow);
     return rv;
@@ -1640,7 +1656,7 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   if (error != 0) {
     RefPtr<CertErrorRunnable> runnable(CreateCertErrorRunnable(
         *certVerifier, error, socketInfo, serverCert,
-        static_cast<const void*>(fd), providerFlags, prnow));
+        aPtrForLoging, providerFlags, prnow));
     if (!runnable) {
       // CreateCertErrorRunnable sets a new error code when it fails
       error = PR_GetError();

@@ -73,7 +73,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NUDGETUNNELCALLBACK
 
-  explicit nsHttpConnection(Http3Session* aHttp3Session = nullptr);
+  explicit nsHttpConnection(bool aIsHttp3);
 
   // Initialize the connection:
   //  info        - specifies the connection parameters.
@@ -185,7 +185,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   bool UsingSpdy() { return (mUsingSpdyVersion != SpdyVersion::NONE); }
   SpdyVersion GetSpdyVersion() { return mUsingSpdyVersion; }
   bool EverUsedSpdy() { return mEverUsedSpdy; }
-  bool UsingHttp3() { return !!mHttp3Session; }
+  bool UsingHttp3() { return !!mIsHttp3; }
   PRIntervalTime Rtt() { return mRtt; }
 
   // true when connection SSL NPN phase is complete and we know
@@ -283,6 +283,8 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   // has had a chance to happen
   MOZ_MUST_USE bool EnsureNPNComplete(nsresult& aOut0RTTWriteHandshakeValue,
                                       uint32_t& aOut0RTTBytesWritten);
+
+  MOZ_MUST_USE bool EnsureNPNCompleteHttp3();
   void SetupSSL();
 
   // Start the Spdy transaction handler when NPN indicates spdy/*
@@ -448,6 +450,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
 
   //QUIC
   RefPtr<Http3Session> mHttp3Session;
+  bool mIsHttp3;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpConnection, NS_HTTPCONNECTION_IID)

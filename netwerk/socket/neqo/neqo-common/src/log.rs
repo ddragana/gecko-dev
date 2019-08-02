@@ -4,16 +4,37 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//use env_logger;
-//use std::sync::Once;
+use env_logger::Builder;
+use std::io::Write;
+use std::sync::Once;
+use std::time::Instant;
 
-//static INIT_ONCE: Once = Once::new();
+static INIT_ONCE: Once = Once::new();
+
+lazy_static! {
+    static ref START_TIME: Instant = Instant::now();
+}
 
 pub fn init() {
-//    INIT_ONCE.call_once(|| {
-//        env_logger::init();
-//        ::log::log!(::log::Level::Info, "Logging initialized");
-//    });
+    INIT_ONCE.call_once(|| {
+        let mut builder = Builder::from_env("RUST_LOG");
+        builder.format(|buf, record| {
+            let elapsed = START_TIME.elapsed();
+            writeln!(
+                buf,
+                "{}s{:3}ms {} {}",
+                elapsed.as_secs(),
+                elapsed.as_millis() % 1000,
+                buf.default_styled_level(record.level()),
+                record.args()
+            )
+        });
+        if let Err(e) = builder.try_init() {
+            ::log::log!(::log::Level::Info, "Logging initialization error {:?}", e);
+        } else {
+            ::log::log!(::log::Level::Info, "Logging initialized");
+        }
+    });
 }
 
 #[macro_export]

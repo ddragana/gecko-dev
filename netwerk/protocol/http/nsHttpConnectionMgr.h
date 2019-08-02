@@ -20,7 +20,6 @@
 #include "ARefBase.h"
 #include "nsWeakReference.h"
 #include "TCPFastOpen.h"
-#include "Http3Session.h"
 
 #include "nsINamed.h"
 #include "nsIObserver.h"
@@ -453,7 +452,7 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
     void CancelFastOpenConnection();
 
    private:
-    nsresult SetupConn(nsIAsyncOutputStream* out, bool aFastOpen, Http3Session* aHttp3Session = nullptr);
+    nsresult SetupConn(nsIAsyncOutputStream* out, bool aFastOpen);
 
     // To find out whether |mTransaction| is still in the connection entry's
     // pending queue. If the transaction is found and |removeWhenFound| is
@@ -516,8 +515,7 @@ class nsHttpConnectionMgr final : public nsIObserver, public AltSvcCache {
     nsCOMPtr<nsIAsyncOutputStream> mBackupStreamOut;
     nsCOMPtr<nsIAsyncInputStream> mBackupStreamIn;
 
-    RefPtr<Http3Session> mHttp3Session;
-    bool mHttp3Forced;
+    bool mIsHttp3;
   };
   friend class nsHalfOpenSocket;
 

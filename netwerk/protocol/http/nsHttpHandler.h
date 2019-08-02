@@ -433,7 +433,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   uint16_t DefaultH3MaxBlockedStreams() const {
     return mH3MaxBlockedStreams;
   }
-  bool AlwaysTryHttp3() const { return mAlwaysTryHttp3; }
 
   uint32_t MaxHttpResponseHeaderSize() const {
     return mMaxHttpResponseHeaderSize;
@@ -458,6 +457,17 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   HttpTrafficAnalyzer* GetHttpTrafficAnalyzer();
 
   bool GetThroughCaptivePortal() { return mThroughCaptivePortal; }
+
+  bool IsHttp3Enabled() { return mHttp3Enabled; }
+  bool IsQuicVersionSupportedHex(const nsACString& version);
+  nsCString QuicVersion() { return kHttp3Version; }
+
+#if defined(DEBUG) && defined(NIGHTLY_BUILD)
+  bool MatchAltSvcTestsOnly(nsACString& orgin);
+  nsCString GetAltSvcMappingHeaderTestOnly() {
+      return mAltSvcMappingTemptativeHeader;
+  }
+#endif
 
  private:
   nsHttpHandler();
@@ -680,7 +690,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   //Http3 parameters
   uint32_t mQpackTableSize;
   uint16_t mH3MaxBlockedStreams;
-  bool mAlwaysTryHttp3;
 
   // The max size (in bytes) for received Http response header.
   uint32_t mMaxHttpResponseHeaderSize;
@@ -776,6 +785,12 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   nsTHashtable<nsCStringHashKey> mBlacklistedSpdyOrigins;
 
   bool mThroughCaptivePortal;
+
+  bool mHttp3Enabled;
+#if defined(DEBUG) && defined(NIGHTLY_BUILD)
+  nsCString mAltSvcMappingTemptativeHost;
+  nsCString mAltSvcMappingTemptativeHeader;
+#endif
 };
 
 extern StaticRefPtr<nsHttpHandler> gHttpHandler;

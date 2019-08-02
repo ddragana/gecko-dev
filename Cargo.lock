@@ -2027,6 +2027,7 @@ name = "neqo-common"
 version = "0.1.0"
 dependencies = [
  "env_logger 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -2076,6 +2077,7 @@ dependencies = [
  "neqo-crypto 0.1.0",
  "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "slice-deque 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "smallvec 0.6.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -2088,6 +2090,7 @@ dependencies = [
  "neqo-transport 0.1.0",
  "nserror 0.1.0",
  "nsstring 0.1.0",
+ "thin-vec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xpcom 0.1.0",
 ]
 

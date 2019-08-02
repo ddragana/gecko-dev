@@ -133,6 +133,7 @@ nsHttpTransaction::nsHttpTransaction()
       mContentDecodingCheck(false),
       mDeferredSendProgress(false),
       mWaitingOnPipeOut(false),
+      mDoNotRemoveAltSvc(false),
       mReportedStart(false),
       mReportedResponseHeader(false),
       mResponseHeadTaken(false),
@@ -1294,7 +1295,7 @@ nsresult nsHttpTransaction::Restart() {
   // to the next
   mReuseOnRestart = false;
 
-  if (!mConnInfo->GetRoutedHost().IsEmpty()) {
+  if (!mDoNotRemoveAltSvc && !mConnInfo->GetRoutedHost().IsEmpty()) {
     MutexAutoLock lock(*nsHttp::GetLock());
     RefPtr<nsHttpConnectionInfo> ci;
     mConnInfo->CloneAsDirectRoute(getter_AddRefs(ci));
@@ -1305,6 +1306,8 @@ nsresult nsHttpTransaction::Restart() {
       MOZ_ASSERT(NS_SUCCEEDED(rv));
     }
   }
+
+  mDoNotRemoveAltSvc = false;
 
   return gHttpHandler->InitiateTransaction(this, mPriority);
 }

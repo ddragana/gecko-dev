@@ -6,6 +6,9 @@
 #define NeqoHttp3Conn_h__
 
 #include "mozilla/net/neqo_glue_ffi.h"
+#include "nsNSSCallbacks.h"
+#include "nsISSLSocketControl.h"
+#include "cert.h"
 
 namespace mozilla {
 namespace net {
@@ -27,6 +30,28 @@ class NeqoHttp3Conn final {
     neqo_http3conn_close(this, aError);
   }
 
+  void set_sec_info(nsISSLSocketControl *aInfoObject) {
+    NeqoSecretInfo secInfo = neqo_http3conn_get_sec_info(this);
+
+    if (secInfo.set) {
+      aInfoObject->SetSSLVersionUsed(secInfo.version);
+      aInfoObject->SetEarlyDataAccepted(secInfo.early_data);
+      aInfoObject->SetResumed(secInfo.resumed);
+      aInfoObject->SetNegotiatedNPNString(secInfo.alpn);
+      aInfoObject->SetInfo(secInfo.cipher, secInfo.version & 0xFF,
+          getKeaGroupName(secInfo.group),
+          getSignatureName(secInfo.signature_scheme));
+    }
+  }
+
+  nsresult peer_certificate_info(NeqoCertificateInfo *aCertInfo) {
+      return neqo_http3conn_peer_certificate_info(this, aCertInfo);
+  }
+
+  void peer_authenticated(PRErrorCode error) {
+    neqo_http3conn_authenticated(this, error);
+  }
+
   void process_input(uint8_t *aPacket, uint32_t aLen) {
     neqo_http3conn_process_input(this, aPacket, aLen);
     
@@ -36,17 +61,13 @@ class NeqoHttp3Conn final {
     neqo_http3conn_process_http3(this);
   }
 
-  void process_output() {
-
-    neqo_http3conn_process_output(this);
+  uint64_t process_output() {
+    return neqo_http3conn_process_output(this);
   }
 
-  void get_data_to_send(nsTArray<uint8_t> &data) {
-    Buffer buf = neqo_http3conn_get_data_to_send(this);
-    data.SetCapacity(buf.len);
-    std::memcpy(data.Elements(), buf.data, buf.len);
-
-    neqo_http3conn_forget_buffer(buf);
+  nsresult get_data_to_send(nsTArray<uint8_t> &data) {
+    data.TruncateLength(0);
+    return neqo_http3conn_get_data_to_send(this, &data);
   }
 
   Http3Event get_event() {
