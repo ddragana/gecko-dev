@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::{Datagram, matches};
+use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
 use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
@@ -125,8 +125,8 @@ struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
-        if client.events().into_iter().any(authentication_needed) {
-          client.authenticated(0, Instant::now());
+        if client.events().any(authentication_needed) {
+            client.authenticated(0, Instant::now());
         }
         match client.state() {
             State::Connected => false,
@@ -397,13 +397,9 @@ struct NetworkCtx {
 }
 
 fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
-    let mut client = Connection::new_client(
-        peer.host,
-        test.alpn(),
-        nctx.local_addr,
-        nctx.remote_addr,
-    )
-    .expect("must succeed");
+    let mut client =
+        Connection::new_client(peer.host, &test.alpn(), nctx.local_addr, nctx.remote_addr)
+            .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
@@ -478,17 +474,13 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new(*d.source(), *d.destination(), payload))
+        Some(Datagram::new(d.source(), d.destination(), payload))
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
-    let mut client = Connection::new_client(
-        peer.host,
-        vec!["hq-20"],
-        nctx.local_addr,
-        nctx.remote_addr,
-    )
-    .expect("must succeed");
+    let mut client =
+        Connection::new_client(peer.host, &["hq-20"], nctx.local_addr, nctx.remote_addr)
+            .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
     let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));

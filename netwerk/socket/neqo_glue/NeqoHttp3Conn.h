@@ -31,7 +31,7 @@ class NeqoHttp3Conn final {
   }
 
   void set_sec_info(nsISSLSocketControl *aInfoObject) {
-    NeqoSecretInfo secInfo = neqo_http3conn_get_sec_info(this);
+    NeqoSecretInfo secInfo = neqo_http3conn_tls_info(this);
 
     if (secInfo.set) {
       aInfoObject->SetSSLVersionUsed(secInfo.version);

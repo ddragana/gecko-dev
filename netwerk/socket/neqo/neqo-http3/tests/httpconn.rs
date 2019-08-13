@@ -6,8 +6,8 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::{Datagram, matches};
-use neqo_http3::{Http3Connection, Http3State, Http3Event};
+use neqo_common::{matches, Datagram};
+use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use test_fixture::*;
 
 fn new_stream_callback(

@@ -10,6 +10,7 @@
 #include "nsHttpHandler.h"
 #include "mozilla/RefPtr.h"
 #include "ASpdySession.h" // because of SoftStreamError()
+#include "nsIOService.h"
 #include "nsISSLSocketControl.h"
 #include "ScopedNSSTypes.h"
 #include "nsSocketTransportService2.h"
@@ -169,7 +170,8 @@ nsresult Http3Session::ProcessInput() {
        mState, this));
   if (mState == INITIALIZING) {
     bool notUsed;
-    ProcessEvents(0, nullptr, &notUsed);
+    uint32_t n = 0;
+    ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
   }
 
   return NS_OK;
@@ -301,7 +303,8 @@ nsresult Http3Session::Process() {
   }
 
   bool notUsed;
-  rv = ProcessEvents(0, nullptr, &notUsed);
+  uint32_t n = 0;
+  rv = ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
   if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
     return rv;
   }
@@ -311,7 +314,8 @@ nsresult Http3Session::Process() {
     return rv;
   }
 
-  return ProcessEvents(0, nullptr, &notUsed);
+  n = 0;
+  return ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
 }
 
 nsresult Http3Session::ProcessOutput() {
@@ -366,7 +370,8 @@ nsresult Http3Session::ProcessOutputAndEvents() {
   }
   mHttp3Connection->process_http3();
   bool notUsed;
-  Unused << ProcessEvents(0, nullptr, &notUsed);
+  uint32_t n = 0;
+  Unused << ProcessEvents(nsIOService::gDefaultSegmentSize, &n, &notUsed);
   return NS_OK;
 }
 

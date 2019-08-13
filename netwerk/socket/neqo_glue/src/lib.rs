@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-//extern crate neqo_http3;
 use neqo_common::Datagram;
 use neqo_crypto::{err, init};
 use neqo_http3::Http3Connection;
@@ -202,9 +201,7 @@ pub extern "C" fn neqo_http3conn_get_data_to_send(conn: &mut NeqoHttp3Conn, pack
     match conn.packets_to_send.pop() {
         None => NS_BASE_STREAM_WOULD_BLOCK,
         Some(d) => {
-            for elem in d.d {
-                packet.push(elem);
-            }
+            packet.extend_from_slice(&d);
             NS_OK
         }
     }
@@ -514,11 +511,11 @@ impl From<neqo_http3::Http3Event> for Http3Event {
             neqo_http3::Http3Event::AuthenticationNeeded => Http3Event::AuthenticationNeeded,
             neqo_http3::Http3Event::ConnectionConnected => Http3Event::ConnectionConnected,
             neqo_http3::Http3Event::GoawayReceived => Http3Event::GoawayReceived,
-            neqo_http3::Http3Event::ConnectionClosing { error } => Http3Event::ConnectionClosing {
-                error: CloseError::from_neqo_error(error),
+            neqo_http3::Http3Event::ConnectionClosing { error_code } => Http3Event::ConnectionClosing {
+                error: CloseError::from_neqo_error(error_code),
             },
-            neqo_http3::Http3Event::ConnectionClosed { error } => Http3Event::ConnectionClosed {
-                error: CloseError::from_neqo_error(error),
+            neqo_http3::Http3Event::ConnectionClosed { error_code } => Http3Event::ConnectionClosed {
+                error: CloseError::from_neqo_error(error_code),
             },
         }
     }
@@ -609,8 +606,8 @@ pub struct NeqoSecretInfo {
 }
 
 #[no_mangle]
-pub extern "C" fn neqo_http3conn_get_sec_info(conn: &mut NeqoHttp3Conn) -> NeqoSecretInfo {
-    match conn.conn.get_sec_info() {
+pub extern "C" fn neqo_http3conn_tls_info(conn: &mut NeqoHttp3Conn) -> NeqoSecretInfo {
+    match conn.conn.tls_info() {
         Some(info) => NeqoSecretInfo {
             set: true,
             version: info.version(),
@@ -657,34 +654,28 @@ pub extern "C" fn neqo_http3conn_peer_certificate_info(
     };
 
     let certs_vec: Vec<&[u8]> = certs_info.collect();
-    for iter1 in certs_vec.iter() {
+    for iter in certs_vec.iter() {
         let mut cert: ThinVec<u8> = ThinVec::new();
-        for iter2 in iter1.iter() {
-            cert.push(*iter2);
-        }
+        cert.extend_from_slice(iter);
         neqo_certs_info.certs.push(cert);
     }
 
-    match certs_info.get_stapled_ocsp_responses() {
+    match certs_info.stapled_ocsp_responses() {
         Some(ocsp_val) => {
             neqo_certs_info.stapled_ocsp_responses_present = true;
-            for iter1 in ocsp_val.iter() {
+            for iter in ocsp_val.iter() {
                 let mut ocsp: ThinVec<u8> = ThinVec::new();
-                for iter2 in iter1.iter() {
-                    ocsp.push(*iter2);
-                }
+                ocsp.extend_from_slice(iter);
                 neqo_certs_info.stapled_ocsp_responses.push(ocsp);
             }
         },
         None => { neqo_certs_info.stapled_ocsp_responses_present = false; }
     };
 
-    match certs_info.get_signed_cert_timestamp() {
+    match certs_info.signed_cert_timestamp() {
         Some(sct_val) => {
             neqo_certs_info.signed_cert_timestamp_present = true;
-            for iter in sct_val.iter() {
-                neqo_certs_info.signed_cert_timestamp.push(*iter);
-            }
+            neqo_certs_info.signed_cert_timestamp.extend_from_slice(sct_val);
         },
         None => { neqo_certs_info.signed_cert_timestamp_present = false; }
     };

@@ -206,8 +206,6 @@ nsresult neqo_http3conn_get_data_to_send(NeqoHttp3Conn *conn, nsTArray<uint8_t> 
 
 nsresult neqo_http3conn_get_headers(NeqoHttp3Conn *conn, uint64_t stream_id, nsCString *headers);
 
-NeqoSecretInfo neqo_http3conn_get_sec_info(NeqoHttp3Conn *conn);
-
 nsresult neqo_http3conn_new(const nsACString *origin,
                             const nsACString *alpn,
                             const nsACString *local_addr,
@@ -235,6 +233,8 @@ nsresult neqo_http3conn_read_data(NeqoHttp3Conn *conn,
 nsrefcnt neqo_http3conn_release(const NeqoHttp3Conn *conn);
 
 nsresult neqo_http3conn_reset_stream(NeqoHttp3Conn *conn, uint64_t stream_id, Http3AppError error);
+
+NeqoSecretInfo neqo_http3conn_tls_info(NeqoHttp3Conn *conn);
 
 } // extern "C"
 
