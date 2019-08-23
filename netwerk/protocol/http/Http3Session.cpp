@@ -21,6 +21,24 @@
 namespace mozilla {
 namespace net {
 
+const uint64_t HTTP3_APP_ERROR_NO_ERROR               = 0x0;
+const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x1;
+const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR         = 0x3;
+const uint64_t HTTP3_APP_ERROR_REQUEST_CANCELLED      = 0x5;
+const uint64_t HTTP3_APP_ERROR_INCOMPLETE_REQUEST     = 0x6;
+const uint64_t HTTP3_APP_ERROR_CONNECT_ERROR          = 0x7;
+const uint64_t HTTP3_APP_ERROR_EXCESSIVE_LOAD         = 0x8;
+const uint64_t HTTP3_APP_ERROR_VERSION_FALLBACK       = 0x9;
+const uint64_t HTTP3_APP_ERROR_WRONG_STREAM           = 0xa;
+const uint64_t HTTP3_APP_ERROR_ID_ERROR               = 0xb;
+const uint64_t HTTP3_APP_ERROR_STREAM_CREATION_ERROR  = 0xd;
+const uint64_t HTTP3_APP_ERROR_CLOSED_CRITICAL_STREAM = 0xf;
+const uint64_t HTTP3_APP_ERROR_EARLY_RESPONSE         = 0x0011;
+const uint64_t HTTP3_APP_ERROR_MISSING_SETTINGS       = 0x0012;
+const uint64_t HTTP3_APP_ERROR_UNEXPECTED_FRAME       = 0x0013;
+const uint64_t HTTP3_APP_ERROR_REQUEST_REJECTED       = 0x0014;
+const uint64_t HTTP3_APP_ERROR_SETTINGS_ERROR         = 0x00ff;
+
 NS_IMPL_ADDREF(Http3Session)
 NS_IMPL_RELEASE(Http3Session)
 NS_INTERFACE_MAP_BEGIN(Http3Session)
@@ -31,6 +49,7 @@ NS_INTERFACE_MAP_END
 
 Http3Session::Http3Session()
   : mState(INITIALIZING),
+    mAuthenticationStarted(false),
     mCleanShutdown(false),
     mGoawayReceived(false),
     mShouldClose(false),
@@ -253,8 +272,12 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
          ProcessPending();
          break;
       case Http3Event::Tag::AuthenticationNeeded:
-         LOG(("Http3Session::Process event - AuthenticationNeeded"));
-         CallCertVerification();
+         LOG(("Http3Session::Process event - AuthenticationNeeded %d", mAuthenticationStarted));
+         if (!mAuthenticationStarted) {
+             mAuthenticationStarted =  true;
+             LOG(("Http3Session::Process event - AuthenticationNeeded called"));
+             CallCertVerification();
+         }
          break;
       case Http3Event::Tag::ConnectionConnected:
          {
@@ -535,8 +558,11 @@ nsresult Http3Session::TryActivating(const nsACString& aMethod,
     return rv;
   }
 
-  MOZ_ASSERT(*aStreamId != UINT64_MAX);
+  LOG(("Http3Session::TryActivating streamId=%llu for stream=%p [this=%p].",
+       *aStreamId, aStream, this));
 
+  MOZ_ASSERT(*aStreamId != UINT64_MAX);
+mHttp3Connection->close_stream(*aStreamId);
   mStreamIdHash.Put(*aStreamId, aStream);
   mHttp3Connection->process_http3();
   return NS_OK;
@@ -719,7 +745,7 @@ void Http3Session::CloseInternal(bool aCallNeqoClose) {
   Shutdown();
 
   if (aCallNeqoClose) {
-    mHttp3Connection->close({ Http3AppError::Tag::NoError });
+    mHttp3Connection->close(HTTP3_APP_ERROR_NO_ERROR);
   }
 
   mStreamIdHash.Clear();
@@ -841,7 +867,7 @@ void Http3Session::CloseStream(Http3Stream *aStream,  nsresult aResult) {
   if (!aStream->RecvdFin() && !aStream->RecvdReset() &&
       (aStream->HasStreamId())) {
     mHttp3Connection->reset_stream(aStream->StreamId(),
-        { Http3AppError::Tag::RequestCancelled });
+        HTTP3_APP_ERROR_REQUEST_CANCELLED);
   }
   aStream->Close(aResult);
   if (aStream->HasStreamId()) {
@@ -908,24 +934,17 @@ nsresult Http3Session::OnWriteSegment(char* buf, uint32_t count,
   return NS_OK;
 }
 
-nsresult Http3Session::GetResponseHeaders(uint64_t aStreamId,
-    UniquePtr<char[]>& aResponseHeaders, uint32_t& aResponseHeadersLen) {
-  nsCString headers;
-  nsresult rv = mHttp3Connection->get_headers(aStreamId, &headers);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  aResponseHeadersLen = headers.Length();
-  aResponseHeaders =  MakeUnique<char[]>(aResponseHeadersLen);
-  memcpy(aResponseHeaders.get(), PromiseFlatCString(headers).get(), aResponseHeadersLen);
-  return NS_OK;
+nsresult Http3Session::ReadResponseHeaders(uint64_t aStreamId,
+    nsTArray<uint8_t>* aResponseHeaders, bool* aFin) {
+  return mHttp3Connection->read_response_headers(aStreamId, aResponseHeaders,
+      aFin);
 }
 
-nsresult Http3Session::ReadData(uint64_t aStreamId, char* aBuf, uint32_t aCount,
+nsresult Http3Session::ReadResponseData(uint64_t aStreamId, char* aBuf, uint32_t aCount,
     uint32_t* aCountWritten, bool* aFin) {
 
-  return mHttp3Connection->read_data(aStreamId, (uint8_t*)aBuf, aCount, aCountWritten, aFin);
+  return mHttp3Connection->read_response_data(aStreamId, (uint8_t*)aBuf, aCount,
+      aCountWritten, aFin);
 }
 
 void Http3Session::TransactionHasDataToWrite(nsAHttpTransaction* caller) {

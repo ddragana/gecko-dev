@@ -7,13 +7,11 @@
 #![allow(unused_assignments)]
 
 use neqo_common::{matches, Datagram};
-use neqo_http3::{Http3Connection, Http3Event, Http3State};
+use neqo_http3::transaction_server::Response;
+use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
 use test_fixture::*;
 
-fn new_stream_callback(
-    request_headers: &[(String, String)],
-    error: bool,
-) -> (Vec<(String, String)>, Vec<u8>) {
+fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {
     println!("Error: {}", error);
 
     assert_eq!(

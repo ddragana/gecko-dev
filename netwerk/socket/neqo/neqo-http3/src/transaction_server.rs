@@ -5,12 +5,16 @@
 // except according to those terms.
 
 use crate::hframe::{ElementDependencyType, HFrame, HFrameReader, PrioritizedElementType};
+use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::mem;
+
+pub type Response = (Vec<Header>, Vec<u8>);
+pub type RequestHandler = Box<dyn FnMut(&[Header], bool) -> Response>;
 
 #[derive(PartialEq, Debug)]
 enum TransactionState {
@@ -27,7 +31,7 @@ pub struct TransactionServer {
     state: TransactionState,
     stream_id: u64,
     frame_reader: HFrameReader,
-    request_headers: Option<Vec<(String, String)>>,
+    request_headers: Option<Vec<Header>>,
     response_buf: Option<Vec<u8>>,
     fin: bool,
 }
@@ -44,7 +48,7 @@ impl TransactionServer {
         }
     }
 
-    pub fn get_request_headers(&self) -> &[(String, String)] {
+    pub fn get_request_headers(&self) -> &[Header] {
         if let Some(h) = &self.request_headers {
             h
         } else {
@@ -52,12 +56,7 @@ impl TransactionServer {
         }
     }
 
-    pub fn set_response(
-        &mut self,
-        headers: &[(String, String)],
-        data: Vec<u8>,
-        encoder: &mut QPackEncoder,
-    ) {
+    pub fn set_response(&mut self, headers: &[Header], data: Vec<u8>, encoder: &mut QPackEncoder) {
         qdebug!([self] "Encoding headers");
         let encoded_headers = encoder.encode_header_block(&headers, self.stream_id);
         let hframe = HFrame::Headers {
@@ -230,7 +229,7 @@ impl TransactionServer {
     pub fn done_reading_request(&self) -> bool {
         self.state == TransactionState::ReadingRequestDone
     }
-    pub fn has_data_to_send(&self) -> bool {
+    pub fn is_state_sending(&self) -> bool {
         self.state == TransactionState::SendingResponse
     }
 }

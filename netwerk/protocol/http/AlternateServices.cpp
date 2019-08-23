@@ -103,9 +103,16 @@ void AltSvcMapping::ProcessHeader(
           break;
         }
 
-        // h2=[hostname]:443 or h3=[hostname]:porti;quic="68332D3232"
+        // h2=[hostname]:443 or h3=[hostname]:port;quic="68332D3232"
+        // or h3-20=[hostname]:port (for cloudflare)
         if (currentName.EqualsLiteral("h3")) {
           isHttp3 = true;
+        } else if (currentName.EqualsLiteral("h3-20")) {
+          isHttp3 = true;
+          npnToken = NS_LITERAL_CSTRING("h3-20");
+        } else if (currentName.EqualsLiteral("h3-22")) {
+          isHttp3 = true;
+          npnToken = NS_LITERAL_CSTRING("h3-22");
         } else {
           npnToken = currentName;
         }

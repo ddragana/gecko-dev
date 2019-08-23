@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Http3Connection, Http3Event};
+use neqo_http3::{Header, Http3Connection, Http3Event};
 use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -73,7 +73,7 @@ impl Timer {
 fn process_loop(
     nctx: &NetworkCtx,
     client: &mut Connection,
-    handler: &mut Handler,
+    handler: &mut dyn Handler,
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
@@ -186,7 +186,7 @@ impl Handler for H9Handler {
 // HTTP/3 IMPLEMENTATION
 #[derive(Debug)]
 struct Headers {
-    pub h: Vec<(String, String)>,
+    pub h: Vec<Header>,
 }
 
 // dragana: this is a very stupid parser.
@@ -288,7 +288,7 @@ impl H3Handler {
                         return false;
                     }
 
-                    let headers = self.h3.get_headers(stream_id);
+                    let headers = self.h3.read_response_headers(stream_id);
                     eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
@@ -299,7 +299,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_data(Instant::now(), stream_id, &mut data)
+                        .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     eprintln!(
                         "READ[{}]: {}",
@@ -451,6 +451,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
+    let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {

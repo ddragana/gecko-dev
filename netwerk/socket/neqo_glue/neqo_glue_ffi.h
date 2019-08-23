@@ -109,6 +109,10 @@ struct CloseError {
 
 struct Http3Event {
   enum class Tag {
+    /// A request stream has space for more data to be send.
+    DataWritable,
+    /// A server has send STOP_SENDING frame.
+    StopSending,
     HeaderReady,
     /// New bytes available for reading.
     DataReadable,
@@ -123,6 +127,14 @@ struct Http3Event {
     ConnectionClosing,
     ConnectionClosed,
     NoEvent,
+  };
+
+  struct DataWritable_Body {
+    uint64_t stream_id;
+  };
+ 
+  struct StopSending_Body {
+    uint64_t stream_id;
   };
 
   struct HeaderReady_Body {
@@ -152,6 +164,8 @@ struct Http3Event {
 
   Tag tag;
   union {
+    DataWritable_Body data_writable;
+    StopSending_Body stop_sending;
     HeaderReady_Body header_ready;
     DataReadable_Body data_readable;
     Reset_Body reset;
@@ -188,7 +202,7 @@ nsrefcnt neqo_http3conn_addref(const NeqoHttp3Conn *conn);
 
 void neqo_http3conn_authenticated(NeqoHttp3Conn *conn, PRErrorCode error);
 
-void neqo_http3conn_close(NeqoHttp3Conn *conn, Http3AppError error);
+void neqo_http3conn_close(NeqoHttp3Conn *conn, uint64_t error);
 
 nsresult neqo_http3conn_close_stream(NeqoHttp3Conn *conn, uint64_t stream_id);
 
@@ -203,8 +217,6 @@ nsresult neqo_http3conn_fetch(NeqoHttp3Conn *conn,
                               uint64_t *stream_id);
 
 nsresult neqo_http3conn_get_data_to_send(NeqoHttp3Conn *conn, nsTArray<uint8_t> *packet);
-
-nsresult neqo_http3conn_get_headers(NeqoHttp3Conn *conn, uint64_t stream_id, nsCString *headers);
 
 nsresult neqo_http3conn_new(const nsACString *origin,
                             const nsACString *alpn,
@@ -223,16 +235,21 @@ void neqo_http3conn_process_input(NeqoHttp3Conn *conn, const uint8_t *packet, ui
 
 uint64_t neqo_http3conn_process_output(NeqoHttp3Conn *conn);
 
-nsresult neqo_http3conn_read_data(NeqoHttp3Conn *conn,
-                                  uint64_t stream_id,
-                                  uint8_t *buf,
-                                  uint32_t len,
-                                  uint32_t *read,
-                                  bool *fin);
+nsresult neqo_http3conn_read_response_data(NeqoHttp3Conn *conn,
+                                           uint64_t stream_id,
+                                           uint8_t *buf,
+                                           uint32_t len,
+                                           uint32_t *read,
+                                           bool *fin);
+
+nsresult neqo_http3conn_read_response_headers(NeqoHttp3Conn *conn,
+                                              uint64_t stream_id,
+                                              nsTArray<uint8_t> *headers,
+                                              bool *fin);
 
 nsrefcnt neqo_http3conn_release(const NeqoHttp3Conn *conn);
 
-nsresult neqo_http3conn_reset_stream(NeqoHttp3Conn *conn, uint64_t stream_id, Http3AppError error);
+nsresult neqo_http3conn_reset_stream(NeqoHttp3Conn *conn, uint64_t stream_id, uint64_t error);
 
 NeqoSecretInfo neqo_http3conn_tls_info(NeqoHttp3Conn *conn);
 

@@ -78,9 +78,9 @@ class Http3Session final : public nsAHttpTransaction,
 
   const static uint32_t kDefaultReadAmount = 2048;
 
-  nsresult GetResponseHeaders(uint64_t aStreamId,
-      UniquePtr<char[]>& aResponseHeaders, uint32_t& aResponseHeadersLen);
-  nsresult ReadData(uint64_t aStreamId, char* aBuf, uint32_t aCount,
+  nsresult ReadResponseHeaders(uint64_t aStreamId,
+      nsTArray<uint8_t>* aResponseHeaders, bool* aFin);
+  nsresult ReadResponseData(uint64_t aStreamId, char* aBuf, uint32_t aCount,
       uint32_t* aCountWritten, bool* aFin);
   void CloseStream(Http3Stream *aStream,  nsresult aResult);
 
@@ -134,6 +134,7 @@ class Http3Session final : public nsAHttpTransaction,
    CLOSED
   } mState;
 
+  bool mAuthenticationStarted;
   bool mCleanShutdown;
   bool mGoawayReceived;
   bool mShouldClose;

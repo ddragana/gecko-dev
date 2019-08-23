@@ -9,7 +9,7 @@
 use neqo_common::qinfo;
 use neqo_crypto;
 
-pub mod connection;
+mod connection;
 mod crypto;
 mod dump;
 mod events;
@@ -35,7 +35,7 @@ pub const QUIC_VERSION: u32 = 0xff00_0016;
 
 type TransportError = u64;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
     NoError,
     InternalError,
@@ -66,6 +66,7 @@ pub enum Error {
     InvalidResumptionToken,
     WrongRole,
     InvalidInput,
+    IdleTimeout,
     PeerError(TransportError),
 }
 
@@ -102,7 +103,8 @@ impl Error {
             | Error::VersionNegotiation
             | Error::WrongRole
             | Error::InvalidResumptionToken
-            | Error::InvalidInput => 1,
+            | Error::InvalidInput
+            | Error::IdleTimeout => 1,
         }
     }
 }
@@ -115,7 +117,7 @@ impl From<neqo_crypto::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             _ => None,
@@ -131,7 +133,7 @@ impl ::std::fmt::Display for Error {
 
 pub type AppError = u64;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum ConnectionError {
     Transport(Error),
     Application(AppError),

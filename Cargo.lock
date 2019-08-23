@@ -2024,7 +2024,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "neqo-common"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "env_logger 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2034,11 +2034,11 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bindgen 0.49.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.0",
+ "neqo-common 0.1.1",
  "serde 1.0.88 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.88 (git+https://github.com/servo/serde?branch=deserialize_from_enums10)",
  "toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2046,35 +2046,35 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.0",
- "neqo-crypto 0.1.0",
- "neqo-qpack 0.1.0",
- "neqo-transport 0.1.0",
+ "neqo-common 0.1.1",
+ "neqo-crypto 0.1.1",
+ "neqo-qpack 0.1.1",
+ "neqo-transport 0.1.1",
  "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.0",
- "neqo-crypto 0.1.0",
- "neqo-transport 0.1.0",
+ "neqo-common 0.1.1",
+ "neqo-crypto 0.1.1",
+ "neqo-transport 0.1.1",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "derive_more 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.0",
- "neqo-crypto 0.1.0",
+ "neqo-common 0.1.1",
+ "neqo-crypto 0.1.1",
  "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "slice-deque 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 0.6.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2084,10 +2084,10 @@ dependencies = [
 name = "neqo_glue"
 version = "0.1.0"
 dependencies = [
- "neqo-common 0.1.0",
- "neqo-crypto 0.1.0",
- "neqo-http3 0.1.0",
- "neqo-transport 0.1.0",
+ "neqo-common 0.1.1",
+ "neqo-crypto 0.1.1",
+ "neqo-http3 0.1.1",
+ "neqo-transport 0.1.1",
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "thin-vec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",

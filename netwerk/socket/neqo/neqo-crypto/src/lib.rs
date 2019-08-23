@@ -9,7 +9,7 @@
 #[macro_use]
 mod exp;
 #[macro_use]
-pub mod p11;
+mod p11;
 
 pub mod aead;
 pub mod agent;
@@ -17,7 +17,7 @@ mod agentio;
 mod cert;
 pub mod constants;
 mod convert;
-pub mod err;
+mod err;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
@@ -25,15 +25,15 @@ mod prio;
 mod replay;
 mod result;
 mod secrets;
-pub mod ssl;
-pub mod time;
+mod ssl;
+mod time;
 
 pub use self::agent::{
     Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,
     SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
-pub use self::err::{Error, Res, SSLErrorCodes};
+pub use self::err::{Error, PRErrorCode, Res, SSLErrorCodes};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
 pub use self::replay::AntiReplay;
@@ -46,7 +46,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::null;
 
 mod nss {
-    #![allow(clippy::const_static_lifetime, non_upper_case_globals)]
+    #![allow(clippy::redundant_static_lifetimes, non_upper_case_globals)]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 

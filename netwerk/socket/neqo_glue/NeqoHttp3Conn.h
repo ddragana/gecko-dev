@@ -26,7 +26,7 @@ class NeqoHttp3Conn final {
         max_table_size, max_blocked_streams, aConn);
   }
 
-  void close(Http3AppError aError) {
+  void close(uint64_t aError) {
     neqo_http3conn_close(this, aError);
   }
 
@@ -80,16 +80,19 @@ class NeqoHttp3Conn final {
     return neqo_http3conn_fetch(this, aMethod, aScheme, aHost, aPath, aHeaders, aStreamId);
   }
 
-  nsresult get_headers(uint64_t aStreamId, nsCString *aHeaders) {
-    return neqo_http3conn_get_headers(this, aStreamId, aHeaders);
+  nsresult close_stream(uint64_t aStreamId) {
+    return neqo_http3conn_close_stream(this, aStreamId);
+  }
+  nsresult read_response_headers(uint64_t aStreamId, nsTArray<uint8_t> *aHeaders, bool *fin) {
+    return neqo_http3conn_read_response_headers(this, aStreamId, aHeaders, fin);
   }
 
-  nsresult read_data(uint64_t aStreamId, uint8_t *aBuf, uint32_t aLen, uint32_t *aRead, bool*aFin) {
-    return neqo_http3conn_read_data(this ,aStreamId, aBuf, aLen, aRead, aFin);
+  nsresult read_response_data(uint64_t aStreamId, uint8_t *aBuf, uint32_t aLen, uint32_t *aRead, bool *aFin) {
+    return neqo_http3conn_read_response_data(this, aStreamId, aBuf, aLen, aRead, aFin);
   }
 
-  void reset_stream(uint64_t stream_id, Http3AppError error) {
-    neqo_http3conn_reset_stream(this, stream_id, error);
+  void reset_stream(uint64_t aStreamId, uint64_t aError) {
+    neqo_http3conn_reset_stream(this, aStreamId, aError);
   }
 
   nsrefcnt AddRef() { return neqo_http3conn_addref(this); }

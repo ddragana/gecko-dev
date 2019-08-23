@@ -13,10 +13,12 @@ pub mod transaction_server;
 
 use neqo_qpack;
 use neqo_transport;
+pub use neqo_transport::Output;
 
 use self::hframe::HFrameType;
 
 pub use connection::{Http3Connection, Http3Event, Http3State};
+pub use neqo_qpack::Header;
 pub use transaction_server::TransactionServer;
 
 type Res<T> = Result<T, Error>;
@@ -50,6 +52,9 @@ pub enum Error {
     DecodingFrame,
     NotEnoughData,
     Unexpected,
+    InvalidStreamId,
+    Unavailable,
+    AlreadyClosed,
     // So we can wrap and report these errors.
     TransportError(neqo_transport::Error),
     QpackError(neqo_qpack::Error),
@@ -81,7 +86,7 @@ impl Error {
             Error::RequestRejected => 20,
             Error::GeneralProtocolError => 0xff,
             Error::MalformedFrame(t) => match t {
-                0...0xfe => (*t as neqo_transport::AppError) + 0x100,
+                0..=0xfe => (*t as neqo_transport::AppError) + 0x100,
                 _ => 0x1ff,
             },
             // These are all internal errors.
@@ -89,6 +94,9 @@ impl Error {
             | Error::DecodingFrame
             | Error::NotEnoughData
             | Error::Unexpected
+            | Error::InvalidStreamId
+            | Error::Unavailable
+            | Error::AlreadyClosed
             | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code(),
         }
@@ -118,7 +126,7 @@ impl Error {
             19 => Error::UnexpectedFrame,
             20 => Error::RequestRejected,
             0xff => Error::GeneralProtocolError,
-            0x100...0x1ff => Error::MalformedFrame(error - 0x100),
+            0x100..=0x1ff => Error::MalformedFrame(error - 0x100),
             0x200 => Error::QpackError(neqo_qpack::Error::DecompressionFailed),
             0x201 => Error::QpackError(neqo_qpack::Error::EncoderStreamError),
             0x202 => Error::QpackError(neqo_qpack::Error::DecoderStreamError),

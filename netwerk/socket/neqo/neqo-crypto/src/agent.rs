@@ -248,7 +248,6 @@ impl SecretAgent {
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(&mut self) -> Res<()> {
         assert_initialized();
-
         let label = CString::new("sslwrapper").expect("cstring failed");
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
 

@@ -28,12 +28,10 @@ Http3Stream::Http3Stream(nsAHttpTransaction* httpTransaction,
     mQueued(false),
     mRequestBlockedOnRead(false),
     mDataReceived(false),
-    mFlatResponseHeaders(nullptr),
-    mFlatResponseHeadersLen(0),
-    mFlatResponseHeadersOffset(0),
     mSocketTransport(session->SocketTransport()),
     mTotalSent(0),
-    mTotalRead(0)
+    mTotalRead(0),
+    mFin(false)
 {}
 
 void Http3Stream::Close(nsresult aResult) {
@@ -151,23 +149,20 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
       break;
     case READING_HEADERS:
       {
-        if (!mFlatResponseHeadersLen) {
-          mSession->GetResponseHeaders(mStreamId, mFlatResponseHeaders,
-              mFlatResponseHeadersLen);
-          LOG(("Http3Stream::OnWriteSegment [this=%p, read %d bytes of headers",
-               this, mFlatResponseHeadersLen));
+        if (mFlatResponseHeaders.IsEmpty()) {
+          mSession->ReadResponseHeaders(mStreamId, &mFlatResponseHeaders, &mFin);
+          LOG(("Http3Stream::OnWriteSegment [this=%p, read %lu bytes of headers",
+               this, mFlatResponseHeaders.Length()));
         }
-        *countWritten = (mFlatResponseHeadersLen > count) ?
-            count : mFlatResponseHeadersLen;
-        memcpy(buf, mFlatResponseHeaders.get() + mFlatResponseHeadersOffset, *countWritten);
-        mFlatResponseHeadersOffset += *countWritten;
+        *countWritten = (mFlatResponseHeaders.Length() > count) ?
+            count : mFlatResponseHeaders.Length();
+        memcpy(buf, mFlatResponseHeaders.Elements(), *countWritten);
 
-        if (mFlatResponseHeadersLen == mFlatResponseHeadersOffset) {
-          mFlatResponseHeadersLen = 0;
-          mFlatResponseHeadersOffset = 0;
-          mFlatResponseHeaders = nullptr;
-          mState = READING_DATA;
+        mFlatResponseHeaders.RemoveElementsAt(0, *countWritten);
+        if (mFlatResponseHeaders.Length() == 0) {
+          mState = mFin ? RECEIVED_FIN : READING_DATA;
         }
+
         if (*countWritten == 0 ) {
           rv = NS_BASE_STREAM_WOULD_BLOCK;
         } else {
@@ -179,13 +174,10 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
       break;
     case READING_DATA:
       {
-        bool fin;
-        rv = mSession->ReadData(mStreamId, buf, count, countWritten, &fin);
-        if (fin) {
-          mState = RECEIVED_FIN;
-        }
+        rv = mSession->ReadResponseData(mStreamId, buf, count, countWritten,
+            &mFin);
         if (*countWritten == 0) {
-          if (fin) {
+          if (mFin) {
             mState = DONE;
             rv = NS_BASE_STREAM_CLOSED;
           } else {
@@ -195,6 +187,10 @@ nsresult Http3Stream::OnWriteSegment(char* buf, uint32_t count,
           mTotalRead += *countWritten;
           mTransaction->OnTransportStatus(mSocketTransport,
               NS_NET_STATUS_RECEIVING_FROM, mTotalRead);
+
+          if (mFin) {
+            mState = RECEIVED_FIN;
+          }
         }
       }
       break;

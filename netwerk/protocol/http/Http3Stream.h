@@ -75,9 +75,7 @@ class Http3Stream final : public nsAHttpSegmentReader,
   bool mQueued;
   bool mRequestBlockedOnRead;
   bool mDataReceived;
-  UniquePtr<char[]> mFlatResponseHeaders;
-  uint32_t mFlatResponseHeadersLen;
-  uint32_t mFlatResponseHeadersOffset;
+  nsTArray<uint8_t> mFlatResponseHeaders;
 
   // The underlying socket transport object is needed to propogate some events
   nsISocketTransport* mSocketTransport;
@@ -85,6 +83,8 @@ class Http3Stream final : public nsAHttpSegmentReader,
   // For Progress Events
   uint64_t mTotalSent;
   uint64_t mTotalRead;
+
+  bool mFin;
 };
 
 }
