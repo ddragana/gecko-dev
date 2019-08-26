@@ -371,10 +371,8 @@ nsNSSSocketInfo::GetEarlyDataAccepted(bool* aAccepted) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted) {
+void nsNSSSocketInfo::SetEarlyDataAccepted(bool aAccepted) {
   mEarlyDataAccepted = aAccepted;
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -383,10 +381,8 @@ nsNSSSocketInfo::GetResumed(bool* aResumed) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNSSSocketInfo::SetResumed(bool aResumed) {
+bool nsNSSSocketInfo::SetResumed(bool aResumed) {
   mResumed = aResumed;
-  return NS_OK;
 }
 
 bool nsNSSSocketInfo::GetDenyClientCert() { return mDenyClientCert; }
@@ -626,11 +622,6 @@ void nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode) {
     }
   }
 
-  if (mAuthListener) {
-    Unused << mAuthListener->Authenticated(errorCode);
-    mAuthListener = nullptr;
-  }
-
   if (errorCode) {
     mFailedVerification = true;
     SetCanceled(errorCode);
@@ -648,51 +639,6 @@ SharedSSLState& nsNSSSocketInfo::SharedState() { return mSharedState; }
 
 void nsNSSSocketInfo::SetSharedOwningReference(SharedSSLState* aRef) {
   mOwningSharedRef = aRef;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::SetSSLVersionUsed(uint16_t aVersion) {
-  mSSLVersionUsed = aVersion;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::SetNegotiatedNPNString(const nsACString& aValue) {
-  mNegotiatedNPN = aValue;
-  mNPNCompleted = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::SetInfo(uint16_t aCipherSuite, uint16_t aProtocolVersion,
-    const nsACString& aKeaGroup, const nsACString& aSignatureScheme) {
-  SSLCipherSuiteInfo cipherInfo;
-  if (SSL_GetCipherSuiteInfo(aCipherSuite, &cipherInfo,
-                             sizeof cipherInfo) == SECSuccess) {
-    mHaveCipherSuiteAndProtocol = true;
-    mCipherSuite = aCipherSuite;
-    mProtocolVersion = aProtocolVersion & 0xFF;
-    mKeaGroup = aKeaGroup;
-    mSignatureSchemeName = aSignatureScheme;
-  }
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::AuthCertificate(UniqueCERTCertificate& aPeerCert,
-    UniqueCERTCertList& aPeerCertChain, const SECItemArray* csa,
-    const SECItem* scts, nsICertAuthenticationListener* aListener) {
-  if (SECSuccess != AuthCertificateHookWithInfo(this,
-      static_cast<const void*>(this), aPeerCert, aPeerCertChain, csa,
-      scts)) {
-    PRErrorCode err = PR_GetError();
-    if (err != PR_WOULD_BLOCK_ERROR) {
-      return NS_ERROR_FAILURE;
-    }
-    mAuthListener = aListener;
-  }
-
-  return NS_OK;
 }
 
 void nsSSLIOLayerHelpers::Cleanup() {

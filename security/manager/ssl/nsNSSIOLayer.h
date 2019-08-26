@@ -57,6 +57,9 @@ class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
   PRStatus CloseSocketAndDestroy();
 
   void SetNegotiatedNPN(const char* value, uint32_t length);
+  void SetEarlyDataAccepted(bool aAccepted);
+
+  void SetResumed(bool aResumed);
 
   void SetHandshakeCompleted();
   bool IsHandshakeCompleted() const { return mHandshakeCompleted; }
@@ -106,6 +109,8 @@ class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
       mBypassAuthentication = val;
     }
   }
+
+  void SetSSLVersionUsed(int16_t version) { mSSLVersionUsed = version; }
 
   void SetMACAlgorithmUsed(int16_t mac) { mMACAlgorithmUsed = mac; }
 
@@ -212,8 +217,6 @@ class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
   uint64_t mPlaintextBytesRead;
 
   nsCOMPtr<nsIX509Cert> mClientCert;
-
-  nsCOMPtr<nsICertAuthenticationListener> mAuthListener;
 
   // if non-null this is a reference to the mSharedState (which is
   // not an owning reference). If this is used, the info has a private

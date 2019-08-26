@@ -13,14 +13,8 @@ interface nsICertAuthenticationListener;
 %{C++
 #include "nsStringFwd.h"
 #include "nsTArrayForwardDeclare.h"
-#include "ScopedNSSTypes.h"
-#include "secitem.h"
 %}
 [ref] native nsCStringTArrayRef(nsTArray<nsCString>);
-[ref] native UniqueCERTCertificateRef(mozilla::UniqueCERTCertificate);
-[ref] native UniqueCERTCertList(mozilla::UniqueCERTCertList);
-[ptr] native SECItemArrayPtr(const SECItemArray);
-[ptr] native SECItemPtr(const SECItem);
 
 [scriptable, builtinclass, uuid(418265c8-654e-4fbb-ba62-4eed27de1f03)]
 interface nsISSLSocketControl : nsISupports {
@@ -185,28 +179,5 @@ interface nsISSLSocketControl : nsISupports {
      * True iff the connection was resumed using the resumption token.
      */
     readonly attribute boolean resumed;
-
-    /**
-     * The following setters are use with http3, because they are not set by
-     * NSSCallbacks.
-     */
-    [noscript] void setSSLVersionUsed(in unsigned short version);
-    [noscript] void setEarlyDataAccepted(in bool earlyData);
-    [noscript] void setResumed(in bool resumed);
-    [noscript] void setNegotiatedNPNString(in ACString negotiatedNPN);
-    [noscript] void setInfo(in unsigned short cipherSuite,
-                            in unsigned short protocolVersion,
-                            in ACString keaGroup,
-                            in ACString signatureScheme);
-
-    [noscript] void authCertificate(in UniqueCERTCertificateRef peerCert,
-                                    in UniqueCERTCertList peepCertList,
-                                    in SECItemArrayPtr csa,
-                                    in SECItemPtr scts,
-                                    in nsICertAuthenticationListener listener);
 };
 
-[noscript, builtinclass, uuid(d502677f-b7ff-4c4e-b311-984dfcfcb567)]
-interface nsICertAuthenticationListener : nsISupports {
-  [noscript] void authenticated(in long error);
-};

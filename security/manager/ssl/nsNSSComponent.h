@@ -145,9 +145,4 @@ inline nsresult CheckForSmartCardChanges() {
 #endif
 }
 
-nsresult CreateSecureInfo(int32_t family, const char* host, int32_t port,
-                          const OriginAttributes& originAttributes,
-                          uint32_t providerFlags, uint32_t providerTlsFlags,
-                          nsISupports** info);
-
 #endif  // _nsNSSComponent_h_

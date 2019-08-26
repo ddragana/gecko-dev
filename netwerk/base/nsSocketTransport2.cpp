@@ -1111,29 +1111,6 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
         fd = PR_OpenUDPSocket(mNetAddr.raw.family);
         rv = fd ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
         mUsingQuic = true;
-
-        // Create secInfo
-        nsCOMPtr<nsISupports> secinfo;
-        CreateSecureInfo(mNetAddr.raw.family, mOriginHost.get(), (int32_t)mOriginPort,
-                         mOriginAttributes,
-                         nsISocketTransport::NO_PERMANENT_STORAGE, mTlsFlags,
-                         getter_AddRefs(secinfo));
-
-        // remember security info and give notification callbacks to PSM...
-        nsCOMPtr<nsIInterfaceRequestor> callbacks;
-        {
-           MutexAutoLock lock(mLock);
-           mSecInfo = secinfo;
-           callbacks = mCallbacks;
-           SOCKET_LOG(("  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
-                       mCallbacks.get()));
-        }
-
-        // don't call into PSM while holding mLock!!
-        nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
-        if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
-        // remember if socket type is SSL so we can ProxyStartSSL if need be.
-        usingSSL = true;
     } else {
 
       nsCOMPtr<nsISocketProviderService> spserv =
