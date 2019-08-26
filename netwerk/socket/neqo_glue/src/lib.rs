@@ -248,7 +248,7 @@ pub extern "C" fn neqo_http3conn_fetch(
             hdrs.push((name, value));
         }
     }
-println!("DDDDDDDD {:?}", hdrs);
+
     unsafe {
         match conn.conn.fetch(
             method.as_str_unchecked(),

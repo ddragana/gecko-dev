@@ -715,7 +715,7 @@ nsresult Http3Session::WriteSegmentsAgain(nsAHttpSegmentWriter* writer,
   }
   nsresult rv = ProcessInput();
   if (NS_FAILED(rv)) {
-    LOG3(("Http3Session %p buffering frame header read failure %" PRIX32 "\n",
+    LOG3(("Http3Session %p processInput returns %" PRIX32 "\n",
           this, static_cast<uint32_t>(rv)));
     // maybe just blocked reading from network
     if (rv == NS_BASE_STREAM_WOULD_BLOCK) rv = NS_OK;
