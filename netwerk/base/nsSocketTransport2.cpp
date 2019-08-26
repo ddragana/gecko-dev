@@ -932,6 +932,19 @@ nsresult nsSocketTransport::InitWithConnectedSocket(PRFileDesc* aFD,
   return InitWithConnectedSocket(aFD, aAddr);
 }
 
+nsresult nsSocketTransport::SetSetInfo(nsISupports* aSecInfo) {
+  // remember security info and give it notification callbacks.
+
+  MutexAutoLock lock(mLock);
+  mSecInfo = secinfo;
+
+  nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
+  if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
+
+  SOCKET_LOG(("nsSocketTransport::SetSenInfo  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
+              mCallbacks.get()));
+}
+
 nsresult nsSocketTransport::PostEvent(uint32_t type, nsresult status,
                                       nsISupports* param) {
   SOCKET_LOG(("nsSocketTransport::PostEvent [this=%p type=%u status=%" PRIx32
@@ -1141,9 +1154,6 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
 
         if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
           controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
-
-        if (mConnectionFlags & nsISocketTransport::MITM_OK)
-          controlFlags |= nsISocketProvider::MITM_OK;
 
         if (mConnectionFlags & nsISocketTransport::BE_CONSERVATIVE)
           controlFlags |= nsISocketProvider::BE_CONSERVATIVE;

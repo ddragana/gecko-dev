@@ -8,18 +8,12 @@
 
 #include "seccomon.h"
 #include "prio.h"
-#include "ScopedNSSTypes.h"
 
 namespace mozilla {
 namespace psm {
 
 SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
                               PRBool isServer);
-
-SECStatus AuthCertificateHookWithInfo(void* arg, const void* aPtrForLoging,
-    const UniqueCERTCertificate& serverCert, UniqueCERTCertList& peerCertChain,
-    const SECItemArray* csa, const SECItem* sctsFromTLSExtension);
-
 }
 }  // namespace mozilla
 

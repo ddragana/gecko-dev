@@ -35,7 +35,4 @@ mozilla::pkix::Result DoOCSPRequest(
     size_t ocspRequestLength, TimeDuration timeout,
     /*out*/ Vector<uint8_t>& result);
 
-nsCString getKeaGroupName(uint32_t aKeaGroup);
-nsCString getSignatureName(uint32_t aSignatureScheme);
-
 #endif  // nsNSSCallbacks_h
