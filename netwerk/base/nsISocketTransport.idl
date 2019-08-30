@@ -312,11 +312,4 @@ interface nsISocketTransport : nsITransport
      * IP address resolved using TRR.
      */
     bool resolvedByTRR();
-
-    /**
-     * When Quic is used Http3Session will create secInfo not PSM.
-     * This function is called when we secInfo is created to give the
-     * SocketTransport a reference.
-     */
-    void SetSecInfo(in nsISupports aSecInfo);
 };

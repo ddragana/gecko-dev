@@ -27,7 +27,7 @@
 #include "Http3Session.h"
 
 class nsISocketTransport;
-class nsISSLSocketControl;
+class nsISSLSocketControlExtended;
 
 namespace mozilla {
 namespace net {
@@ -268,7 +268,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   // called to cause the underlying socket to start speaking SSL
   MOZ_MUST_USE nsresult InitSSLParams(bool connectingToProxy,
                                       bool ProxyStartSSL);
-  MOZ_MUST_USE nsresult SetupNPNList(nsISSLSocketControl* ssl, uint32_t caps);
+  MOZ_MUST_USE nsresult SetupNPNList(nsISSLSocketControlExtended* ssl, uint32_t caps);
 
   MOZ_MUST_USE nsresult OnTransactionDone(nsresult reason);
   MOZ_MUST_USE nsresult OnSocketWritable();
@@ -288,7 +288,7 @@ class nsHttpConnection final : public nsAHttpSegmentReader,
   void SetupSSL();
 
   // Start the Spdy transaction handler when NPN indicates spdy/*
-  void StartSpdy(nsISSLSocketControl* ssl, SpdyVersion versionLevel);
+  void StartSpdy(nsISSLSocketControlExtended* ssl, SpdyVersion versionLevel);
   // Like the above, but do the bare minimum to do 0RTT data, so we can back
   // it out, if necessary
   void Start0RTTSpdy(SpdyVersion versionLevel);

@@ -15,6 +15,7 @@
 #include "nsISocketProvider.h"
 #include "nsSocketProviderService.h"
 #include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsISocketTransport.h"
 #include "nsISupportsPriority.h"
 #include "nsNetAddr.h"
@@ -401,7 +402,7 @@ nsresult TLSFilterTransaction::NudgeTunnel(NudgeTunnelCallback* aCallback) {
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsISSLSocketControl> ssl(do_QueryInterface(mSecInfo));
+  nsCOMPtr<nsISSLSocketControlExtended> ssl(do_QueryInterface(mSecInfo));
   nsresult rv = ssl ? ssl->DriveHandshake() : NS_ERROR_FAILURE;
   if (NS_FAILED(rv) && rv != NS_BASE_STREAM_WOULD_BLOCK) {
     // fatal handshake failure

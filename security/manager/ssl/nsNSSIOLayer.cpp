@@ -133,10 +133,10 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags,
       mIsShortWritePending(false),
       mShortWritePendingByte(0),
       mShortWriteOriginalAmount(-1),
-      mKEAUsed(nsISSLSocketControl::KEY_EXCHANGE_UNKNOWN),
+      mKEAUsed(nsISSLSocketControlExtended::KEY_EXCHANGE_UNKNOWN),
       mKEAKeyBits(0),
       mSSLVersionUsed(nsISSLSocketControl::SSL_VERSION_UNKNOWN),
-      mMACAlgorithmUsed(nsISSLSocketControl::SSL_MAC_UNKNOWN),
+      mMACAlgorithmUsed(nsISSLSocketControlExtended::SSL_MAC_UNKNOWN),
       mProviderFlags(providerFlags),
       mProviderTlsFlags(providerTlsFlags),
       mSocketCreationTimestamp(TimeStamp::Now()),
@@ -149,7 +149,8 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags,
 nsNSSSocketInfo::~nsNSSSocketInfo() {}
 
 NS_IMPL_ISUPPORTS_INHERITED(nsNSSSocketInfo, TransportSecurityInfo,
-                            nsISSLSocketControl, nsIClientAuthUserDecision)
+                            nsISSLSocketControlExtended, nsISSLSocketControl,
+                            nsIClientAuthUserDecision)
 
 NS_IMETHODIMP
 nsNSSSocketInfo::GetProviderFlags(uint32_t* aProviderFlags) {
@@ -374,7 +375,7 @@ nsNSSSocketInfo::GetResumed(bool* aResumed) {
   return NS_OK;
 }
 
-bool nsNSSSocketInfo::SetResumed(bool aResumed) {
+void nsNSSSocketInfo::SetResumed(bool aResumed) {
   mResumed = aResumed;
 }
 

@@ -109,6 +109,7 @@ UNIFIED_SOURCES += [
     'nsServerTiming.cpp',
     'NullHttpChannel.cpp',
     'NullHttpTransaction.cpp',
+    'QuicTransportSecInfo.cpp',
     'TunnelUtils.cpp',
 ]
 

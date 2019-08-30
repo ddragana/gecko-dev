@@ -27,6 +27,7 @@
 #include "nsHttpConnection.h"
 #include "nsIRequestContext.h"
 #include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsISupportsPriority.h"
 #include "nsStandardURL.h"
 #include "nsURLHelper.h"
@@ -4333,7 +4334,7 @@ nsresult Http2Session::ConfirmTLSProfile() {
 
   nsCOMPtr<nsISupports> securityInfo;
   mConnection->GetSecurityInfo(getter_AddRefs(securityInfo));
-  nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(securityInfo);
+  nsCOMPtr<nsISSLSocketControlExtended> ssl = do_QueryInterface(securityInfo);
   LOG3(("Http2Session::ConfirmTLSProfile %p sslsocketcontrol=%p\n", this,
         ssl.get()));
   if (!ssl) return NS_ERROR_FAILURE;
@@ -4367,7 +4368,7 @@ nsresult Http2Session::ConfirmTLSProfile() {
   int16_t macAlgorithm = ssl->GetMACAlgorithmUsed();
   LOG3(("Http2Session::ConfirmTLSProfile %p MAC Algortihm (aead==6) %d\n", this,
         macAlgorithm));
-  if (macAlgorithm != nsISSLSocketControl::SSL_MAC_AEAD) {
+  if (macAlgorithm != nsISSLSocketControlExtended::SSL_MAC_AEAD) {
     LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to lack of AEAD\n",
           this));
     return SessionError(INADEQUATE_SECURITY);

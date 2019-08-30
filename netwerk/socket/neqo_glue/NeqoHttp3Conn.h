@@ -30,18 +30,8 @@ class NeqoHttp3Conn final {
     neqo_http3conn_close(this, aError);
   }
 
-  void set_sec_info(nsISSLSocketControl *aInfoObject) {
-    NeqoSecretInfo secInfo = neqo_http3conn_tls_info(this);
-
-    if (secInfo.set) {
-      aInfoObject->SetSSLVersionUsed(secInfo.version);
-      aInfoObject->SetEarlyDataAccepted(secInfo.early_data);
-      aInfoObject->SetResumed(secInfo.resumed);
-      aInfoObject->SetNegotiatedNPNString(secInfo.alpn);
-      aInfoObject->SetInfo(secInfo.cipher, secInfo.version & 0xFF,
-          getKeaGroupName(secInfo.group),
-          getSignatureName(secInfo.signature_scheme));
-    }
+  NeqoSecretInfo get_sec_info() {
+    return neqo_http3conn_tls_info(this);
   }
 
   nsresult peer_certificate_info(NeqoCertificateInfo *aCertInfo) {

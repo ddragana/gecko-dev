@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "HttpLog.h"
+#include "Http3Session.h"
 #include "Http3Stream.h"
 #include "DNS.h"
 #include "nsHttpHandler.h"
@@ -13,8 +14,10 @@
 #include "nsIOService.h"
 #include "nsISSLSocketControl.h"
 #include "ScopedNSSTypes.h"
+#include "SSLServerCertVerification.h"
 #include "nsSocketTransportService2.h"
 #include "nsThreadUtils.h"
+#include "QuicTransportSecInfo.h"
 #include "cert.h"
 #include "sslerr.h"
 
@@ -43,8 +46,9 @@ NS_IMPL_ADDREF(Http3Session)
 NS_IMPL_RELEASE(Http3Session)
 NS_INTERFACE_MAP_BEGIN(Http3Session)
   NS_INTERFACE_MAP_ENTRY(nsAHttpConnection)
-  NS_INTERFACE_MAP_ENTRY(nsICertAuthenticationListener)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsICertAuthenticationListener)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(Http3Session)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITimerCallback)
 NS_INTERFACE_MAP_END
 
 Http3Session::Http3Session()
@@ -63,11 +67,15 @@ Http3Session::Http3Session()
 
 nsresult Http3Session::Init(const nsACString& aOrigin,
     nsISocketTransport* aSocketTransport, nsAHttpSegmentReader* reader,
-      nsAHttpSegmentWriter* writer) {
+    nsAHttpSegmentWriter* writer) {
   LOG3(("Http3Session::Init %p", this));
   mSocketTransport = aSocketTransport;
   mSegmentReader = reader;
   mSegmentWriter = writer;
+
+  nsCOMPtr<nsISupports> info;
+  Unused << mSocketTransport->GetSecurityInfo(getter_AddRefs(info));
+  mSecInfo = do_QueryObject(info);
 
   NetAddr selfAddr;
   if (NS_FAILED(mSocketTransport->GetSelfAddr(&selfAddr))) {
@@ -283,13 +291,8 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
          {
            LOG(("Http3Session::Process event - ConnectionConnected"));
            mState = CONNECTED;
-           nsCOMPtr<nsISupports> securityInfo;
-           mSocketTransport->GetSecurityInfo(getter_AddRefs(securityInfo));
-           nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(securityInfo);
-           MOZ_ASSERT(ssl);
-           if (ssl) {
-             mHttp3Connection->set_sec_info(ssl);
-           }
+           SetSecInfo();
+           mSecInfo->HandshakeCompleted();
          }
          break;
       case Http3Event::Tag::GoawayReceived:
@@ -1067,102 +1070,33 @@ void Http3Session::CallCertVerification() {
     return;
   }
 
-  UniqueCERTCertificate cert;
-  UniqueCERTCertList certChain(CERT_NewCertList());
-  for (auto& cert_der : certInfo.certs) {
-    SECItem der = {
-        SECItemType::siBuffer,
-        cert_der.Elements(),
-        (uint32_t)cert_der.Length()
-    };
+  Maybe<nsTArray<nsTArray<uint8_t>>> stapledOCSPResponse;
+  if (certInfo.stapled_ocsp_responses_present) {
+    stapledOCSPResponse.emplace(certInfo.stapled_ocsp_responses);
+  }
 
-    if (!cert) {
-      cert.reset(CERT_NewTempCertificate(
-          CERT_GetDefaultCertDB(), &der, nullptr, false, true));
-      if (!cert) {
-        LOG(("Http3Session::CallCertVerification [this=%p] cert failed",
-             this));
-        mHttp3Connection->peer_authenticated(SSL_ERROR_BAD_CERTIFICATE);
-        mError = psm::GetXPCOMFromNSSError(SSL_ERROR_BAD_CERTIFICATE);
-        return;
-      }
-    }
+  Maybe<nsTArray<uint8_t>> sctsFromTLSExtension;
+  if (certInfo.signed_cert_timestamp_present) {
+    sctsFromTLSExtension.emplace(certInfo.signed_cert_timestamp);
+  }
 
-    if (CERT_AddCertToListTail(certChain.get(), CERT_NewTempCertificate(
-                               CERT_GetDefaultCertDB(), &der, nullptr,
-                               false, true)) != SECSuccess) {
-      LOG(("Http3Session::CallCertVerification [this=%p] cert chain failed",
+  mSecInfo->SetAuthenticationCallback(this);
+  uint32_t providerFlags;
+  // the return value is always NS_OK, just ignore it.
+  Unused << mSecInfo->GetProviderFlags(&providerFlags);
+
+  SECStatus rv = AuthCertificateHookWithInfo(mSecInfo,
+      static_cast<const void*>(this), certInfo.certs, stapledOCSPResponse,
+      sctsFromTLSExtension, providerFlags);
+  if ((rv != SECSuccess) && (rv != SECWouldBlock)){
+      LOG(("Http3Session::CallCertVerification [this=%p] AuthCertificate failed",
            this));
       mHttp3Connection->peer_authenticated(SSL_ERROR_BAD_CERTIFICATE);
       mError = psm::GetXPCOMFromNSSError(SSL_ERROR_BAD_CERTIFICATE);
-      return;
-    }
-  }
-
-  SECItemArray ocsp;
-  ocsp.items = nullptr;
-  ocsp.len = 0;
-  if (certInfo.stapled_ocsp_responses_present &&
-      certInfo.stapled_ocsp_responses.Length()) {
-    SECITEM_AllocArray(NULL, &ocsp,
-        certInfo.stapled_ocsp_responses.Length());
-    if (!ocsp.items) {
-      LOG(("Http3Session::CallCertVerification [this=%p] ocsp failed",
-           this));
-      mHttp3Connection->peer_authenticated(SSL_ERROR_BAD_CERTIFICATE);
-      mError = psm::GetXPCOMFromNSSError(SSL_ERROR_BAD_CERTIFICATE);
-      return;
-    }
-
-    for (uint32_t i = 0; i < certInfo.stapled_ocsp_responses.Length(); i++) {
-      ocsp.items[i].data = (unsigned char *)PORT_Alloc(certInfo.stapled_ocsp_responses[i].Length());
-      if (!ocsp.items[i].data) {
-        LOG(("Http3Session::CallCertVerification [this=%p] ocsp failed",
-             this));
-        mHttp3Connection->peer_authenticated(SSL_ERROR_BAD_CERTIFICATE);
-        mError = psm::GetXPCOMFromNSSError(SSL_ERROR_BAD_CERTIFICATE);
-        SECITEM_FreeArray(&ocsp, PR_FALSE);
-        return;
-      }
-      PORT_Memcpy(ocsp.items[i].data, certInfo.stapled_ocsp_responses[i].Elements(),
-          certInfo.stapled_ocsp_responses[i].Length());
-      ocsp.items[i].len = certInfo.stapled_ocsp_responses[i].Length();
-      ocsp.items[i].type = SECItemType::siBuffer;
-    }
-  }
-
-  SECItem scts = {
-      SECItemType::siBuffer,
-      certInfo.signed_cert_timestamp_present ?
-          certInfo.signed_cert_timestamp.Elements() :
-          nullptr,
-      certInfo.signed_cert_timestamp_present ?
-          (uint32_t)certInfo.signed_cert_timestamp.Length() :
-          0
-  };
-
-  nsCOMPtr<nsISupports> securityInfo;
-  mSocketTransport->GetSecurityInfo(getter_AddRefs(securityInfo));
-  nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(securityInfo);
-  MOZ_ASSERT(ssl);
-
-  if (!ssl ||
-      NS_FAILED(ssl->AuthCertificate(cert, certChain,
-      certInfo.stapled_ocsp_responses_present ? &ocsp : nullptr,
-      certInfo.signed_cert_timestamp_present ? &scts : nullptr, this))) {
-    LOG(("Http3Session::CallCertVerification [this=%p] AuthCertificate failed",
-         this));
-    mHttp3Connection->peer_authenticated(SSL_ERROR_BAD_CERTIFICATE);
-    mError = psm::GetXPCOMFromNSSError(SSL_ERROR_BAD_CERTIFICATE);
-  }
-
-  if (ocsp.items) {
-    SECITEM_FreeArray(&ocsp, PR_FALSE);
   }
 }
 
-NS_IMETHODIMP
-Http3Session::Authenticated(int32_t aError) {
+void Http3Session::Authenticated(int32_t aError) {
   LOG(("Http3Session::Authenticated error=%x [this=%p].",
        aError, this));
   if (mState == INITIALIZING) {
@@ -1177,8 +1111,18 @@ Http3Session::Authenticated(int32_t aError) {
   if (mConnection) {
     Unused << mConnection->ResumeSend();
   }
+}
 
-  return NS_OK;
+void Http3Session::SetSecInfo() {
+  NeqoSecretInfo secInfo = mHttp3Connection->get_sec_info();
+
+  if (secInfo.set) {
+    mSecInfo->SetSSLVersionUsed(secInfo.version);
+    mSecInfo->SetResumed(secInfo.resumed);
+
+    mSecInfo->SetInfo(secInfo.cipher, secInfo.version, secInfo.group,
+        secInfo.signature_scheme);
+  }
 }
 
 }

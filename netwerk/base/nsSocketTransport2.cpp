@@ -29,6 +29,7 @@
 #include "nsSocketProviderService.h"
 #include "nsISocketProvider.h"
 #include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsIPipe.h"
 #include "nsIClassInfoImpl.h"
 #include "nsURLHelper.h"
@@ -36,6 +37,7 @@
 #include "nsIDNSRecord.h"
 #include "nsIDNSByTypeRecord.h"
 #include "nsICancelable.h"
+#include "QuicTransportSecInfo.h"
 #include "TCPFastOpenLayer.h"
 #include <algorithm>
 #include "sslexp.h"
@@ -932,19 +934,6 @@ nsresult nsSocketTransport::InitWithConnectedSocket(PRFileDesc* aFD,
   return InitWithConnectedSocket(aFD, aAddr);
 }
 
-nsresult nsSocketTransport::SetSetInfo(nsISupports* aSecInfo) {
-  // remember security info and give it notification callbacks.
-
-  MutexAutoLock lock(mLock);
-  mSecInfo = secinfo;
-
-  nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
-  if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
-
-  SOCKET_LOG(("nsSocketTransport::SetSenInfo  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
-              mCallbacks.get()));
-}
-
 nsresult nsSocketTransport::PostEvent(uint32_t type, nsresult status,
                                       nsISupports* param) {
   SOCKET_LOG(("nsSocketTransport::PostEvent [this=%p type=%u status=%" PRIx32
@@ -1120,22 +1109,50 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
     fd = nullptr;
     uint32_t i = 0;
 
+    uint32_t controlFlags = 0;
+    if (mProxyTransparentResolvesHost)
+      controlFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
+
+    if (mConnectionFlags & nsISocketTransport::ANONYMOUS_CONNECT)
+      controlFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
+
+    if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
+      controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
+
+    if (mConnectionFlags & nsISocketTransport::BE_CONSERVATIVE)
+      controlFlags |= nsISocketProvider::BE_CONSERVATIVE;
+
+    // by setting host to mOriginHost, instead of mHost we send the
+    // SocketProvider (e.g. PSM) the origin hostname but can still do DNS
+    // on an explicit alternate service host name
+    const char* host = mOriginHost.get();
+    int32_t port = (int32_t)mOriginPort;
+
     if (mTypes[0].EqualsLiteral("quic")) {
         fd = PR_OpenUDPSocket(mNetAddr.raw.family);
         rv = fd ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
         mUsingQuic = true;
+        RefPtr<QuicTransportSecInfo> info = new QuicTransportSecInfo(controlFlags);
+        info->SetHostName(mHttpsProxy ? mProxyHost.get() : host);
+        info->SetPort(mHttpsProxy ? mProxyPort : port);
+        nsCOMPtr<nsISupports> secinfo;
+        info->QueryInterface(NS_GET_IID(nsISupports), (void**)(&secinfo));
+        // remember security info and give notification callbacks to PSM...
+        nsCOMPtr<nsIInterfaceRequestor> callbacks;
+        {
+           MutexAutoLock lock(mLock);
+           mSecInfo = secinfo;
+           callbacks = mCallbacks;
+           SOCKET_LOG(("  [secinfo=%p callbacks=%p]\n", mSecInfo.get(),
+                       mCallbacks.get()));
+        }
+        // don't call into PSM while holding mLock!!
+        nsCOMPtr<nsISSLSocketControl> secCtrl(do_QueryInterface(secinfo));
+        if (secCtrl) secCtrl->SetNotificationCallbacks(callbacks);
     } else {
 
       nsCOMPtr<nsISocketProviderService> spserv =
           nsSocketProviderService::GetOrCreate();
-
-      // by setting host to mOriginHost, instead of mHost we send the
-      // SocketProvider (e.g. PSM) the origin hostname but can still do DNS
-      // on an explicit alternate service host name
-      const char* host = mOriginHost.get();
-      int32_t port = (int32_t)mOriginPort;
-      nsCOMPtr<nsIProxyInfo> proxyInfo = mProxyInfo;
-      uint32_t controlFlags = 0;
 
       uint32_t i;
       for (i = 0; i < mTypes.Length(); ++i) {
@@ -1146,17 +1163,7 @@ nsresult nsSocketTransport::BuildSocket(PRFileDesc*& fd, bool& proxyTransparent,
         rv = spserv->GetSocketProvider(mTypes[i].get(), getter_AddRefs(provider));
         if (NS_FAILED(rv)) break;
 
-        if (mProxyTransparentResolvesHost)
-          controlFlags |= nsISocketProvider::PROXY_RESOLVES_HOST;
-
-        if (mConnectionFlags & nsISocketTransport::ANONYMOUS_CONNECT)
-          controlFlags |= nsISocketProvider::ANONYMOUS_CONNECT;
-
-        if (mConnectionFlags & nsISocketTransport::NO_PERMANENT_STORAGE)
-          controlFlags |= nsISocketProvider::NO_PERMANENT_STORAGE;
-
-        if (mConnectionFlags & nsISocketTransport::BE_CONSERVATIVE)
-          controlFlags |= nsISocketProvider::BE_CONSERVATIVE;
+        nsCOMPtr<nsIProxyInfo> proxyInfo = mProxyInfo;
 
         nsCOMPtr<nsISupports> secinfo;
         if (i == 0) {
@@ -1519,8 +1526,8 @@ nsresult nsSocketTransport::InitiateSocket() {
   }
 #endif
 
-  if (!mDNSRecordTxt.IsEmpty() && mSecInfo) {
-    nsCOMPtr<nsISSLSocketControl> secCtrl = do_QueryInterface(mSecInfo);
+  if (!mDNSRecordTxt.IsEmpty() && !mUsingQuic && mSecInfo) {
+    nsCOMPtr<nsISSLSocketControlExtended> secCtrl = do_QueryInterface(mSecInfo);
     if (secCtrl) {
       SOCKET_LOG(("nsSocketTransport::InitiateSocket set esni keys."));
       rv = secCtrl->SetEsniTxt(mDNSRecordTxt);
@@ -1687,7 +1694,7 @@ nsresult nsSocketTransport::InitiateSocket() {
         // been pushed, and we were proxying (transparently; ie. nothing
         // has to happen in the protocol layer above us), it's time for
         // the ssl to start doing it's thing.
-        nsCOMPtr<nsISSLSocketControl> secCtrl = do_QueryInterface(mSecInfo);
+        nsCOMPtr<nsISSLSocketControlExtended> secCtrl = do_QueryInterface(mSecInfo);
         if (secCtrl) {
           SOCKET_LOG(("  calling ProxyStartSSL()\n"));
           secCtrl->ProxyStartSSL();

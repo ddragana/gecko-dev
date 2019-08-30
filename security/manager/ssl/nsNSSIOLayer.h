@@ -15,7 +15,7 @@
 #include "nsDataHashtable.h"
 #include "nsIClientAuthDialogs.h"
 #include "nsIProxyInfo.h"
-#include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsNSSCertificate.h"
 #include "nsTHashtable.h"
 #include "sslt.h"
@@ -32,13 +32,14 @@ using mozilla::OriginAttributes;
 class nsIObserver;
 
 class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
-                              public nsISSLSocketControl,
+                              public nsISSLSocketControlExtended,
                               public nsIClientAuthUserDecision {
  public:
   nsNSSSocketInfo(mozilla::psm::SharedSSLState& aState, uint32_t providerFlags,
                   uint32_t providerTlsFlags);
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSISSLSOCKETCONTROLEXTENDED
   NS_DECL_NSISSLSOCKETCONTROL
   NS_DECL_NSICLIENTAUTHUSERDECISION
 
@@ -88,8 +89,7 @@ class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
     after_cert_verification
   };
   void SetCertVerificationWaiting();
-  // Use errorCode == 0 to indicate success;
-  void SetCertVerificationResult(PRErrorCode errorCode);
+  void SetCertVerificationResult(PRErrorCode errorCode) override;
 
   // for logging only
   PRBool IsWaitingForCertVerification() const {
@@ -198,7 +198,7 @@ class nsNSSSocketInfo final : public mozilla::psm::TransportSecurityInfo,
 #endif
 
   // mKEA* are used in false start and http/2 detetermination
-  // Values are from nsISSLSocketControl
+  // Values are from nsISSLSocketControlExtended
   int16_t mKEAUsed;
   uint32_t mKEAKeyBits;
   int16_t mSSLVersionUsed;

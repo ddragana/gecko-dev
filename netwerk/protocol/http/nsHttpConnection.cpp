@@ -34,6 +34,7 @@
 #include "nsISocketTransport.h"
 #include "nsSocketTransportService2.h"
 #include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsISupportsPriority.h"
 #include "nsPreloadedStream.h"
 #include "nsProxyRelease.h"
@@ -219,9 +220,6 @@ nsresult nsHttpConnection::Init(
   mCallbacks = new nsMainThreadPtrHolder<nsIInterfaceRequestor>(
       "nsHttpConnection::mCallbacks", callbacks, false);
 
-  mSocketTransport->SetEventSink(this, nullptr);
-  mSocketTransport->SetSecurityCallbacks(this);
-
   if (mIsHttp3) {
     nsresult rv = mHttp3Session->Init(mConnInfo->GetOrigin(), mSocketTransport,
         this, this);
@@ -232,6 +230,9 @@ nsresult nsHttpConnection::Init(
     }
     mTransaction = mHttp3Session;
   }
+
+  mSocketTransport->SetEventSink(this, nullptr);
+  mSocketTransport->SetSecurityCallbacks(this);
 
   return NS_OK;
 }
@@ -338,7 +339,7 @@ void nsHttpConnection::Start0RTTSpdy(SpdyVersion spdyVersion) {
   mTransaction = mSpdySession;
 }
 
-void nsHttpConnection::StartSpdy(nsISSLSocketControl* sslControl,
+void nsHttpConnection::StartSpdy(nsISSLSocketControlExtended* sslControl,
                                  SpdyVersion spdyVersion) {
   LOG(("nsHttpConnection::StartSpdy [this=%p, mDid0RTTSpdy=%d]\n", this,
        mDid0RTTSpdy));
@@ -465,7 +466,7 @@ bool nsHttpConnection::EnsureNPNComplete(nsresult& aOut0RTTWriteHandshakeValue,
 
   nsresult rv = NS_OK;
   nsCOMPtr<nsISupports> securityInfo;
-  nsCOMPtr<nsISSLSocketControl> ssl;
+  nsCOMPtr<nsISSLSocketControlExtended> ssl;
   nsAutoCString negotiatedNPN;
   // This is neede for telemetry
   bool handshakeSucceeded = false;
@@ -939,7 +940,7 @@ void nsHttpConnection::SetupSSL() {
 // offer list for both NPN and ALPN. ALPN validation callbacks are made
 // now before the handshake is complete, and NPN validation callbacks
 // are made during the handshake.
-nsresult nsHttpConnection::SetupNPNList(nsISSLSocketControl* ssl,
+nsresult nsHttpConnection::SetupNPNList(nsISSLSocketControlExtended* ssl,
                                         uint32_t caps) {
   nsTArray<nsCString> protocolArray;
 
@@ -1109,7 +1110,7 @@ nsresult nsHttpConnection::InitSSLParams(bool connectingToProxy,
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsISSLSocketControl> ssl = do_QueryInterface(securityInfo, &rv);
+  nsCOMPtr<nsISSLSocketControlExtended> ssl = do_QueryInterface(securityInfo, &rv);
   if (NS_FAILED(rv)) {
     return rv;
   }

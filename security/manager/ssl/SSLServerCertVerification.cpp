@@ -202,13 +202,13 @@ class SSLServerCertVerificationResult : public Runnable {
  public:
   NS_DECL_NSIRUNNABLE
 
-  SSLServerCertVerificationResult(nsNSSSocketInfo* infoObject,
+  SSLServerCertVerificationResult(TransportSecurityInfo* infoObject,
                                   PRErrorCode errorCode);
 
   void Dispatch();
 
  private:
-  const RefPtr<nsNSSSocketInfo> mInfoObject;
+  const RefPtr<TransportSecurityInfo> mInfoObject;
 
  public:
   const PRErrorCode mErrorCode;
@@ -221,7 +221,7 @@ class CertErrorRunnable : public SyncRunnableBase {
                     TimeStamp aJobStartTime, const UniqueCERTCertificate& aCert,
                     uint32_t aProviderFlags, PRTime aPRTime,
                     PRErrorCode aDefaultErrorCodeToReport,
-                    nsNSSSocketInfo* aInfoObject)
+                    TransportSecurityInfo* aInfoObject)
       : mPtrForLog(aPtrForLog),
         mHostName(aHostName),
         mPort(aPort),
@@ -256,7 +256,7 @@ class CertErrorRunnable : public SyncRunnableBase {
 
   // This could be null when socket process is enabled and will be removed
   // in bug 1550686.
-  const RefPtr<nsNSSSocketInfo> mInfoObject;
+  const RefPtr<TransportSecurityInfo> mInfoObject;
 };
 
 // A probe value of 1 means "no error".
@@ -724,12 +724,13 @@ class SSLServerCertVerificationJob : public Runnable {
   // Must be called only on the socket transport thread
   static SECStatus Dispatch(const RefPtr<SharedCertVerifier>& certVerifier,
                             const void* fdForLogging,
-                            nsNSSSocketInfo* infoObject,
+                            TransportSecurityInfo* infoObject,
                             const UniqueCERTCertificate& serverCert,
                             const UniqueCERTCertList& peerCertChain,
                             Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
                             Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension,
-                            uint32_t providerFlags, Time time, PRTime prtime);
+                            uint32_t providerFlags, Time time, PRTime prtime,
+                            uint32_t flags);
 
  private:
   NS_DECL_NSIRUNNABLE
@@ -737,19 +738,20 @@ class SSLServerCertVerificationJob : public Runnable {
   // Must be called only on the socket transport thread
   SSLServerCertVerificationJob(const RefPtr<SharedCertVerifier>& certVerifier,
                                const void* fdForLogging,
-                               nsNSSSocketInfo* infoObject,
+                               TransportSecurityInfo* infoObject,
                                const UniqueCERTCertificate& cert,
                                UniqueCERTCertList peerCertChain,
                                Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
                                Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension,
                                uint32_t providerFlags, Time time,
-                               PRTime prtime);
+                               PRTime prtime, uint32_t flags);
   const RefPtr<SharedCertVerifier> mCertVerifier;
   const void* const mFdForLogging;
-  const RefPtr<nsNSSSocketInfo> mInfoObject;
+  const RefPtr<TransportSecurityInfo> mInfoObject;
   const UniqueCERTCertificate mCert;
   UniqueCERTCertList mPeerCertChain;
   const uint32_t mProviderFlags;
+  const uint32_t mFlags;
   const Time mTime;
   const PRTime mPRTime;
   const TimeStamp mJobStartTime;
@@ -759,11 +761,11 @@ class SSLServerCertVerificationJob : public Runnable {
 
 SSLServerCertVerificationJob::SSLServerCertVerificationJob(
     const RefPtr<SharedCertVerifier>& certVerifier, const void* fdForLogging,
-    nsNSSSocketInfo* infoObject, const UniqueCERTCertificate& cert,
+    TransportSecurityInfo* infoObject, const UniqueCERTCertificate& cert,
     UniqueCERTCertList peerCertChain,
     Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
     Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension, uint32_t providerFlags,
-    Time time, PRTime prtime)
+    Time time, PRTime prtime, uint32_t flags)
     : Runnable("psm::SSLServerCertVerificationJob"),
       mCertVerifier(certVerifier),
       mFdForLogging(fdForLogging),
@@ -771,6 +773,7 @@ SSLServerCertVerificationJob::SSLServerCertVerificationJob(
       mCert(CERT_DupCertificate(cert.get())),
       mPeerCertChain(std::move(peerCertChain)),
       mProviderFlags(providerFlags),
+      mFlags(flags),
       mTime(time),
       mPRTime(prtime),
       mJobStartTime(TimeStamp::Now()),
@@ -1321,7 +1324,7 @@ void CollectCertTelemetry(
 }
 
 void AuthCertificateSetResults(
-    nsNSSSocketInfo* infoObject, const UniqueCERTCertificate& cert,
+    TransportSecurityInfo* infoObject, const UniqueCERTCertificate& cert,
     UniqueCERTCertList& builtCertChain, UniqueCERTCertList& peerCertChain,
     const CertificateTransparencyInfo& certificateTransparencyInfo,
     SECOidTag evOidPolicy, bool aSucceeded) {
@@ -1355,12 +1358,12 @@ void AuthCertificateSetResults(
 
 // Note: Takes ownership of |peerCertChain| if SECSuccess is not returned.
 SECStatus AuthCertificate(CertVerifier& certVerifier,
-                          nsNSSSocketInfo* infoObject,
+                          TransportSecurityInfo* infoObject,
                           const UniqueCERTCertificate& cert,
                           UniqueCERTCertList& peerCertChain,
                           const Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
                           const Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension,
-                          uint32_t providerFlags, Time time) {
+                          uint32_t providerFlags, Time time, uint32_t flags) {
   MOZ_ASSERT(infoObject);
   MOZ_ASSERT(cert);
 
@@ -1377,12 +1380,6 @@ SECStatus AuthCertificate(CertVerifier& certVerifier,
   SHA1ModeResult sha1ModeResult = SHA1ModeResult::NeverChecked;
   PinningTelemetryInfo pinningTelemetryInfo;
   CertificateTransparencyInfo certificateTransparencyInfo;
-
-  int flags = 0;
-  if (!infoObject->SharedState().IsOCSPStaplingEnabled() ||
-      !infoObject->SharedState().IsOCSPMustStapleEnabled()) {
-    flags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
-  }
 
   Result rv = certVerifier.VerifySSLServerCert(
       cert, stapledOCSPResponse, sctsFromTLSExtension, time, infoObject,
@@ -1408,11 +1405,11 @@ SECStatus AuthCertificate(CertVerifier& certVerifier,
 /*static*/
 SECStatus SSLServerCertVerificationJob::Dispatch(
     const RefPtr<SharedCertVerifier>& certVerifier, const void* fdForLogging,
-    nsNSSSocketInfo* infoObject, const UniqueCERTCertificate& serverCert,
+    TransportSecurityInfo* infoObject, const UniqueCERTCertificate& serverCert,
     const UniqueCERTCertList& peerCertChain,
     Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
     Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension, uint32_t providerFlags,
-    Time time, PRTime prtime) {
+    Time time, PRTime prtime, uint32_t flags) {
   // Runs on the socket transport thread
   if (!certVerifier || !infoObject || !serverCert) {
     NS_ERROR("Invalid parameters for SSL server cert validation");
@@ -1437,7 +1434,7 @@ SECStatus SSLServerCertVerificationJob::Dispatch(
   RefPtr<SSLServerCertVerificationJob> job(new SSLServerCertVerificationJob(
       certVerifier, fdForLogging, infoObject, serverCert,
       std::move(peerCertChainCopy), stapledOCSPResponse, sctsFromTLSExtension,
-      providerFlags, time, prtime));
+      providerFlags, time, prtime, flags));
 
   nsresult nrv = gCertVerificationThreadPool->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_FAILED(nrv)) {
@@ -1470,7 +1467,8 @@ SSLServerCertVerificationJob::Run() {
   PR_SetError(0, 0);
   SECStatus rv = AuthCertificate(*mCertVerifier, mInfoObject, mCert,
                                  mPeerCertChain, mStapledOCSPResponse,
-                                 mSCTsFromTLSExtension, mProviderFlags, mTime);
+                                 mSCTsFromTLSExtension, mProviderFlags, mTime,
+                                 mFlags);
   MOZ_ASSERT((mPeerCertChain && rv == SECSuccess) ||
                  (!mPeerCertChain && rv != SECSuccess),
              "AuthCertificate() should take ownership of chain on failure");
@@ -1541,11 +1539,14 @@ SSLServerCertVerificationJob::Run() {
 
 }  // unnamed namespace
 
-// Extracts whatever information we need out of fd (using SSL_*) and passes it
-// to SSLServerCertVerificationJob::Dispatch. SSLServerCertVerificationJob
-// should never do anything with fd except logging.
-SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
-                              PRBool isServer) {
+// Takes informations needed for cert verification, does some sanity checks and
+// calls SSLServerCertVerificationJob::Dispatch.
+SECStatus AuthCertificateHookInternal(TransportSecurityInfo* infoObject,
+    const void* aPtrForLogging, const UniqueCERTCertificate& serverCert,
+    UniqueCERTCertList& peerCertChain,
+    Maybe<nsTArray<uint8_t>>& stapledOCSPResponse,
+    Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension, uint32_t providerFlags,
+    uint32_t flags) {
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   if (!certVerifier) {
     PR_SetError(SEC_ERROR_NOT_INITIALIZED, 0);
@@ -1555,28 +1556,9 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   // Runs on the socket transport thread
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("[%p] starting AuthCertificateHook\n", fd));
+          ("[%p] starting AuthCertificateHookInternal\n", aPtrForLogging));
 
-  // Modern libssl always passes PR_TRUE for checkSig, and we have no means of
-  // doing verification without checking signatures.
-  MOZ_ASSERT(checkSig, "AuthCertificateHook: checkSig unexpectedly false");
-
-  // PSM never causes libssl to call this function with PR_TRUE for isServer,
-  // and many things in PSM assume that we are a client.
-  MOZ_ASSERT(!isServer, "AuthCertificateHook: isServer unexpectedly true");
-
-  nsNSSSocketInfo* socketInfo = static_cast<nsNSSSocketInfo*>(arg);
-
-  UniqueCERTCertificate serverCert(SSL_PeerCertificate(fd));
-
-  if (!checkSig || isServer || !socketInfo || !serverCert) {
-    PR_SetError(PR_INVALID_STATE_ERROR, 0);
-    return SECFailure;
-  }
-
-  // Get the peer certificate chain for error reporting
-  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
-  if (!peerCertChain) {
+  if (!infoObject || !serverCert) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
@@ -1603,12 +1585,55 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
     return SECFailure;
   }
 
-  socketInfo->SetFullHandshake();
-
   Time now(Now());
   PRTime prnow(PR_Now());
 
+  // We *must* do certificate verification on a background thread because
+  // we need the socket transport thread to be free for our OCSP requests,
+  // and we *want* to do certificate verification on a background thread
+  // because of the performance benefits of doing so.
+  return SSLServerCertVerificationJob::Dispatch(
+      certVerifier, aPtrForLogging, infoObject, serverCert,
+      peerCertChain, stapledOCSPResponse, sctsFromTLSExtension, providerFlags,
+      now, prnow, flags);
+}
+
+// Extracts whatever information we need out of fd (using SSL_*) and passes it
+// to AuthCertificateHookInternal. AuthCertificateHookInternal will call
+// SSLServerCertVerificationJob::Dispatch. SSLServerCertVerificationJob
+// should never do anything with fd except logging.
+SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
+                              PRBool isServer) {
+
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+          ("[%p] starting AuthCertificateHook\n", fd));
+
+  // Modern libssl always passes PR_TRUE for checkSig, and we have no means of
+  // doing verification without checking signatures.
+  MOZ_ASSERT(checkSig, "AuthCertificateHook: checkSig unexpectedly false");
+
+  // PSM never causes libssl to call this function with PR_TRUE for isServer,
+  // and many things in PSM assume that we are a client.
+  MOZ_ASSERT(!isServer, "AuthCertificateHook: isServer unexpectedly true");
+
+  nsNSSSocketInfo* socketInfo = static_cast<nsNSSSocketInfo*>(arg);
+  socketInfo->SetFullHandshake();
+
+  UniqueCERTCertificate serverCert(SSL_PeerCertificate(fd));
+
   if (BlockServerCertChangeForSpdy(socketInfo, serverCert) != SECSuccess) {
+    return SECFailure;
+  }
+
+  if (!checkSig || isServer || !socketInfo || !serverCert) {
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
+    return SECFailure;
+  }
+
+  // Get the peer certificate chain for error reporting
+  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
+  if (!peerCertChain) {
+    PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
 
@@ -1637,19 +1662,78 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   uint32_t providerFlags = 0;
   socketInfo->GetProviderFlags(&providerFlags);
 
-  // We *must* do certificate verification on a background thread because
-  // we need the socket transport thread to be free for our OCSP requests,
-  // and we *want* to do certificate verification on a background thread
-  // because of the performance benefits of doing so.
+  uint32_t flags = 0;
+  if (!socketInfo->SharedState().IsOCSPStaplingEnabled() ||
+      !socketInfo->SharedState().IsOCSPMustStapleEnabled()) {
+     flags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
+  }
+
   socketInfo->SetCertVerificationWaiting();
-  return SSLServerCertVerificationJob::Dispatch(
-      certVerifier, static_cast<const void*>(fd), socketInfo, serverCert,
-      peerCertChain, stapledOCSPResponse, sctsFromTLSExtension, providerFlags,
-      now, prnow);
+  return AuthCertificateHookInternal(socketInfo, static_cast<const void*>(fd),
+      serverCert, peerCertChain, stapledOCSPResponse, sctsFromTLSExtension,
+      providerFlags, flags);
+}
+
+// Takes informations needed for cert verification, does some sanity checks and
+// calls SSLServerCertVerificationJob::Dispatch.
+// This function is usef for Quic.
+SECStatus AuthCertificateHookWithInfo(TransportSecurityInfo* infoObject,
+    const void* aPtrForLogging, nsTArray<nsTArray<uint8_t>>& peerCertChain,
+    Maybe<nsTArray<nsTArray<uint8_t>>>& stapledOCSPResponses,
+    Maybe<nsTArray<uint8_t>>& sctsFromTLSExtension, uint32_t providerFlags) {
+
+  UniqueCERTCertificate cert;
+  UniqueCERTCertList certChain(CERT_NewCertList());
+  for (auto& cert_der : peerCertChain) {
+    SECItem der = {
+        SECItemType::siBuffer,
+        cert_der.Elements(),
+        (uint32_t)cert_der.Length()
+    };
+
+    if (!cert) {
+      cert.reset(CERT_NewTempCertificate(
+          CERT_GetDefaultCertDB(), &der, nullptr, false, true));
+      if (!cert) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                ("[%p] AuthCertificateHookWithInfo: cert failed",
+                 aPtrForLogging));
+        return SECFailure;
+      }
+    }
+
+    if (CERT_AddCertToListTail(certChain.get(), CERT_NewTempCertificate(
+                               CERT_GetDefaultCertDB(), &der, nullptr,
+                               false, true)) != SECSuccess) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+              ("[%p] AuthCertificateHookWithInfo: getting cert chain failed",
+               aPtrForLogging));
+      return SECFailure;
+    }
+  }
+
+  // we currently only support single stapled responses
+  Maybe<nsTArray<uint8_t>> stapledOCSPResponse;
+  if (stapledOCSPResponses && (stapledOCSPResponses->Length() == 1)) {
+    stapledOCSPResponse.emplace(stapledOCSPResponses->ElementAt(0));
+  }
+
+  uint32_t flags = 0;
+  // QuicTransportSecInfo does not have a SharedState as nsNSSSocketInfo.
+  // Here we need prefs for ocsp. This are prefs they are the same for
+  // PublicSSLState and PrivateSSLState, just take them from one of them.
+  if (!PublicSSLState()->IsOCSPStaplingEnabled() ||
+      !PublicSSLState()->IsOCSPMustStapleEnabled()) {
+    flags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
+  }
+
+  return AuthCertificateHookInternal(infoObject, aPtrForLogging, cert,
+      certChain, stapledOCSPResponse, sctsFromTLSExtension,
+      providerFlags, flags);
 }
 
 SSLServerCertVerificationResult::SSLServerCertVerificationResult(
-    nsNSSSocketInfo* infoObject, PRErrorCode errorCode)
+    TransportSecurityInfo* infoObject, PRErrorCode errorCode)
     : Runnable("psm::SSLServerCertVerificationResult"),
       mInfoObject(infoObject),
       mErrorCode(errorCode) {}

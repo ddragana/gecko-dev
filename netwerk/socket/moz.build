@@ -13,6 +13,7 @@ XPIDL_SOURCES += [
     'nsISocketProviderService.idl',
     'nsISOCKSSocketInfo.idl',
     'nsISSLSocketControl.idl',
+    'nsISSLSocketControlExtended.idl',
     'nsITransportSecurityInfo.idl',
 ]
 

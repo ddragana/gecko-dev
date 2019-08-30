@@ -9,8 +9,9 @@
 
 #include "nsISupportsImpl.h"
 #include "mozilla/net/NeqoHttp3Conn.h"
-#include "nsRefPtrHashtable.h"
 #include "nsAHttpConnection.h"
+#include "nsRefPtrHashtable.h"
+#include "nsWeakReference.h"
 #include "HttpTrafficAnalyzer.h"
 #include "mozilla/UniquePtr.h"
 #include "nsDeque.h"
@@ -19,21 +20,30 @@ namespace mozilla {
 namespace net {
 
 class Http3Stream;
+class QuicTransportSecInfo;
+
+// IID for the QuicTransportSecInfo interface
+#define NS_HTTP3SESSION_IID                          \
+  {                                                  \
+    0x8fc82aaf, 0xc4ef, 0x46ed, {                    \
+      0x89, 0x41, 0x93, 0x95, 0x8f, 0xac, 0x4f, 0x21 \
+    }                                                \
+  }
 
 class Http3Session final : public nsAHttpTransaction,
                            public nsAHttpConnection,
                            public nsAHttpSegmentReader,
                            public nsAHttpSegmentWriter,
-                           public nsICertAuthenticationListener,
                            public nsITimerCallback
 {
  public:
+  NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTP3SESSION_IID)
+
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
   NS_DECL_NSAHTTPCONNECTION(mConnection)
   NS_DECL_NSAHTTPSEGMENTREADER
   NS_DECL_NSAHTTPSEGMENTWRITER
-  NS_DECL_NSICERTAUTHENTICATIONLISTENER
   NS_DECL_NSITIMERCALLBACK
 
   Http3Session();
@@ -98,6 +108,8 @@ class Http3Session final : public nsAHttpTransaction,
   void TransactionHasDataToWrite(nsAHttpTransaction* caller) override;
 
   nsISocketTransport* SocketTransport() { return mSocketTransport; }
+
+  void Authenticated(int32_t aError);
  private:
   ~Http3Session();
 
@@ -117,6 +129,7 @@ class Http3Session final : public nsAHttpTransaction,
   void ProcessPending();
 
   void CallCertVerification();
+  void SetSecInfo();
 
   RefPtr<NeqoHttp3Conn> mHttp3Connection;
   RefPtr<nsAHttpConnection> mConnection;
@@ -153,7 +166,11 @@ class Http3Session final : public nsAHttpTransaction,
   nsCOMPtr<nsITimer> mTimer;
 
   nsDataHashtable<nsCStringHashKey, bool> mJoinConnectionCache;
+
+  RefPtr<QuicTransportSecInfo> mSecInfo;
 };
+
+NS_DEFINE_STATIC_IID_ACCESSOR(Http3Session, NS_HTTP3SESSION_IID);
 
 }
 }

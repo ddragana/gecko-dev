@@ -29,7 +29,7 @@
 #include "nsITransport.h"
 #include "nsIOutputStream.h"
 #include "nsINSSErrorsService.h"
-#include "nsISSLSocketControl.h"
+#include "nsISSLSocketControlExtended.h"
 #include "nsStringStream.h"
 #include "secerr.h"
 #include "sslerr.h"
@@ -437,7 +437,7 @@ void TCPSocket::NotifyCopyComplete(nsresult aStatus) {
 void TCPSocket::ActivateTLS() {
   nsCOMPtr<nsISupports> securityInfo;
   mTransport->GetSecurityInfo(getter_AddRefs(securityInfo));
-  nsCOMPtr<nsISSLSocketControl> socketControl = do_QueryInterface(securityInfo);
+  nsCOMPtr<nsISSLSocketControlExtended> socketControl = do_QueryInterface(securityInfo);
   if (socketControl) {
     socketControl->StartTLS();
   }
