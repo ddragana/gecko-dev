@@ -153,10 +153,9 @@ fn dynamic_link(extra_libs: &[&str]) {
 }
 
 fn static_link(nsstarget: &PathBuf) {
-    let lib_dir = nsstarget.join("lib");
     println!(
         "cargo:rustc-link-search=native={}",
-        lib_dir.to_str().unwrap()
+        nsstarget.to_str().unwrap()
     );
     let mut static_libs = vec![
         "certdb",
@@ -204,7 +203,7 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     includes
 }
 
-fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
+fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf], flags: &[String]) {
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + ".h");
     let header = header_path.to_str().unwrap();
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join(String::from(base) + ".rs");
@@ -216,6 +215,10 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     builder = builder.clang_arg(String::from("-v"));
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
+    }
+
+    for f in flags {
+        builder = builder.clang_arg(f);
     }
 
     // Apply the configuration.
@@ -245,9 +248,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
         .expect("couldn't write bindings");
 }
 
-fn main() {
-    setup_clang();
-
+fn setup_for_non_gecko() -> Vec<PathBuf> {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     build_nss(nss.clone());
@@ -258,7 +259,6 @@ fn main() {
     let nsstarget = env::var("NSS_TARGET")
         .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
     let nsstarget = nssdist.join(nsstarget.trim());
-
     let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
@@ -268,7 +268,8 @@ fn main() {
     );
 
     if is_debug() {
-        static_link(&nsstarget);
+        let lib_dir = nsstarget.join("lib");
+        static_link(&lib_dir);
     } else {
         let libs = if env::consts::OS == "windows" {
             &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
@@ -278,12 +279,71 @@ fn main() {
         dynamic_link(libs);
     }
 
+    includes
+}
+
+fn setup_for_gecko() -> Vec<String> {
+    let mut extra_flags: Vec<String> = Vec::new();
+    match env::var_os("MOZ_TOPOBJDIR") {
+        Some(path) => {
+            if is_debug() {
+                let lib_dir = PathBuf::from(path.clone()).join("dist").join("bin");
+                static_link(&lib_dir);
+            } else {
+                let libs = if env::consts::OS == "windows" {
+                    &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+                } else {
+                    &["nssutil3", "nss3", "ssl3"]
+                };
+                dynamic_link(libs);
+            }
+
+            let flags_path = PathBuf::from(path.clone()).join("netwerk/socket/neqo/extra-bindgen-flags");
+
+            println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
+            extra_flags = fs::read_to_string(flags_path)
+                .expect("Failed to read extra-bindgen-flags file")
+                .split_whitespace()
+                .map(|s| s.to_owned())
+                .collect();
+
+            extra_flags.push(String::from("-DNO_NSPR_10_SUPPORT"));
+            if env::consts::OS == "windows" {
+                extra_flags.push(String::from("-DWIN"));
+            } else if env::consts::OS == "macos" {
+                extra_flags.push(String::from("-DDARWIN"));
+            } else if env::consts::OS == "linux" {
+                extra_flags.push(String::from("-DLINUX"));
+            } else if env::consts::OS == "android" {
+                extra_flags.push(String::from("-DLINUX"));
+                extra_flags.push(String::from("-DANDROID"));
+            }
+        }
+        None => {
+            println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranted to finish.");
+        }
+    }
+    extra_flags
+}
+
+
+fn main() {
+    setup_clang();
+
+    let mut includes: Vec<PathBuf> = Vec::new();
+    let mut flags: Vec<String> = Vec::new();
+    if cfg!(feature = "gecko") {
+        flags = setup_for_gecko();
+    } else {
+        includes = setup_for_non_gecko();
+    }
+
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
     let config = fs::read_to_string(config_file).expect("unable to read binding configuration");
     let config: HashMap<String, Bindings> = toml::from_str(&config).unwrap();
 
     for (k, v) in &config {
-        build_bindings(k, v, &includes[..]);
+        build_bindings(k, v, &includes[..], &flags[..]);
     }
 }
