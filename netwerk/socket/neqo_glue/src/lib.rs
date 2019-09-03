@@ -158,6 +158,9 @@ pub extern "C" fn neqo_http3conn_new(
     }
 }
 
+/* Process a packet.
+ * packet holds packet data.
+ */
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_process_input(
     conn: &mut NeqoHttp3Conn,
@@ -179,6 +182,9 @@ pub extern "C" fn neqo_http3conn_process_http3(conn: &mut NeqoHttp3Conn) {
     conn.conn.process_http3(Instant::now());
 }
 
+/* Process output and store data to be sent into conn.packets_to_send.
+ * neqo_http3conn_get_data_to_send will be called to pick up this data.
+ */
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_process_output(conn: &mut NeqoHttp3Conn) -> u64 {
     loop {
@@ -225,6 +231,8 @@ pub extern "C" fn neqo_http3conn_fetch(
     let mut hdrs = Vec::new();
     let hdrs_str: Vec<&str> = unsafe {headers.as_str_unchecked().split("\r\n").collect() };
     // this is only used for headers built by Firefox.
+    // Firefox supply all headers already prepared for sending over http1.
+    // They need to be split into (String, String) pairs.
     let mut skip_first = true;
     for elem in hdrs_str.iter() {
         if skip_first {
@@ -272,6 +280,7 @@ pub extern "C" fn neqo_http3conn_fetch(
     }
 }
 
+// This error codes are not used currently, they will be used for telemetry.
 #[repr(C)]
 pub enum Http3AppError {
     NoError,
@@ -392,6 +401,7 @@ impl CloseError {
     }
 }
 
+// Reset a stream with streamId.
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_reset_stream(
     conn: &mut NeqoHttp3Conn,
@@ -404,7 +414,7 @@ pub extern "C" fn neqo_http3conn_reset_stream(
     }
 }
 
-// TODO when sending request body has been implemented.
+// Close sending side of a streeam with streamId
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_close_stream(
     conn: &mut NeqoHttp3Conn,
@@ -455,6 +465,8 @@ pub enum Http3Event {
     NoEvent,
 }
 
+// conn.conn.events() returns multiple events that will be store in
+// conn.events. The function returns single even.
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_event(conn: &mut NeqoHttp3Conn) -> Http3Event {
     if conn.events.is_empty() {
@@ -514,6 +526,9 @@ impl From<neqo_http3::Http3Event> for Http3Event {
     }
 }
 
+// Read response headers.
+// Firefox needs these headers to look like http1 heeaders, so we are
+// building that here.
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_read_response_headers(
     conn: &mut NeqoHttp3Conn,
@@ -546,6 +561,7 @@ pub extern "C" fn neqo_http3conn_read_response_headers(
     }
 }
 
+// Read response data into buf.
 #[no_mangle]
 pub extern "C" fn neqo_http3conn_read_response_data(
     conn: &mut NeqoHttp3Conn,
