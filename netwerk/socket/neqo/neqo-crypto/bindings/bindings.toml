@@ -47,6 +47,7 @@ functions = [
     "SSL_SetNextProtoNego",
     "SSL_SetURL",
     "SSL_VersionRangeSet",
+    "PK11_ReferenceSymKey",
 ]
 enums = [
     "SSLAuthType",
