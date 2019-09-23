@@ -251,17 +251,18 @@ def basic_bindgen_cflags(target, is_unix, compiler_info, android_cflags,
         args += android_cflags
 
     args += {
-        'Android': ['-DOS_ANDROID=1'],
+        'Android': ['-DOS_ANDROID=1', '-DLINUX', '-DANDROID'],
         'DragonFly': ['-DOS_BSD=1', '-DOS_DRAGONFLY=1'],
         'FreeBSD': ['-DOS_BSD=1', '-DOS_FREEBSD=1'],
-        'GNU': ['-DOS_LINUX=1'],
+        'GNU': ['-DOS_LINUX=1', '-DLINUX'],
         'NetBSD': ['-DOS_BSD=1', '-DOS_NETBSD=1'],
         'OpenBSD': ['-DOS_BSD=1', '-DOS_OPENBSD=1'],
-        'OSX': ['-DOS_MACOSX=1', '-stdlib=libc++'],
+        'OSX': ['-DOS_MACOSX=1', '-stdlib=libc++', '-DDARWIN'],
         'SunOS': ['-DOS_SOLARIS=1'],
         'WINNT': [
             '-DOS_WIN=1',
             '-DWIN32=1',
+            '-DXP_WIN',
         ],
     }.get(target.os, [])
 
