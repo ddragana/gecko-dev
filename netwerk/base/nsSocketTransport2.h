@@ -480,6 +480,8 @@ class nsSocketTransport final : public nsASocketHandler,
   // callback when mFD is nulled out to make sure the ssl layer cannot call
   // the callback after nsSocketTransport is destroyed.
   bool mSSLCallbackSet;
+
+  bool mUsingQuic;
 };
 
 }  // namespace net

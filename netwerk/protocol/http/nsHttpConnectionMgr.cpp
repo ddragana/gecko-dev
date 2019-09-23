@@ -1530,7 +1530,7 @@ nsresult nsHttpConnectionMgr::TryDispatchTransaction(
   // essentially pipelining without head of line blocking
 
   if (!(caps & NS_HTTP_DISALLOW_SPDY) && gHttpHandler->IsSpdyEnabled()) {
-    RefPtr<nsHttpConnection> conn = GetSpdyActiveConn(ent);
+    RefPtr<nsHttpConnection> conn = GetH2orH3ActiveConn(ent);
     if (conn) {
       if (trans->IsWebsocketUpgrade() && !conn->CanAcceptWebsocket()) {
         // This is a websocket transaction and we already have a h2 connection
@@ -1750,15 +1750,17 @@ nsresult nsHttpConnectionMgr::DispatchTransaction(nsConnectionEntry* ent,
 
   LOG(
       ("nsHttpConnectionMgr::DispatchTransaction "
-       "[ent-ci=%s %p trans=%p caps=%x conn=%p priority=%d]\n",
-       ent->mConnInfo->HashKey().get(), ent, trans, caps, conn, priority));
+       "[ent-ci=%s %p trans=%p caps=%x conn=%p priority=%d isHttp2=%d "
+       "isHttp3=%d]\n",
+       ent->mConnInfo->HashKey().get(), ent, trans, caps, conn, priority,
+       conn->UsingSpdy(), conn->UsingHttp3()));
 
   // It is possible for a rate-paced transaction to be dispatched independent
   // of the token bucket when the amount of parallelization has changed or
   // when a muxed connection (e.g. h2) becomes available.
   trans->CancelPacing(NS_OK);
 
-  if (conn->UsingSpdy()) {
+  if (conn->UsingSpdy() || conn->UsingHttp3()) {
     LOG(
         ("Spdy Dispatch Transaction via Activate(). Transaction host = %s, "
          "Connection host = %s\n",
@@ -2118,13 +2120,12 @@ void nsHttpConnectionMgr::DispatchSpdyPendingQ(
   leftovers.Clear();
 }
 
-// This function tries to dispatch the pending spdy transactions on
+// This function tries to dispatch the pending h2 or h3 transactions on
 // the connection entry sent in as an argument. It will do so on the
-// active spdy connection either in that same entry or from the
+// active h2 or h3 connection either in that same entry or from the
 // coalescing hash table
-
 void nsHttpConnectionMgr::ProcessSpdyPendingQ(nsConnectionEntry* ent) {
-  nsHttpConnection* conn = GetSpdyActiveConn(ent);
+  nsHttpConnection* conn = GetH2orH3ActiveConn(ent);
   if (!conn || !conn->CanDirectlyActivate()) {
     return;
   }
@@ -2153,9 +2154,9 @@ void nsHttpConnectionMgr::OnMsgProcessAllSpdyPendingQ(int32_t, ARefBase*) {
   }
 }
 
-// Given a connection entry, return an active h2 connection
-// that can be directly activated or null
-nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
+// Given a connection entry, return an active h2 or h3 connection
+// that can be directly activated or null.
+nsHttpConnection* nsHttpConnectionMgr::GetH2orH3ActiveConn(
     nsConnectionEntry* ent) {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
   MOZ_ASSERT(ent);
@@ -2191,7 +2192,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
     for (int32_t index = ent->mHalfOpenFastOpenBackups.Length() - 1; index >= 0;
          --index) {
       LOG(
-          ("GetSpdyActiveConn() shutting down connection in fast "
+          ("GetH2orH3ActiveConn() shutting down connection in fast "
            "open state (%p) because we have an experienced spdy "
            "connection (%p).\n",
            ent->mHalfOpenFastOpenBackups[index].get(), experienced));
@@ -2200,7 +2201,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
     }
 
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2orH3ActiveConn() request for ent %p %s "
          "found an active experienced connection %p in native connection "
          "entry\n",
          ent, ci->HashKey().get(), experienced));
@@ -2209,7 +2210,7 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
 
   if (noExperience) {
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2orH3ActiveConn() request for ent %p %s "
          "found an active but inexperienced connection %p in native connection "
          "entry\n",
          ent, ci->HashKey().get(), noExperience));
@@ -2221,14 +2222,14 @@ nsHttpConnection* nsHttpConnectionMgr::GetSpdyActiveConn(
   nsHttpConnection* existingConn = FindCoalescableConnection(ent, false);
   if (existingConn) {
     LOG(
-        ("GetSpdyActiveConn() request for ent %p %s "
+        ("GetH2orH3ActiveConn() request for ent %p %s "
          "found an active connection %p in the coalescing hashtable\n",
          ent, ci->HashKey().get(), existingConn));
     return existingConn;
   }
 
   LOG(
-      ("GetSpdyActiveConn() request for ent %p %s "
+      ("GetH2orH3ActiveConn() request for ent %p %s "
        "did not find an active connection\n",
        ent, ci->HashKey().get()));
   return nullptr;
@@ -3829,11 +3830,11 @@ nsHttpConnectionMgr::GetOrCreateConnectionEntry(
   anonInvertedCI->SetAnonymous(!specificCI->GetAnonymous());
   nsConnectionEntry* invertedEnt = mCT.GetWeak(anonInvertedCI->HashKey());
   if (invertedEnt) {
-    nsHttpConnection* h2conn = GetSpdyActiveConn(invertedEnt);
-    if (h2conn && h2conn->IsExperienced() && h2conn->NoClientCertAuth()) {
-      MOZ_ASSERT(h2conn->UsingSpdy());
+    nsHttpConnection* h2orh3conn = GetH2orH3ActiveConn(invertedEnt);
+    if (h2orh3conn && h2orh3conn->IsExperienced() && h2orh3conn->NoClientCertAuth()) {
+      MOZ_ASSERT(h2orh3conn->UsingSpdy() || h2orh3conn->UsingHttp3());
       LOG(
-          ("GetOrCreateConnectionEntry is coalescing h2 an/onymous "
+          ("GetOrCreateConnectionEntry is coalescing h2/3 an/onymous "
            "connections, ent=%p",
            invertedEnt));
       return invertedEnt;
@@ -3985,6 +3986,7 @@ nsHttpConnectionMgr::nsHalfOpenSocket::nsHalfOpenSocket(
   LOG(("Creating nsHalfOpenSocket [this=%p trans=%p ent=%s key=%s]\n", this,
        trans, ent->mConnInfo->Origin(), ent->mConnInfo->HashKey().get()));
 
+  mIsHttp3 = mEnt->mConnInfo->IsHttp3();
   if (speculative) {
     Telemetry::AutoCounter<Telemetry::HTTPCONNMGR_TOTAL_SPECULATIVE_CONN>
         totalSpeculativeConn;
@@ -4022,12 +4024,16 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupStreams(
   nsresult rv;
   nsTArray<nsCString> socketTypes;
   const nsHttpConnectionInfo* ci = mEnt->mConnInfo;
-  if (ci->FirstHopSSL()) {
-    socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
+  if (mIsHttp3) {
+    socketTypes.AppendElement(NS_LITERAL_CSTRING("quic"));
   } else {
-    const nsCString& defaultType = gHttpHandler->DefaultSocketType();
-    if (!defaultType.IsVoid()) {
-      socketTypes.AppendElement(defaultType);
+    if (ci->FirstHopSSL()) {
+      socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
+    } else {
+      const nsCString& defaultType = gHttpHandler->DefaultSocketType();
+      if (!defaultType.IsVoid()) {
+        socketTypes.AppendElement(defaultType);
+      }
     }
   }
 
@@ -4780,12 +4786,13 @@ void nsHttpConnectionMgr::nsHalfOpenSocket::FastOpenNotSupported() {
 nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
     nsIAsyncOutputStream* out, bool aFastOpen) {
   MOZ_ASSERT(!aFastOpen || (out == mStreamOut));
+  MOZ_ASSERT(!(mIsHttp3 && aFastOpen));
   // assign the new socket to the http connection
   RefPtr<nsHttpConnection> conn = new nsHttpConnection();
   LOG(
       ("nsHalfOpenSocket::SetupConn "
-       "Created new nshttpconnection %p\n",
-       conn.get()));
+       "Created new nshttpconnection %p %s\n",
+       conn.get(), mIsHttp3 ? "using http3" : ""));
 
   NullHttpTransaction* nullTrans = mTransaction->QueryNullTransaction();
   if (nullTrans) {
@@ -4890,6 +4897,14 @@ nsresult nsHttpConnectionMgr::nsHalfOpenSocket::SetupConn(
     MOZ_ASSERT(!mSpeculative, "Speculative Half Open found mTransaction");
 
     gHttpHandler->ConnMgr()->AddActiveConn(conn, mEnt);
+    if (mIsHttp3) {
+        // If this is Http3 we need to set a ConnectionHandle to the first
+        // transaction. The handler will be given to Http3Session.
+        RefPtr<ConnectionHandle> handle = new ConnectionHandle(conn);
+
+       // give the transaction the indirect reference to the connection.
+       pendingTransInfo->mTransaction->SetConnection(handle);
+    }
     rv = gHttpHandler->ConnMgr()->DispatchTransaction(
         mEnt, pendingTransInfo->mTransaction, conn);
   } else {
@@ -5121,7 +5136,9 @@ nsHttpConnectionMgr::nsHalfOpenSocket::OnTransportStatus(nsITransport* trans,
       // nsHttpConnectionMgr::Shutdown and nsSocketTransportService::Shutdown
       // where the first abandons all half open socket instances and only
       // after that the second stops the socket thread.
-      if (mEnt && !mBackupTransport && !mSynTimer) SetupBackupTimer();
+      if (mEnt && !mBackupTransport && !mSynTimer && !mIsHttp3) {
+          SetupBackupTimer();
+      }
       break;
 
     case NS_NET_STATUS_CONNECTED_TO:
@@ -5177,7 +5194,7 @@ bool nsHttpConnectionMgr::nsHalfOpenSocket::Claim() {
     }
 
     if ((mPrimaryStreamStatus == NS_NET_STATUS_CONNECTING_TO) && mEnt &&
-        !mBackupTransport && !mSynTimer) {
+        !mBackupTransport && !mSynTimer && !mIsHttp3) {
       SetupBackupTimer();
     }
   }
@@ -5226,7 +5243,7 @@ nsHttpConnectionMgr::nsConnectionEntry::nsConnectionEntry(
       mDoNotDestroy(false) {
   MOZ_COUNT_CTOR(nsConnectionEntry);
 
-  if (mConnInfo->FirstHopSSL()) {
+  if (mConnInfo->FirstHopSSL() && !mConnInfo->IsHttp3()) {
     mUseFastOpen = gHttpHandler->UseFastOpen();
   } else {
     // Only allow the TCP fast open on a secure connection.
@@ -5242,7 +5259,7 @@ bool nsHttpConnectionMgr::nsConnectionEntry::AvailableForDispatchNow() {
     return true;
   }
 
-  return gHttpHandler->ConnMgr()->GetSpdyActiveConn(this) ? true : false;
+  return gHttpHandler->ConnMgr()->GetH2orH3ActiveConn(this) ? true : false;
 }
 
 bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
@@ -5262,6 +5279,8 @@ bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
       info.rtt = ent->mActiveConns[i]->Rtt();
       if (ent->mActiveConns[i]->UsingSpdy()) {
         info.SetHTTP2ProtocolVersion(ent->mActiveConns[i]->GetSpdyVersion());
+      } else if  (ent->mActiveConns[i]->UsingHttp3()) {
+        info.SetHTTP3ProtocolVersion();
       } else {
         info.SetHTTP1ProtocolVersion(
             ent->mActiveConns[i]->GetLastHttpResponseVersion());
