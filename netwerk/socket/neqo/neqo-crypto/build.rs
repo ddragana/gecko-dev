@@ -347,11 +347,10 @@ println!("DDDDDD {:?}", flags);
 }
 
 fn main() {
-    setup_clang();
-
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else {
+        setup_clang();
         setup_standalone()
     };
 
