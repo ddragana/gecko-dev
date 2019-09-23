@@ -66,6 +66,7 @@ impl Aead {
         unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
 
+    #[cfg(not(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android"))))]
     unsafe fn from_raw<S: Into<String>>(
         version: Version,
         cipher: Cipher,
@@ -80,6 +81,32 @@ impl Aead {
             cipher,
             secret,
             p.as_ptr() as *const i8,
+            c_uint::try_from(p.len())?,
+            &mut ctx,
+        )?;
+        match NonNull::new(ctx) {
+            Some(ctx_ptr) => Ok(Self {
+                ctx: AeadContext::new(ctx_ptr),
+            }),
+            None => Err(Error::InternalError),
+        }
+    }
+
+    #[cfg(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android")))]
+    unsafe fn from_raw<S: Into<String>>(
+        version: Version,
+        cipher: Cipher,
+        secret: *mut PK11SymKey,
+        prefix: S,
+    ) -> Res<Self> {
+        let prefix_str = prefix.into();
+        let p = prefix_str.as_bytes();
+        let mut ctx: *mut ssl::SSLAeadContext = null_mut();
+        SSL_MakeAead(
+            version,
+            cipher,
+            secret,
+            p.as_ptr() as *const u8,
             c_uint::try_from(p.len())?,
             &mut ctx,
         )?;

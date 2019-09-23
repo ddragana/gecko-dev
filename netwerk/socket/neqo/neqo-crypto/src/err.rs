@@ -77,6 +77,7 @@ impl From<std::ffi::NulError> for Error {
 
 use std::ffi::CStr;
 
+#[cfg(not(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android"))))]
 fn wrap_str_fn<F>(f: F, dflt: &str) -> String
 where
     F: FnOnce() -> *const i8,
@@ -90,6 +91,21 @@ where
     }
 }
 
+#[cfg(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android")))]
+fn wrap_str_fn<F>(f: F, dflt: &str) -> String
+where
+    F: FnOnce() -> *const i8,
+{
+    unsafe {
+        let p = f();
+        if p.is_null() {
+            return dflt.to_string();
+        }
+        CStr::from_ptr(p as *const u8).to_string_lossy().into_owned()
+    }
+}
+
+#[cfg(not(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android"))))]
 pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     if rv == SECSuccess {
         return Ok(());
@@ -99,6 +115,21 @@ pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
     let name = wrap_str_fn(|| unsafe { PR_ErrorToName(code) }, "UNKNOWN_ERROR");
     let desc = wrap_str_fn(
         || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
+        "...",
+    );
+    Err(Error::NssError { name, code, desc })
+}
+
+#[cfg(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android")))]
+pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
+    if rv == SECSuccess {
+        return Ok(());
+    }
+
+    let code = unsafe { PR_GetError() };
+    let name = wrap_str_fn(|| unsafe { PR_ErrorToName(code) as *const i8 }, "UNKNOWN_ERROR");
+    let desc = wrap_str_fn(
+        || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) as *const i8 },
         "...",
     );
     Err(Error::NssError { name, code, desc })

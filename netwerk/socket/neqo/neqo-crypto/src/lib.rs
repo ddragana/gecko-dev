@@ -100,6 +100,7 @@ pub fn init() {
     }
 }
 
+#[cfg(not(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android"))))]
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
     time::init();
     unsafe {
@@ -118,6 +119,43 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
                 empty.as_ptr(),
                 empty.as_ptr(),
                 nss::SECMOD_DB.as_ptr() as *const i8,
+                nss::NSS_INIT_READONLY,
+            ))
+            .expect("NSS_Initialize failed");
+
+            secstatus_to_res(nss::NSS_SetDomesticPolicy()).expect("NSS_SetDomesticPolicy failed");
+            secstatus_to_res(ssl::SSL_ConfigServerSessionIDCache(
+                1024,
+                0,
+                0,
+                dircstr.as_ptr(),
+            ))
+            .expect("SSL_ConfigServerSessionIDCache failed");
+
+            NssLoaded::Db(path.to_path_buf().into_boxed_path())
+        });
+    }
+}
+
+#[cfg(any(all(target_arch = "aarch64", any(target_os = "android", target_os = "linux")), all(target_arch = "arm", target_os = "android")))]
+pub fn init_db<P: Into<PathBuf>>(dir: P) {
+    time::init();
+    unsafe {
+        INITIALIZED.call_once(|| {
+            if already_initialized() {
+                return NssLoaded::External;
+            }
+
+            let path = dir.into();
+            assert!(path.is_dir());
+            let pathstr = path.to_str().expect("path converts to string").to_string();
+            let dircstr = CString::new(pathstr).expect("new CString");
+            let empty = CString::new("").expect("new empty CString");
+            secstatus_to_res(nss::NSS_Initialize(
+                dircstr.as_ptr(),
+                empty.as_ptr(),
+                empty.as_ptr(),
+                nss::SECMOD_DB.as_ptr() as *const u8,
                 nss::NSS_INIT_READONLY,
             ))
             .expect("NSS_Initialize failed");
