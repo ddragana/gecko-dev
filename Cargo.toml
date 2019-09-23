@@ -38,6 +38,7 @@ exclude = [
   "media/mp4parse-rust/mp4parse_fallible",
   "xpcom/rust/gkrust_utils",
   "tools/fuzzing/rust",
+  "netwerk/socket/neqo",
 ]
 
 # Explicitly specify what our profiles use.  The opt-level setting here is
