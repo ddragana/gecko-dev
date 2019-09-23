@@ -75,6 +75,7 @@ EXPORTS += [
     'RootCertificateTelemetryUtils.h',
     'ScopedNSSTypes.h',
     'SharedCertVerifier.h',
+    'SSLServerCertVerification.h',
     'TransportSecurityInfo.h',
 ]
 
