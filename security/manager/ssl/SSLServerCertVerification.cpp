@@ -1312,6 +1312,39 @@ static void CollectCertTelemetry(
   }
 }
 
+static void AuthCertificateSetResults(
+    nsNSSSocketInfo* infoObject, const UniqueCERTCertificate& cert,
+    UniqueCERTCertList& builtCertChain, UniqueCERTCertList& peerCertChain,
+    const CertificateTransparencyInfo& certificateTransparencyInfo,
+    SECOidTag evOidPolicy, bool aSucceeded) {
+  if (aSucceeded) {
+    // Certificate verification succeeded. Delete any potential record of
+    // certificate error bits.
+    RememberCertErrorsTable::GetInstance().RememberCertHasError(infoObject,
+                                                                SECSuccess);
+
+    EVStatus evStatus;
+    if (evOidPolicy == SEC_OID_UNKNOWN) {
+      evStatus = EVStatus::NotEV;
+    } else {
+      evStatus = EVStatus::EV;
+    }
+
+    RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert.get());
+    infoObject->SetServerCert(nsc, evStatus);
+
+    infoObject->SetSucceededCertChain(std::move(builtCertChain));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("AuthCertificate setting NEW cert %p", nsc.get()));
+
+    infoObject->SetCertificateTransparencyInfo(certificateTransparencyInfo);
+  } else {
+    // Certificate validation failed; store the peer certificate chain on
+    // infoObject so it can be used for error reporting.
+    infoObject->SetFailedCertChain(std::move(peerCertChain));
+  }
+}
+
 // Note: Takes ownership of |peerCertChain| if SECSuccess is not returned.
 SECStatus AuthCertificate(CertVerifier& certVerifier,
                           nsNSSSocketInfo* infoObject,
@@ -1354,33 +1387,10 @@ SECStatus AuthCertificate(CertVerifier& certVerifier,
                        sha1ModeResult, pinningTelemetryInfo, builtCertChain,
                        certificateTransparencyInfo);
 
-  if (rv == Success) {
-    // Certificate verification succeeded. Delete any potential record of
-    // certificate error bits.
-    RememberCertErrorsTable::GetInstance().RememberCertHasError(infoObject,
-                                                                SECSuccess);
-
-    EVStatus evStatus;
-    if (evOidPolicy == SEC_OID_UNKNOWN) {
-      evStatus = EVStatus::NotEV;
-    } else {
-      evStatus = EVStatus::EV;
-    }
-
-    RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert.get());
-    infoObject->SetServerCert(nsc, evStatus);
-
-    infoObject->SetSucceededCertChain(std::move(builtCertChain));
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("AuthCertificate setting NEW cert %p", nsc.get()));
-
-    infoObject->SetCertificateTransparencyInfo(certificateTransparencyInfo);
-  }
-
+  AuthCertificateSetResults(infoObject, cert, builtCertChain, peerCertChain,
+                            certificateTransparencyInfo, evOidPolicy,
+                            rv == Success);
   if (rv != Success) {
-    // Certificate validation failed; store the peer certificate chain on
-    // infoObject so it can be used for error reporting.
-    infoObject->SetFailedCertChain(std::move(peerCertChain));
     PR_SetError(MapResultToPRErrorCode(rv), 0);
   }
 
