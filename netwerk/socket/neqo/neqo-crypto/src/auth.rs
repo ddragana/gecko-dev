@@ -69,7 +69,7 @@ impl Into<PRErrorCode> for AuthenticationStatus {
 impl From<PRErrorCode> for AuthenticationStatus {
     fn from(v: PRErrorCode) -> Self {
         match v {
-            0 => Self::Ok,
+            0 => AuthenticationStatus::Ok,
             sec::SEC_ERROR_CA_CERT_INVALID => AuthenticationStatus::CaInvalid,
             mozpkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA => AuthenticationStatus::CaNotV3,
             sec::SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED => AuthenticationStatus::CertAlgorithmDisabled,
