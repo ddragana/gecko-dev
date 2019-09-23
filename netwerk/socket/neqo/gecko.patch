@@ -1,0 +1,23 @@
+From 9445f839ff04b0e57da62bafd1d24d31edb81233 Fri Sep 06 00:00:00 2019
+From: Dragana Damjanovic <dd.mozilla@gmail.com>
+Date: Fri, 6 Sep 2019 10:41:58 +1000
+Subject: gecko: Update neqo's workespace.
+
+
+diff --git a/netwerk/socket/neqo/Cargo.toml b/netwerk/socket/neqo/Cargo.toml
+--- a/netwerk/socket/neqo/Cargo.toml
++++ b/netwerk/socket/neqo/Cargo.toml
+@@ -1,13 +1,8 @@
+ [workspace]
+ members = [
+-  "neqo-client",
+   "neqo-common",
+   "neqo-crypto",
+   "neqo-http3",
+-  "neqo-http3-server",
+   "neqo-qpack",
+-  "neqo-server",
+   "neqo-transport",
+-  "neqo-interop",
+-  "test-fixture",
+ ]

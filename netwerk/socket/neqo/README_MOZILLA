@@ -1,0 +1,8 @@
+The source from this directory was copied from the neqo
+git repository using the update.sh script.  The only changes
+made were those applied by update.sh and the addition of
+Makefile.in build files for the Mozilla build system.
+
+The neqo git repository is: https://github.com/mozilla/neqo.git
+
+The git commit ID used was 45b08e3e660baaab3d8c56e0a2f5e37ecac4fd9d (2019-09-16 13:16:21 +0200)
