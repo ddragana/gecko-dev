@@ -1926,7 +1926,7 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     rv = Preferences::GetInt(HTTP_PREF("http3.default-max-stream-blocked"),
                              &val);
     if (NS_SUCCEEDED(rv)) {
-      mHttp3MaxBlockedStreams = clamped(val, 0, UINT16_MAX);
+      mHttp3MaxBlockedStreams = clamped(val, 0, 0xffff);
     }
   }
 
